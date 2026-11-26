@@ -4,6 +4,7 @@
 derives the expected set from the master plan table and compares.
 """
 
+import hashlib
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -333,6 +334,12 @@ class HealthUpdated(ContractModel):
 CatalogId = Annotated[str, Field(pattern=r"^CAT-[A-Z]\d{2}-\d{2}$")]
 Sha256Ref = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 """Prefixed hash for V1.1 artifacts (ModelCandidate predates it and stores bare hex)."""
+SubjectKind = Literal["strategy", "technique", "composition", "model"]
+
+
+def sha256_ref(data: bytes) -> str:
+    """The `Sha256Ref` form of an artifact's bytes."""
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
 class ParameterBound(ContractModel):
@@ -349,8 +356,9 @@ class ParameterBound(ContractModel):
 class StrategyManifest(ContractModel):
     """A versioned, hashed strategy artifact. Never executable by itself."""
 
-    strategy_id: str = Field(min_length=1)
-    version: str = Field(min_length=1)
+    strategy_id: str = Field(pattern=r"^[^@\s]+$")
+    version: str = Field(pattern=r"^[^@\s]+$")
+    """Neither may contain '@': `id@version` is the subject ref."""
     artifact_hash: Sha256Ref
     family: str
     catalog_ids: list[CatalogId] = Field(min_length=1)
@@ -413,7 +421,7 @@ class StrategyProposal(ContractModel):
 
 class EligibilityRecord(ContractModel):
     subject_hash: Sha256Ref
-    subject_kind: Literal["strategy", "technique", "composition", "model"]
+    subject_kind: SubjectKind
     subject_ref: str
     user_enabled: bool
     eligibility: Eligibility
