@@ -51,3 +51,20 @@ def redact(value: Any, secrets: Iterable[str] = ()) -> Any:
         return walk(str(v))  # unknown objects are logged as text, still scrubbed
 
     return walk(value)
+
+
+def unredact(incoming: Any, current: Any) -> Any:
+    """Inverse of `redact` for round-trips: wherever `incoming` holds MASK under a
+    secret-named key, put back the value stored in `current`."""
+    if isinstance(incoming, dict):
+        cur = current if isinstance(current, dict) else {}
+        out: dict[str, Any] = {}
+        for k, v in incoming.items():
+            if v == MASK and SECRET_KEY.search(str(k)):
+                out[k] = cur.get(k)
+            else:
+                out[k] = unredact(v, cur.get(k))
+        return out
+    if isinstance(incoming, list):
+        return [unredact(v, None) for v in incoming]
+    return incoming

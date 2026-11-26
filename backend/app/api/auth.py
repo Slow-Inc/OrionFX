@@ -7,10 +7,12 @@
 """
 
 import base64
+import binascii
 import hashlib
 import hmac
 import secrets
 import sqlite3
+import threading
 from collections import deque
 from datetime import datetime, timedelta
 
@@ -19,6 +21,7 @@ from app.storage.audit import audit
 from app.storage.db import transaction
 
 _N, _R, _P = 2**14, 8, 1
+_MAX_N = 2**16  # refuse stored hashes that would cost more than this to check
 SESSION_TTL = timedelta(hours=12)
 
 
@@ -30,16 +33,17 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored: str) -> bool:
+    """Fail closed: any malformed or out-of-policy hash is a mismatch, never a 500."""
     try:
         scheme, n, r, p, salt_b64, digest_b64 = stored.split("$")
-    except ValueError:
+        cost = (int(n), int(r), int(p))
+        if scheme != "scrypt" or cost[0] > _MAX_N or cost[1] > 16 or cost[2] > 4:
+            return False
+        salt = base64.b64decode(salt_b64, validate=True)
+        expected = base64.b64decode(digest_b64, validate=True)
+        actual = hashlib.scrypt(password.encode(), salt=salt, n=cost[0], r=cost[1], p=cost[2])
+    except (ValueError, binascii.Error, MemoryError):
         return False
-    if scheme != "scrypt":
-        return False
-    expected = base64.b64decode(digest_b64)
-    actual = hashlib.scrypt(
-        password.encode(), salt=base64.b64decode(salt_b64), n=int(n), r=int(r), p=int(p)
-    )
     return hmac.compare_digest(actual, expected)
 
 
@@ -74,6 +78,7 @@ class SessionStore:
         now = self._clock()
         expires = now + SESSION_TTL
         with transaction(self._conn):
+            self._conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now.isoformat(),))
             self._conn.execute(
                 "INSERT INTO sessions (token_sha256, created_at, expires_at) VALUES (?, ?, ?)",
                 (_token_hash(token), now.isoformat(), expires.isoformat()),
@@ -93,7 +98,12 @@ class SessionStore:
 
 
 class LoginThrottle:
-    """Process-wide: there is one owner, so one window guards every login."""
+    """Process-wide: there is one owner, so one window guards every login.
+
+    An attempt is *reserved* before the password is checked (scrypt is slow and
+    the login route runs in a threadpool), so parallel guesses cannot all slip
+    through the gap between check and record. A correct password frees its slot.
+    """
 
     def __init__(
         self,
@@ -105,16 +115,20 @@ class LoginThrottle:
         self._clock = clock
         self._max = max_failures
         self._window = window
-        self._failures: deque[datetime] = deque()
+        self._attempts: deque[datetime] = deque()
+        self._lock = threading.Lock()
 
-    def _prune(self) -> None:
-        cutoff = self._clock() - self._window
-        while self._failures and self._failures[0] <= cutoff:
-            self._failures.popleft()
+    def try_reserve(self) -> bool:
+        with self._lock:
+            cutoff = self._clock() - self._window
+            while self._attempts and self._attempts[0] <= cutoff:
+                self._attempts.popleft()
+            if len(self._attempts) >= self._max:
+                return False
+            self._attempts.append(self._clock())
+            return True
 
-    def blocked(self) -> bool:
-        self._prune()
-        return len(self._failures) >= self._max
-
-    def record_failure(self) -> None:
-        self._failures.append(self._clock())
+    def succeeded(self) -> None:
+        with self._lock:
+            if self._attempts:
+                self._attempts.pop()

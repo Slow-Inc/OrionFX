@@ -8,6 +8,7 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from app.core.contracts import ContractModel
 from app.core.events import EventEnvelope, parse_event
 from app.storage.db import transaction
 
@@ -39,6 +40,20 @@ class Journal:
             )
         return cur.lastrowid if cur.rowcount == 1 else None
 
+    @staticmethod
+    def _in(event_types: Sequence[str]) -> str:
+        return ",".join("?" * len(event_types))
+
+    @staticmethod
+    def _stored(row: sqlite3.Row) -> StoredEvent:
+        return StoredEvent(int(row["seq"]), parse_event(row["body"]))
+
+    @staticmethod
+    def _json_path(payload_field: str) -> str:
+        if not payload_field.isidentifier():
+            raise ValueError("payload_field must be a plain field name")
+        return f"$.payload.{payload_field}"
+
     def read_raw_since(
         self, seq: int, *, limit: int = 500, event_types: Sequence[str] | None = None
     ) -> list[tuple[int, str]]:
@@ -46,7 +61,7 @@ class Journal:
         sql = "SELECT seq, body FROM events WHERE seq > ?"
         args: list[object] = [seq]
         if event_types is not None:
-            sql += f" AND event_type IN ({','.join('?' * len(event_types))})"
+            sql += f" AND event_type IN ({self._in(event_types)})"
             args.extend(event_types)
         sql += " ORDER BY seq LIMIT ?"
         args.append(limit)
@@ -61,24 +76,43 @@ class Journal:
 
     def recent(self, event_types: Sequence[str], *, limit: int = 50) -> list[StoredEvent]:
         """Newest first."""
-        marks = ",".join("?" * len(event_types))
         rows = self._conn.execute(
-            f"SELECT seq, body FROM events WHERE event_type IN ({marks}) ORDER BY seq DESC LIMIT ?",
+            f"SELECT seq, body FROM events WHERE event_type IN ({self._in(event_types)})"
+            " ORDER BY seq DESC LIMIT ?",
             [*event_types, limit],
         ).fetchall()
-        return [StoredEvent(int(r["seq"]), parse_event(r["body"])) for r in rows]
+        return [self._stored(r) for r in rows]
+
+    def latest_per_cycle(self, event_type: str, *, limit: int) -> list[StoredEvent]:
+        """The newest event of `event_type` for each cycle, newest cycles first."""
+        rows = self._conn.execute(
+            "SELECT seq, body FROM events WHERE seq IN ("
+            " SELECT MAX(seq) FROM events WHERE event_type = ? AND cycle_id IS NOT NULL"
+            " GROUP BY cycle_id) ORDER BY seq DESC LIMIT ?",
+            (event_type, limit),
+        ).fetchall()
+        return [self._stored(r) for r in rows]
+
+    def latest_per_payload_field(self, event_type: str, payload_field: str) -> list[StoredEvent]:
+        """The newest event of `event_type` for each distinct payload `payload_field`."""
+        path = self._json_path(payload_field)
+        rows = self._conn.execute(
+            "SELECT seq, body FROM events WHERE seq IN ("
+            " SELECT MAX(seq) FROM events WHERE event_type = ?"
+            f" GROUP BY json_extract(body, '{path}')) ORDER BY seq",
+            (event_type,),
+        ).fetchall()
+        return [self._stored(r) for r in rows]
 
     def find(self, event_type: str, payload_field: str, value: str) -> StoredEvent | None:
         """Latest event of `event_type` whose payload `payload_field` equals `value`."""
-        if not payload_field.isidentifier():
-            raise ValueError("payload_field must be a plain field name")
         row = self._conn.execute(
             "SELECT seq, body FROM events WHERE event_type = ?"
-            f" AND json_extract(body, '$.payload.{payload_field}') = ?"
+            f" AND json_extract(body, '{self._json_path(payload_field)}') = ?"
             " ORDER BY seq DESC LIMIT 1",
             (event_type, value),
         ).fetchone()
-        return StoredEvent(int(row["seq"]), parse_event(row["body"])) if row else None
+        return self._stored(row) if row else None
 
     def latest_seq(self) -> int:
         row = self._conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
@@ -98,3 +132,11 @@ class Journal:
                 " ON CONFLICT(consumer) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq)",
                 (consumer, seq),
             )
+
+
+def payload_as[T: ContractModel](stored: StoredEvent, model: type[T]) -> T:
+    """Narrow a stored event's payload to its contract type (checked, not cast)."""
+    payload = stored.envelope.payload
+    if not isinstance(payload, model):
+        raise TypeError(f"seq {stored.seq}: expected {model.__name__}")
+    return payload

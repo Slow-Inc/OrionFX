@@ -6,6 +6,20 @@
 
 ---
 
+## M08 slice B — owner API, auth, control commands, live feed (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/9-m08-api`)
+
+**Goal:** the authenticated local API and live feed the dashboard uses (PRD-08 #7, slice #9).
+
+**Shipped:** `backend/app/api/{app,auth,__main__}.py`; journal read helpers (`recent`, `find`, `latest_per_cycle`, `latest_per_payload_field`, `payload_as`); `secrets.unredact`; shared `health.effective_health`; deps FastAPI, uvicorn, httpx (dev).
+
+**Validation:** `uv run pytest` → 115 passed; ruff + mypy clean. Every private route is derived from the app's route table and checked for 401. Mutation probes: removing the router auth dependency, the throttle check, or the session-expiry comparison each turned the matching test red; removing both WS session checks made the WS test hang (caught, but as a hang rather than a clean failure).
+
+**Not done:** the positions and reports read models (return `available: false` until M06/X02 exist); TLS/remote access (local only).
+
+**Next:** M06 Risk & Execution.
+
+---
+
 ## M08 slice A — storage, journal, config, lease, backup, health, logging (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, branch `feat/8-m08-storage`)
 
 **Goal:** the durable local core every module shares (PRD-08 #7, slice #8).

@@ -10,51 +10,68 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, WebSocket
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    WebSocket,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from app.api.auth import LoginThrottle, SessionStore
-from app.core.config import ProtectedPolicy, UserConfig, missing_for_start
-from app.core.contracts import ControlRequested
+from app.core.config import ProtectedPolicy, SystemConfig, UserConfig, missing_for_start
+from app.core.contracts import (
+    AccountSnapshot,
+    ControlCompleted,
+    ControlRequested,
+    HealthUpdated,
+    RiskUpdated,
+)
 from app.core.enums import CommandStatus, ControlCommand, ControlState, Mode
 from app.core.events import make_event
+from app.core.health import effective_health
 from app.core.ids import new_id
-from app.core.secrets import MASK, redact
+from app.core.secrets import redact, unredact
 from app.core.time import Clock, utc_now
 from app.storage.audit import audit
 from app.storage.config_store import ConfigStore, VersionConflict
 from app.storage.db import connect, transaction
 from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag
-from app.storage.journal import Journal
+from app.storage.journal import Journal, payload_as
 
 ACCOUNT_STALE_AFTER = timedelta(seconds=60)
+HEALTH_TTL = timedelta(seconds=60)
 WS_POLL_SECONDS = 0.5
 
-COMMANDS: dict[str, ControlCommand] = {
-    "start": ControlCommand.START,
-    "pause": ControlCommand.PAUSE,
-    "finish-cycle": ControlCommand.FINISH_CYCLE,
-    "emergency-stop": ControlCommand.EMERGENCY_STOP,
-    "approve-recovery": ControlCommand.APPROVE_RECOVERY,
-}
+# "emergency-stop" <-> ControlCommand.EMERGENCY_STOP, derived from the enum.
+COMMANDS: dict[str, ControlCommand] = {c.value.lower().replace("_", "-"): c for c in ControlCommand}
+
+Limit = Annotated[int, Query(ge=1, le=200)]
+_SYSTEM_DEFAULTS = SystemConfig()
 
 
 @dataclass(frozen=True)
 class ApiSettings:
     db_path: Path
-    bind_host: str = "127.0.0.1"
+    bind_host: str = _SYSTEM_DEFAULTS.bind_host
     port: int = 8000
-    dashboard_origin: str = "http://127.0.0.1:5173"
+    dashboard_origin: str = _SYSTEM_DEFAULTS.dashboard_origin
     account_id: str = "local-account"
     bot_id: str = "bot-1"
+    ws_hello_timeout: float = 5.0
+    extra_origins: tuple[str, ...] = field(default_factory=tuple)
 
 
 class LoginBody(BaseModel):
@@ -66,11 +83,22 @@ class SettingsPatch(BaseModel):
     config: dict[str, Any]
 
 
+class WsHello(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str
+    since: int = Field(default=0, ge=0)
+
+
+class WsResync(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    since: int = Field(ge=0)
+
+
 def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
     app = FastAPI(title="OrionFX", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.dashboard_origin],
+        allow_origins=[settings.dashboard_origin, *settings.extra_origins],
         allow_methods=["GET", "POST", "PATCH"],
         allow_headers=["Authorization", "Content-Type"],
     )
@@ -104,12 +132,12 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
 
     @app.post("/api/auth/login")
     def login(body: LoginBody, conn: Db) -> dict[str, str]:
-        if throttle.blocked():
+        if not throttle.try_reserve():
             raise HTTPException(status_code=429, detail="too many failed logins; wait")
         result = SessionStore(conn, clock=clock).login(body.password)
         if result is None:
-            throttle.record_failure()
             raise HTTPException(status_code=401, detail="invalid password")
+        throttle.succeeded()
         token, expires = result
         return {"token": token, "expires_at": expires.isoformat()}
 
@@ -126,24 +154,40 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
     def status(conn: Db) -> dict[str, Any]:
         journal = Journal(conn)
         version, cfg = ConfigStore(conn).current()
+        now = clock()
+
         completed = journal.recent(["control.completed"], limit=1)
-        risk = journal.recent(["risk.updated"], limit=1)
         control_state = ControlState.STOPPED
-        risk_locked = False
+        control_seq = None
         if completed:
-            payload = completed[0].envelope.payload
-            control_state = payload.resulting_state  # type: ignore[attr-defined]
-            risk_locked = payload.risk_locked  # type: ignore[attr-defined]
-        if risk:
-            risk_locked = risk_locked or risk[0].envelope.payload.risk_locked  # type: ignore[attr-defined]
-        health = {
-            e.envelope.payload.component: e.envelope.payload.model_dump(mode="json")  # type: ignore[attr-defined]
-            for e in reversed(journal.recent(["health.updated"], limit=50))
-        }
+            control_state = payload_as(completed[0], ControlCompleted).resulting_state
+            control_seq = completed[0].seq
+
+        # Both events carry the lock; the newer one is M06's current word on it.
+        # Each field reports the seq it came from, so a dashboard can tell when
+        # the lock is newer than the last control transition.
+        lock_events = journal.recent(["control.completed", "risk.updated"], limit=1)
+        risk_locked = False
+        lock_seq = None
+        if lock_events:
+            ev = lock_events[0]
+            if ev.envelope.event_type == "control.completed":
+                risk_locked = payload_as(ev, ControlCompleted).risk_locked
+            else:
+                risk_locked = payload_as(ev, RiskUpdated).risk_locked
+            lock_seq = ev.seq
+
+        health = {}
+        for ev in journal.latest_per_payload_field("health.updated", "component"):
+            beat = effective_health(payload_as(ev, HealthUpdated), now, HEALTH_TTL)
+            health[beat.component] = beat.model_dump(mode="json")
+
         return {
-            "as_of": clock().isoformat(),
+            "as_of": now.isoformat(),
             "control_state": control_state,
+            "control_state_seq": control_seq,
             "risk_locked": risk_locked,
+            "risk_lock_seq": lock_seq,
             "requires_reconcile": get_bool_flag(conn, REQUIRES_RECONCILE),
             "config_version": version,
             "account_mode": cfg.trading.account_mode,
@@ -158,12 +202,11 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
         latest = Journal(conn).recent(["account.snapshot"], limit=1)
         if not latest:
             return {"as_of": clock().isoformat(), "snapshot": None, "stale": True}
-        snap = latest[0].envelope.payload
-        observed = snap.observed_at  # type: ignore[attr-defined]
+        snap = payload_as(latest[0], AccountSnapshot)
         return {
             "as_of": clock().isoformat(),
             "snapshot": snap.model_dump(mode="json"),
-            "stale": clock() - observed > ACCOUNT_STALE_AFTER,
+            "stale": clock() - snap.observed_at > ACCOUNT_STALE_AFTER,
         }
 
     @private.get("/api/positions")
@@ -172,30 +215,34 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
         return {"as_of": clock().isoformat(), "available": False, "items": []}
 
     @private.get("/api/cycles")
-    def cycles(conn: Db, limit: int = 50) -> dict[str, Any]:
-        latest: dict[str, Any] = {}
-        for e in Journal(conn).recent(["cycle.updated"], limit=max(1, min(limit, 500)) * 10):
-            key = e.envelope.cycle_id or "unknown"
-            latest.setdefault(key, {"cycle_id": key, **e.envelope.payload.model_dump(mode="json")})
-        return {"as_of": clock().isoformat(), "items": list(latest.values())[:limit]}
+    def cycles(conn: Db, limit: Limit = 50) -> dict[str, Any]:
+        items = [
+            {
+                "cycle_id": e.envelope.cycle_id,
+                "seq": e.seq,
+                **e.envelope.payload.model_dump(mode="json"),
+            }
+            for e in Journal(conn).latest_per_cycle("cycle.updated", limit=limit)
+        ]
+        return {"as_of": clock().isoformat(), "items": items}
 
     @private.get("/api/reports")
     def reports() -> dict[str, Any]:
         return {"as_of": clock().isoformat(), "available": False, "items": []}
 
     def _recent_payloads(conn: sqlite3.Connection, event_type: str, limit: int) -> dict[str, Any]:
-        items = Journal(conn).recent([event_type], limit=max(1, min(limit, 200)))
+        items = Journal(conn).recent([event_type], limit=limit)
         return {
             "as_of": clock().isoformat(),
             "items": [{"seq": e.seq, **e.envelope.payload.model_dump(mode="json")} for e in items],
         }
 
     @private.get("/api/predictions")
-    def predictions(conn: Db, limit: int = 50) -> dict[str, Any]:
+    def predictions(conn: Db, limit: Limit = 50) -> dict[str, Any]:
         return _recent_payloads(conn, "prediction.generated", limit)
 
     @private.get("/api/decisions")
-    def decisions(conn: Db, limit: int = 50) -> dict[str, Any]:
+    def decisions(conn: Db, limit: Limit = 50) -> dict[str, Any]:
         return _recent_payloads(conn, "decision.created", limit)
 
     @private.get("/api/settings")
@@ -212,11 +259,8 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
     def patch_settings(body: SettingsPatch, conn: Db) -> dict[str, int]:
         store = ConfigStore(conn)
         _, current = store.current()
-        raw = body.config
-        # The dashboard echoes the masked value back; "***" means "keep what is stored".
-        llm = raw.get("llm")
-        if isinstance(llm, dict) and llm.get("api_key_ref") == MASK:
-            raw = {**raw, "llm": {**llm, "api_key_ref": current.llm.api_key_ref}}
+        # The dashboard echoes masked values back; MASK means "keep what is stored".
+        raw = unredact(body.config, current.model_dump(mode="json"))
         try:
             cfg = UserConfig.model_validate(raw)
         except ValidationError as exc:
@@ -264,37 +308,60 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
 
     # --- live feed ---------------------------------------------------------------
 
-    @app.websocket("/ws/live")
-    async def live(ws: WebSocket) -> None:
-        """First message: {"token": ..., "since": <seq>}. Then events with seq > since."""
-        await ws.accept()
+    def _session_valid(token: str) -> bool:
         conn = connect(settings.db_path)
         try:
-            hello = await ws.receive_json()
-            token = str(hello.get("token", "")) if isinstance(hello, dict) else ""
-            sessions = SessionStore(conn, clock=clock)
-            if not sessions.is_valid(token):
+            return SessionStore(conn, clock=clock).is_valid(token)
+        finally:
+            conn.close()
+
+    def _events_since(cursor: int) -> list[tuple[int, str]]:
+        conn = connect(settings.db_path)
+        try:
+            return Journal(conn).read_raw_since(cursor)
+        finally:
+            conn.close()
+
+    @app.websocket("/ws/live")
+    async def live(ws: WebSocket) -> None:
+        """First message: {"token": ..., "since": <seq>} within the hello timeout.
+        Then the server streams {"seq", "event"} for every seq > since. A later
+        {"since": n} message resyncs. Close codes: 4400 bad input, 4401 auth,
+        4408 hello timeout. SQLite work runs off the event loop."""
+        await ws.accept()
+        try:
+            try:
+                raw = await asyncio.wait_for(ws.receive_json(), timeout=settings.ws_hello_timeout)
+            except TimeoutError:
+                await ws.close(code=4408)
+                return
+            try:
+                hello = WsHello.model_validate(raw)
+            except ValidationError:
+                await ws.close(code=4400)
+                return
+            if not await asyncio.to_thread(_session_valid, hello.token):
                 await ws.close(code=4401)
                 return
-            cursor = int(hello.get("since", 0))
-            journal = Journal(conn)
+            cursor = hello.since
             while True:
-                if not sessions.is_valid(token):
+                if not await asyncio.to_thread(_session_valid, hello.token):
                     await ws.close(code=4401)
                     return
-                for seq, body in journal.read_raw_since(cursor):
-                    await ws.send_json({"seq": seq, "event": json.loads(body)})
+                for seq, body in await asyncio.to_thread(_events_since, cursor):
+                    await ws.send_text(f'{{"seq":{seq},"event":{body}}}')
                     cursor = seq
                 try:
                     msg = await asyncio.wait_for(ws.receive_json(), timeout=WS_POLL_SECONDS)
                 except TimeoutError:
                     continue
-                if isinstance(msg, dict) and "since" in msg:  # client-requested resync
-                    cursor = int(msg["since"])
-        except WebSocketDisconnect:
+                try:
+                    cursor = WsResync.model_validate(msg).since
+                except ValidationError:
+                    await ws.close(code=4400)
+                    return
+        except (WebSocketDisconnect, json.JSONDecodeError):
             return
-        finally:
-            conn.close()
 
     @app.exception_handler(sqlite3.Error)
     async def db_error(_: Request, exc: sqlite3.Error) -> Response:

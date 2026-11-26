@@ -279,3 +279,40 @@ def test_healthz_is_public_and_says_nothing(client: TestClient) -> None:
 
 def test_default_bind_is_localhost() -> None:
     assert ApiSettings(db_path=Path("x")).bind_host == "127.0.0.1"
+
+
+def test_status_risk_lock_follows_newest_event(client: TestClient, db: Path) -> None:
+    headers = _login(client)
+    j = Journal(connect(db))
+    common = {"account_id": "local-account", "bot_id": "bot-1", "mode": Mode.DEMO}
+    j.append(
+        make_event(
+            "control.completed",
+            source="M06",
+            payload={
+                "command_id": "cmd-1",
+                "status": "COMPLETED",
+                "resulting_state": "RISK_LOCKED",
+                "risk_locked": True,
+            },
+            **common,  # type: ignore[arg-type]
+        )
+    )
+    assert client.get("/api/status", headers=headers).json()["risk_locked"] is True
+    j.append(
+        make_event(
+            "risk.updated",
+            source="M06",
+            payload={
+                "epoch_dd_percent": "0",
+                "lifetime_dd_percent": "0",
+                "epoch_ceiling_percent": "20",
+                "lifetime_ceiling_percent": "30",
+                "risk_locked": False,
+                "reason_codes": ["RECOVERY_APPROVED"],
+                "policy_version": "p",
+            },
+            **common,  # type: ignore[arg-type]
+        )
+    )
+    assert client.get("/api/status", headers=headers).json()["risk_locked"] is False
