@@ -90,6 +90,11 @@ def ref_tr(c: list[float], h: list[float], lo: list[float]) -> list[float]:
     ]
 
 
+def _w(tid: str) -> list[CandleClosed]:
+    """The bars a technique reads: exactly its lookback."""
+    return BARS[-LIB[tid].lookback :]
+
+
 def _value(tid: str, key: str) -> float:
     obs = observe(LIB[tid], BARS, NOW)
     assert obs.quality_flags == [] or tid == "tick_volume", obs.quality_flags
@@ -99,7 +104,7 @@ def _value(tid: str, key: str) -> float:
 
 
 def test_sma_wma_ema() -> None:
-    c, _, _ = _f(BARS)
+    c, _, _ = _f(_w("ema_5"))
     assert _value("sma_5", "sma") == pytest.approx(sum(c[-5:]) / 5, abs=1e-9)
     assert _value("wma_5", "wma") == pytest.approx(
         sum(x * (i + 1) for i, x in enumerate(c[-5:])) / 15, abs=1e-9
@@ -108,7 +113,7 @@ def test_sma_wma_ema() -> None:
 
 
 def test_rsi() -> None:
-    c, _, _ = _f(BARS)
+    c, _, _ = _f(_w("rsi_5"))
     d = [b - a for a, b in itertools.pairwise(c)]
     g = ref_wilder([max(x, 0) for x in d], 5)[-1]
     lo = ref_wilder([max(-x, 0) for x in d], 5)[-1]
@@ -116,7 +121,7 @@ def test_rsi() -> None:
 
 
 def test_macd() -> None:
-    c, _, _ = _f(BARS)
+    c, _, _ = _f(_w("macd_3_6_4"))
     fast, slow = ref_ema(c, 3)[3:], ref_ema(c, 6)
     line = [f - s for f, s in zip(fast, slow, strict=True)]
     sig = ref_ema(line, 4)[-1]
@@ -126,9 +131,10 @@ def test_macd() -> None:
 
 
 def test_atr_adx_dmi() -> None:
-    c, h, lo = _f(BARS)
+    c, h, lo = _f(_w("atr_5"))
+    assert _value("atr_5", "atr") == pytest.approx(ref_wilder(ref_tr(c, h, lo), 5)[-1], abs=1e-9)
+    c, h, lo = _f(_w("adx_5"))
     tr = ref_tr(c, h, lo)
-    assert _value("atr_5", "atr") == pytest.approx(ref_wilder(tr, 5)[-1], abs=1e-9)
     pdm, mdm = [], []
     for i in range(1, len(c)):
         up, down = h[i] - h[i - 1], lo[i - 1] - lo[i]
@@ -144,7 +150,7 @@ def test_atr_adx_dmi() -> None:
 
 
 def test_bollinger() -> None:
-    c, _, _ = _f(BARS)
+    c, _, _ = _f(_w("bb_5_2"))
     w = c[-5:]
     mid = sum(w) / 5
     sd = math.sqrt(sum((x - mid) ** 2 for x in w) / 5)
@@ -160,25 +166,69 @@ def test_tick_volume_is_labelled_as_broker_ticks() -> None:
     assert "TICK_COUNT_NOT_TRADED_VOLUME" in obs.quality_flags
 
 
-# --- UST-03: no false valid signal -----------------------------------------------------------
+# --- UST-03: no false valid signal (every technique) ----------------------------------------
+
+ALL = sorted(LIB)
 
 
-def test_warmup_gives_no_values() -> None:
-    obs = observe(LIB["macd_3_6_4"], BARS[:8], BARS[7].close_time)
+@pytest.mark.parametrize("tid", ALL)
+def test_warmup_gives_no_values(tid: str) -> None:
+    tech = LIB[tid]
+    if tech.lookback == 1:
+        pytest.skip("a one-bar technique has no warm-up")
+    short = BARS[-(tech.lookback - 1) :]
+    obs = observe(tech, short, NOW)
     assert obs.values == {} and "WARMUP" in obs.quality_flags
 
 
-def test_gap_inside_the_window_gives_no_values() -> None:
-    bars = _bars(flags_at=len(CLOSES) - 2)
-    obs = observe(LIB["sma_5"], bars, NOW)
+@pytest.mark.parametrize("tid", ALL)
+def test_gap_inside_the_window_gives_no_values(tid: str) -> None:
+    obs = observe(LIB[tid], _bars(flags_at=len(CLOSES) - 1), NOW)
     assert obs.values == {} and "GAP_IN_WINDOW" in obs.quality_flags
-    older_gap = observe(LIB["sma_5"], _bars(flags_at=3), NOW)  # outside the 5-bar window
-    assert older_gap.values
 
 
-def test_stale_input_gives_no_values() -> None:
-    obs = observe(LIB["sma_5"], BARS, NOW + timedelta(minutes=30))
+@pytest.mark.parametrize("tid", ALL)
+def test_non_contiguous_bars_give_no_values(tid: str) -> None:
+    tech = LIB[tid]
+    holed = [*BARS[: -tech.lookback - 1], *BARS[-tech.lookback :]]
+    if tech.lookback == 1:
+        holed = [BARS[-1]]  # one bar cannot be non-contiguous
+        assert observe(tech, holed, NOW).values
+        return
+    window = [*BARS[-tech.lookback - 1 : -2], BARS[-1]]  # drops one bar inside the window
+    obs = observe(tech, window, NOW)
+    assert obs.values == {} and "GAP_IN_WINDOW" in obs.quality_flags
+    assert observe(tech, holed, NOW).values  # a hole before the window does not matter
+
+
+@pytest.mark.parametrize("tid", ALL)
+def test_expired_input_gives_no_values(tid: str) -> None:
+    obs = observe(LIB[tid], BARS, BARS[-1].close_time + timedelta(minutes=5))
     assert obs.values == {} and "STALE" in obs.quality_flags
+
+
+def test_gap_before_the_lookback_does_not_matter() -> None:
+    assert observe(LIB["ema_5"], _bars(flags_at=3), NOW) == observe(LIB["ema_5"], BARS, NOW)
+
+
+def test_value_does_not_depend_on_extra_history() -> None:
+    for tech in LIB.values():
+        assert observe(tech, BARS, NOW) == observe(tech, BARS[-tech.lookback :], NOW)
+
+
+def test_asking_before_the_bar_was_available_is_look_ahead() -> None:
+    with pytest.raises(ValueError, match="look-ahead"):
+        observe(LIB["sma_5"], BARS, BARS[-1].close_time)
+
+
+def test_unknown_volume_is_not_reported_as_zero() -> None:
+    bars = [*BARS[:-1], BARS[-1].model_copy(update={"volume": None})]
+    obs = observe(LIB["tick_volume"], bars, NOW)
+    assert obs.values == {} and "MISSING_INPUT" in obs.quality_flags
+
+
+def test_bollinger_id_does_not_depend_on_decimal_spelling() -> None:
+    assert "bb_20_2" in make_library(bb_k=D("2.0"))
 
 
 def test_observation_carries_lineage_and_validity() -> None:

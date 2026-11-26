@@ -1,33 +1,34 @@
 """Indicator techniques CAT-T01-01..09 and tick volume CAT-T09-01 (#30; UST-02, UST-03).
 
 Pure Decimal functions over closed bars of one symbol and timeframe, wrapped as
-`TechniqueObservation`s. An observation never carries numbers when its inputs
-cannot support them: too few bars (WARMUP), a GAP inside the window, or a last
-bar too old to describe the market now (STALE) all give values of None and a
-quality flag, so a consumer waits instead of acting on a false signal.
+`TechniqueObservation`s. Each technique reads exactly its last `lookback` bars,
+so a value depends only on the bars named in `input_refs`, never on how much
+history the caller passed (smoothed indicators use a fixed multiple of their
+period [PROPOSED]). An observation never carries numbers its inputs cannot
+support: too few bars (WARMUP), missing or non-contiguous bars (GAP_IN_WINDOW),
+a missing input such as unknown volume (MISSING_INPUT) or an expired last bar
+(STALE) give an empty `values` and a quality flag, so a consumer waits instead
+of acting on a false signal. Asking with `now` before the last bar was
+available is refused: that would be look-ahead.
 
 Formulas are the standard ones (Wilder smoothing for RSI/ATR/ADX, EMA seeded
 with the SMA of its first window, population standard deviation for Bollinger
 Bands). Default periods are [PROPOSED] (master plan: "exact periods TBD").
 """
 
-import itertools
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
+from itertools import pairwise
 
 from app.core.contracts import CandleClosed, TechniqueObservation
-from app.core.enums import Timeframe
+from app.core.enums import QualityFlag
+from app.core.time import TIMEFRAME_DURATION
 
 D = Decimal
-FRAME = {
-    Timeframe.M5: timedelta(minutes=5),
-    Timeframe.M15: timedelta(minutes=15),
-    Timeframe.H1: timedelta(hours=1),
-}
 BB_K = Decimal(2)
-STALE_AFTER_BARS = 2  # [PROPOSED] a last bar older than two intervals is stale
+RECURSIVE_LOOKBACK = 5  # [PROPOSED] smoothed indicators read 5x their period
 
 Values = dict[str, Decimal]
 
@@ -63,13 +64,12 @@ def wilder(xs: Sequence[Decimal], n: int) -> list[Decimal]:
 
 def true_ranges(bars: Sequence[CandleClosed]) -> list[Decimal]:
     return [
-        max(b.high - b.low, abs(b.high - p.close), abs(b.low - p.close))
-        for p, b in itertools.pairwise(bars)
+        max(b.high - b.low, abs(b.high - p.close), abs(b.low - p.close)) for p, b in pairwise(bars)
     ]
 
 
 def rsi(closes: Sequence[Decimal], n: int) -> Decimal:
-    deltas = [b - a for a, b in itertools.pairwise(closes)]
+    deltas = [b - a for a, b in pairwise(closes)]
     gain = wilder([max(d, D(0)) for d in deltas], n)[-1]
     loss = wilder([max(-d, D(0)) for d in deltas], n)[-1]
     if loss == 0:
@@ -79,7 +79,7 @@ def rsi(closes: Sequence[Decimal], n: int) -> Decimal:
 
 def dmi(bars: Sequence[CandleClosed], n: int) -> Values:
     plus_dm, minus_dm = [], []
-    for p, b in itertools.pairwise(bars):
+    for p, b in pairwise(bars):
         up, down = b.high - p.high, p.low - b.low
         plus_dm.append(up if up > down and up > 0 else D(0))
         minus_dm.append(down if down > up and down > 0 else D(0))
@@ -112,11 +112,13 @@ def macd(closes: Sequence[Decimal], fast: int, slow: int, signal: int) -> Values
 class Technique:
     technique_id: str
     catalog_id: str
-    version: str
-    warmup: int
+    lookback: int
+    """Exactly this many closed bars are read; fewer means WARMUP."""
     unit: str
     compute: Callable[[Sequence[CandleClosed]], Values]
-    flags: tuple[str, ...] = ()
+    flags: tuple[QualityFlag, ...] = ()
+    needs_volume: bool = False
+    version: str = "1.0.0"
 
 
 def _closes(bars: Sequence[CandleClosed]) -> list[Decimal]:
@@ -138,90 +140,32 @@ def make_library(
     bb_k: Decimal = BB_K,
 ) -> dict[str, Technique]:
     """The MVP indicator set; parameters are part of each technique's identity."""
-    v = "1.0.0"
+    r = RECURSIVE_LOOKBACK
+    adx_lookback = (r + 1) * adx_n + 1
     techniques = [
-        Technique(
-            f"sma_{sma_n}",
-            "CAT-T01-01",
-            v,
-            sma_n,
-            "price",
-            lambda b: {"sma": sma(_closes(b), sma_n)},
-        ),
-        Technique(
-            f"ema_{ema_n}",
-            "CAT-T01-02",
-            v,
-            ema_n,
-            "price",
-            lambda b: {"ema": ema_series(_closes(b), ema_n)[-1]},
-        ),
-        Technique(
-            f"wma_{wma_n}",
-            "CAT-T01-03",
-            v,
-            wma_n,
-            "price",
-            lambda b: {"wma": wma(_closes(b), wma_n)},
-        ),
-        Technique(
-            f"rsi_{rsi_n}",
-            "CAT-T01-04",
-            v,
-            rsi_n + 1,
-            "index_0_100",
-            lambda b: {"rsi": rsi(_closes(b), rsi_n)},
-        ),
-        Technique(
-            f"macd_{macd_fast}_{macd_slow}_{macd_signal}",
-            "CAT-T01-05",
-            v,
-            macd_slow + macd_signal - 1,
-            "price",
-            lambda b: macd(_closes(b), macd_fast, macd_slow, macd_signal),
-        ),
-        Technique(
-            f"atr_{atr_n}",
-            "CAT-T01-06",
-            v,
-            atr_n + 1,
-            "price",
-            lambda b: {"atr": wilder(true_ranges(b), atr_n)[-1]},
-        ),
-        Technique(
-            f"adx_{adx_n}",
-            "CAT-T01-07",
-            v,
-            2 * adx_n,
-            "index_0_100",
-            lambda b: {"adx": dmi(b, adx_n)["adx"]},
-        ),
-        Technique(
-            f"dmi_{adx_n}",
-            "CAT-T01-08",
-            v,
-            2 * adx_n,
-            "index_0_100",
-            lambda b: {k: x for k, x in dmi(b, adx_n).items() if k != "adx"},
-        ),
-        Technique(
-            f"bb_{bb_n}_{bb_k}",
-            "CAT-T01-09",
-            v,
-            bb_n,
-            "price",
-            lambda b: bollinger(_closes(b), bb_n, bb_k),
-        ),
-        Technique(
-            "tick_volume",
-            "CAT-T09-01",
-            v,
-            1,
-            "broker_ticks",
-            lambda b: {"tick_volume": b[-1].volume or D(0)},
-            flags=("TICK_COUNT_NOT_TRADED_VOLUME",),
-        ),
-    ]
+        Technique(f"sma_{sma_n}", "CAT-T01-01", lookback=sma_n, unit="price",
+                  compute=lambda b: {"sma": sma(_closes(b), sma_n)}),
+        Technique(f"ema_{ema_n}", "CAT-T01-02", lookback=r * ema_n, unit="price",
+                  compute=lambda b: {"ema": ema_series(_closes(b), ema_n)[-1]}),
+        Technique(f"wma_{wma_n}", "CAT-T01-03", lookback=wma_n, unit="price",
+                  compute=lambda b: {"wma": wma(_closes(b), wma_n)}),
+        Technique(f"rsi_{rsi_n}", "CAT-T01-04", lookback=r * rsi_n + 1, unit="index_0_100",
+                  compute=lambda b: {"rsi": rsi(_closes(b), rsi_n)}),
+        Technique(f"macd_{macd_fast}_{macd_slow}_{macd_signal}", "CAT-T01-05",
+                  lookback=r * macd_slow + macd_signal, unit="price",
+                  compute=lambda b: macd(_closes(b), macd_fast, macd_slow, macd_signal)),
+        Technique(f"atr_{atr_n}", "CAT-T01-06", lookback=r * atr_n + 1, unit="price",
+                  compute=lambda b: {"atr": wilder(true_ranges(b), atr_n)[-1]}),
+        Technique(f"adx_{adx_n}", "CAT-T01-07", lookback=adx_lookback, unit="index_0_100",
+                  compute=lambda b: {"adx": dmi(b, adx_n)["adx"]}),
+        Technique(f"dmi_{adx_n}", "CAT-T01-08", lookback=adx_lookback, unit="index_0_100",
+                  compute=lambda b: {k: x for k, x in dmi(b, adx_n).items() if k != "adx"}),
+        Technique(f"bb_{bb_n}_{bb_k.normalize()}", "CAT-T01-09", lookback=bb_n, unit="price",
+                  compute=lambda b: bollinger(_closes(b), bb_n, bb_k)),
+        Technique("tick_volume", "CAT-T09-01", lookback=1, unit="broker_ticks",
+                  compute=lambda b: {"tick_volume": b[-1].volume or D(0)},
+                  flags=(QualityFlag.TICK_COUNT_NOT_TRADED_VOLUME,), needs_volume=True),
+    ]  # fmt: skip
     return {t.technique_id: t for t in techniques}
 
 
@@ -238,29 +182,32 @@ def observe(
     last = bars[-1]
     if any(b.symbol != last.symbol or b.timeframe != last.timeframe for b in bars):
         raise ValueError("bars must share one symbol and timeframe")
-    size = FRAME[last.timeframe]
-    window = bars[-technique.warmup :]
-    flags = list(technique.flags)
-    if len(bars) < technique.warmup:
-        flags.append("WARMUP")
-    if any("GAP" in b.quality_flags for b in window):
-        flags.append("GAP_IN_WINDOW")
-    valid_until = last.close_time + size
-    if now - last.close_time > STALE_AFTER_BARS * size or last.available_at >= valid_until:
-        flags.append("STALE")  # too old now, or it arrived after its own validity
-        valid_until = max(valid_until, last.available_at + timedelta(microseconds=1))
-    usable = not ({"WARMUP", "GAP_IN_WINDOW", "STALE"} & set(flags))
-    values: dict[str, Decimal | None]
-    values = dict(technique.compute(bars)) if usable else {}
+    if now < last.available_at:
+        raise ValueError("the last bar was not available yet at `now` (look-ahead)")
+    size = TIMEFRAME_DURATION[last.timeframe]
+    window = bars[-technique.lookback :]
+    blockers: list[QualityFlag] = []
+    if len(window) < technique.lookback:
+        blockers.append(QualityFlag.WARMUP)
+    contiguous = all(b.open_time - a.open_time == size for a, b in pairwise(window))
+    if not contiguous or any(QualityFlag.GAP in b.quality_flags for b in window):
+        blockers.append(QualityFlag.GAP_IN_WINDOW)  # no indicator spans missing data
+    if technique.needs_volume and last.volume is None:
+        blockers.append(QualityFlag.MISSING_INPUT)
+    valid_until = last.close_time + size  # the next bar replaces this one
+    if now >= valid_until:
+        blockers.append(QualityFlag.STALE)
+        # TechniqueObservation needs valid_until > available_at even when stale.
+        valid_until = max(valid_until, last.available_at + size)
     return TechniqueObservation(
         technique_id=technique.technique_id,
         technique_version=technique.version,
         input_refs=[_ref(window[0]), _ref(last)],
         available_at=last.available_at,
         valid_until=valid_until,
-        values=values,
+        values={} if blockers else dict(technique.compute(window)),
         unit=technique.unit,
         uncertainty=None,
-        quality_flags=flags,
-        reason_codes=[] if usable else ["INPUT_NOT_USABLE"],
+        quality_flags=[*technique.flags, *blockers],
+        reason_codes=["INPUT_NOT_USABLE"] if blockers else [],
     )

@@ -172,3 +172,14 @@ class Eligibility(StrEnum):
     SHADOW_ONLY = "shadow_only"
     DEMO_ELIGIBLE = "demo_eligible"
     LIVE_ELIGIBLE = "live_eligible"
+
+
+class QualityFlag(StrEnum):
+    """Data-quality flags on candles and technique observations (UST-03)."""
+
+    GAP = "GAP"
+    WARMUP = "WARMUP"
+    GAP_IN_WINDOW = "GAP_IN_WINDOW"
+    STALE = "STALE"
+    MISSING_INPUT = "MISSING_INPUT"
+    TICK_COUNT_NOT_TRADED_VOLUME = "TICK_COUNT_NOT_TRADED_VOLUME"

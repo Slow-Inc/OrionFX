@@ -480,9 +480,11 @@
       "tests/unit/market_data/test_indicators.py::test_sma_wma_ema",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-02",
@@ -499,9 +501,11 @@
       "tests/unit/market_data/test_indicators.py::test_sma_wma_ema",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-03",
@@ -518,9 +522,11 @@
       "tests/unit/market_data/test_indicators.py::test_sma_wma_ema",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-04",
@@ -537,9 +543,11 @@
       "tests/unit/market_data/test_indicators.py::test_rsi",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-05",
@@ -556,9 +564,11 @@
       "tests/unit/market_data/test_indicators.py::test_macd",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-06",
@@ -575,9 +585,11 @@
       "tests/unit/market_data/test_indicators.py::test_atr_adx_dmi",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-07",
@@ -594,9 +606,11 @@
       "tests/unit/market_data/test_indicators.py::test_atr_adx_dmi",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-08",
@@ -613,9 +627,11 @@
       "tests/unit/market_data/test_indicators.py::test_atr_adx_dmi",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-09",
@@ -632,9 +648,11 @@
       "tests/unit/market_data/test_indicators.py::test_bollinger",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Default periods and the 5x lookback for smoothed indicators are PROPOSED; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T02-01",
@@ -1386,9 +1404,12 @@
       "tests/unit/market_data/test_indicators.py::test_tick_volume_is_labelled_as_broker_ticks",
       "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
       "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
-      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+      "tests/unit/market_data/test_indicators.py::test_non_contiguous_bars_give_no_values",
+      "tests/unit/market_data/test_indicators.py::test_expired_input_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_value_does_not_depend_on_extra_history",
+      "tests/unit/market_data/test_indicators.py::test_unknown_volume_is_not_reported_as_zero"
     ],
-    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
+    "note": "Labelled broker tick count, never traded volume; replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T10-01",

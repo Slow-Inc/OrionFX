@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+from app.core.enums import Timeframe
+
 Clock = Callable[[], datetime]
 
 
@@ -36,3 +38,10 @@ def broker_to_utc(broker_time: datetime, offset_minutes: int) -> datetime:
 def fresh(observed_at: datetime, now: datetime, max_age: timedelta) -> bool:
     """Not older than `max_age`, and not from the future beyond the clock skew."""
     return -CLOCK_SKEW <= now - observed_at <= max_age
+
+
+TIMEFRAME_DURATION = {
+    Timeframe.M5: timedelta(minutes=5),
+    Timeframe.M15: timedelta(minutes=15),
+    Timeframe.H1: timedelta(hours=1),
+}
