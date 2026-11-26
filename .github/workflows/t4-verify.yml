@@ -1,0 +1,51 @@
+# T4 verify — the server-side ship gate.
+#
+# CURRENT STATE (2026-11-27): the repo has no code yet (master plan phase P0 —
+# PRDs & contracts). The `lint` / `typecheck` / `test` / `build` jobs from the
+# T4 template are deliberately NOT installed: a job that runs a script that does
+# not exist is a permanently red check, and a red check everyone merges past
+# teaches the team to ignore red. They land with P1 Foundation (tracked in
+# docs/OPEN-WORK-LEDGER.md) — backend: ruff + mypy + pytest; frontend: bun
+# lint/typecheck/test/build.
+#
+# Until then the only job is `guards`: the same three scripts as the local
+# `.githooks/pre-push`, so the local run and the CI run cannot drift.
+#
+# Slow-Inc is on the GitHub free plan, so this check cannot be made a required
+# status check on a private repo. `.claude/t4.json` "requireGreenCI": true is the
+# (weaker) fallback — it binds agent-run `gh pr merge` only, not a web merge.
+name: T4 verify
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: t4-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sh .githooks/check-tree-budget
+      - name: check-gate-ledger
+        if: github.event_name == 'pull_request'
+        run: sh .githooks/check-gate-ledger
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+      - name: check-issue-ref
+        if: github.event_name == 'pull_request'
+        run: PR_BODY="$(gh pr view "${{ github.event.number }}" --json body -q .body)" sh .githooks/check-issue-ref
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
