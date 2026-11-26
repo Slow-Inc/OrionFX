@@ -21,16 +21,12 @@ from decimal import Decimal
 from enum import StrEnum
 
 from app.core.contracts import CandleClosed, MarketSnapshot
-from app.core.enums import DataQuality, Timeframe
-from app.core.time import CLOCK_SKEW, Clock, broker_to_utc, fresh, utc_now
+from app.core.enums import DataQuality, QualityFlag, Timeframe
+from app.core.time import CLOCK_SKEW, TIMEFRAME_DURATION, Clock, broker_to_utc, fresh, utc_now
 from app.execution.broker import Quote
 from app.market_data.port import RawTick
 
-FRAMES = {
-    Timeframe.M5: timedelta(minutes=5),
-    Timeframe.M15: timedelta(minutes=15),
-    Timeframe.H1: timedelta(hours=1),
-}
+FRAMES = TIMEFRAME_DURATION
 M5 = FRAMES[Timeframe.M5]
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 QUOTE_MAX_AGE = timedelta(seconds=5)  # [PROPOSED]; matches the M06 default policy age
@@ -42,7 +38,7 @@ class Issue(StrEnum):
     FUTURE_TICK = "FUTURE_TICK"
     DUPLICATE = "DUPLICATE"
     OUT_OF_ORDER = "OUT_OF_ORDER"
-    GAP = "GAP"
+    GAP = QualityFlag.GAP.value
 
 
 @dataclass(frozen=True, slots=True)

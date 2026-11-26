@@ -6,6 +6,20 @@
 
 ---
 
+## M02 slice B — indicator techniques CAT-T01 + tick volume CAT-T09-01 (2026-11-27, /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/30-m02-indicators`)
+
+**Goal:** deterministic MVP indicators as `TechniqueObservation`s that never emit a false valid value (PRD-02 #28, slice #30; UST-02, UST-03).
+
+**Shipped:** `backend/app/market_data/techniques/indicators.py` (SMA, EMA, WMA, RSI, MACD, ATR, ADX, DMI, Bollinger Bands, labelled tick volume; `observe`, `make_library`); `QualityFlag` (core/enums) and `TIMEFRAME_DURATION` (core/time) shared with the candle engine. Catalog: CAT-T01-01..09 and CAT-T09-01 → tested (replay data only).
+
+**Validation:** `uv run pytest` → all pass (72 indicator tests; warm-up, gap, non-contiguous, expired run for every technique; values match an independent float implementation). 22 mutation probes caught (2 survivors fixed by richer test data: gap opens and outside bars).
+
+**Process note (honest record):** in this slice the implementation was written before its tests (TDD order not kept). Compensated with an independent reference implementation and mutation probes on every formula and guard.
+
+**Review fixes:** fixed lookback per technique (value depends only on the bars in `input_refs`), contiguity check, unknown volume is MISSING_INPUT not 0, an expired bar is STALE, `now` before availability is refused (look-ahead), normalized Bollinger id, evidence refs point at tests that run each row.
+
+---
+
 ## M02 slice A — timestamps, symbol mapping, candles, data quality (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/29-m02-candles`)
 
 **Goal:** one honest source of XAUUSD candles (PRD-02 #28, slice #29; DAT-01, DAT-04, UST-03).
