@@ -1,6 +1,6 @@
 # OrionFX
 
-Personal XAUUSD AI auto-trading bot on MT5. **Demo/Shadow only** — Live stays disabled until the qualification gates in `docs/plans/master_planV1.md` §11 pass and the owner approves explicitly.
+Personal XAUUSD AI auto-trading bot on MT5. **Demo/Shadow only** — Live stays disabled until the qualification gates in `docs/plans/master_planV1.1.md` §11 pass and the owner approves explicitly.
 
 ## Layout
 

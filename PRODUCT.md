@@ -4,7 +4,7 @@
 > This is the product brief (users, purpose, brand). The **visual design system** —
 > color tokens, typography, components, do/don'ts — is canonical in **`DESIGN.md`**;
 > the brand/principles below are the "why", DESIGN.md is the "how".
-> Requirements of record live in `docs/plans/master_planV1.md`; this file summarizes them and never overrides them.
+> Requirements of record live in `docs/plans/master_planV1.1.md`; this file summarizes them and never overrides them.
 
 ## Users
 A single owner-operator running the bot for personal use (master plan §1.1). Multi-user SaaS, subscriptions, copy/social trading and a native mobile app are out of scope [LOCKED, §1.4].
@@ -41,7 +41,7 @@ Target WCAG 2.1 AA for the dashboard; profit/loss is never signalled by colour a
 > ไฟล์นี้คือ product brief (ผู้ใช้ วัตถุประสงค์ แบรนด์) ส่วน **ระบบดีไซน์** —
 > สี ตัวอักษร component และข้อควร/ไม่ควร — อยู่ที่ **`DESIGN.md`**
 > แบรนด์และหลักการด้านล่างคือ "ทำไม" ส่วน DESIGN.md คือ "ทำอย่างไร"
-> ข้อกำหนดที่เป็นทางการอยู่ใน `docs/plans/master_planV1.md` ไฟล์นี้แค่สรุป และไม่มีอำนาจเหนือมัน
+> ข้อกำหนดที่เป็นทางการอยู่ใน `docs/plans/master_planV1.1.md` ไฟล์นี้แค่สรุป และไม่มีอำนาจเหนือมัน
 
 ## ผู้ใช้
 เจ้าของคนเดียวที่รันบอทเพื่อใช้งานส่วนตัว (master plan §1.1) multi-user SaaS, ระบบสมาชิก, copy/social trading และแอปมือถือ native อยู่นอก scope [LOCKED, §1.4]

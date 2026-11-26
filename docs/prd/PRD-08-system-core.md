@@ -5,7 +5,7 @@
 - Reviewers: M06 (state it persists), M01 (API it consumes), X01, X02
 - Status: Implemented — slice A #8, slice B #9 (parent #7)
 - Version: 0.1
-- Parent: `docs/plans/master_planV1.md` (V1.0)
+- Parent: `docs/plans/master_planV1.1.md` (V1.1; drafted against V1.0, whose rules V1.1 keeps unchanged. V1.1 §15–16 obligations for this module are tracked in #20)
 - Target phase: P1
 - Requirement IDs: SYS-01, SYS-02 (local), SYS-03 (local storage), SYS-04 (safe-mode hooks), SYS-05 (local backup), SYS-08; UI-01 (API side); AT-20, AT-21, AT-22, AT-26
 

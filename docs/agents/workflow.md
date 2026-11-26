@@ -7,7 +7,7 @@ How agents plan and implement in this repo, and which skills to invoke automatic
 When planning or implementing a feature, follow this order:
 
 1. **`/grill-me`** — stress-test the concept first (interview-style)
-2. **`/grill-with-docs`** — challenge the plan against existing ADRs in `docs/adr/` and `docs/plans/master_planV1.md`
+2. **`/grill-with-docs`** — challenge the plan against existing ADRs in `docs/adr/` and `docs/plans/master_planV1.1.md`
 3. **Survey the change sites** — enumerate every place the change touches, before the plan exists
 4. **`/to-prd`** — create a PRD from the grilled plan (one PRD per epic; module PRDs follow the template in master plan §12 at `docs/prd/PRD-XX-*.md`), carrying the survey as its change inventory
 5. **`/to-issues`** — break the PRD into GitHub issues on `Slow-Inc/OrionFX` with triage labels (one issue per deliverable)
