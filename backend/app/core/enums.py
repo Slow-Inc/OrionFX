@@ -82,6 +82,12 @@ class ExecutionState(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class RequestKind(StrEnum):
+    OPEN = "OPEN"
+    CLOSE = "CLOSE"
+    CANCEL = "CANCEL"
+
+
 class Timeframe(StrEnum):
     M5 = "M5"
     M15 = "M15"
