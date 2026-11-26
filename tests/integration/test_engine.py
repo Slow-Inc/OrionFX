@@ -15,6 +15,7 @@ from app.core.contracts import (
     ControlCompleted,
     ControlRequested,
     CycleUpdated,
+    ExecutionUpdated,
     RiskDecision,
     TradeIntent,
 )
@@ -38,9 +39,10 @@ from app.execution.fake_broker import FakeBroker, Outcome
 from app.execution.ledger import ExecutionLedger
 from app.execution.ownership import OwnershipRegistry
 from app.profit.cycle import CycleBook
+from app.risk.drawdown import DrawdownTracker
 from app.storage.config_store import ConfigStore
 from app.storage.db import connect, migrate
-from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag, set_bool_flag
+from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag, set_bool_flag, set_flag
 from app.storage.journal import Journal, payload_as
 from app.storage.lease import LeaseStore
 
@@ -658,3 +660,264 @@ def test_start_refused_when_a_lock_was_set_while_stopped(
     done = _completed(conn, cid)
     assert done.status is CommandStatus.REJECTED and "approve recovery" in (done.reason or "")
     assert CycleBook(conn, account=broker.account()).open_cycle_id() is None
+
+
+def _answers(conn: sqlite3.Connection, command_id: str) -> list[ControlCompleted]:
+    return [
+        p
+        for e in Journal(conn).recent(["control.completed"], limit=200)
+        if (p := payload_as(e, ControlCompleted)).command_id == command_id
+    ]
+
+
+def _stuck_emergency(conn: sqlite3.Connection, broker: FakeBroker, clock: Clock) -> str:
+    eng = _running(conn, broker, clock)
+    _intent(conn, clock)
+    eng.tick()
+    broker.market_open = False
+    cid = _command(conn, ControlCommand.EMERGENCY_STOP)
+    eng.tick()
+    return cid
+
+
+def test_unresolved_emergency_is_not_re_announced_every_tick(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    cid = _stuck_emergency(conn, broker, clock)
+    eng = _engine(conn, broker, clock)
+    eng.start()
+    for _ in range(3):
+        eng.tick()
+    assert [a.status for a in _answers(conn, cid)] == [CommandStatus.UNRESOLVED]
+
+
+def test_pending_emergency_survives_restart_and_completes(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    cid = _stuck_emergency(conn, broker, clock)
+    again = _engine(conn, broker, clock)
+    assert again.start()
+    assert again.control.state is ControlState.CLOSING
+    broker.market_open = True
+    clock.advance(1)
+    _price(broker, "2000.00")
+    again.tick()
+    assert _bot_positions(broker) == []
+    assert _completed(conn, cid).status is CommandStatus.COMPLETED
+
+
+def test_dd_lock_during_emergency_close_still_completes_the_command(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    cid = _stuck_emergency(conn, broker, clock)
+    eng = _engine(conn, broker, clock)
+    eng.start()
+    broker.add_manual_position("XAUUSD", Side.BUY, D("1.00"))
+    _price(broker, "1997.50")
+    eng.tick()
+    assert eng.control.risk_locked
+    broker.market_open = True
+    clock.advance(1)
+    _price(broker, "1997.50")
+    eng.tick()
+    assert _bot_positions(broker) == []
+    done = _completed(conn, cid)
+    assert done.status is CommandStatus.COMPLETED
+    assert done.resulting_state is ControlState.RISK_LOCKED and done.risk_locked
+
+
+# --- code-review findings: exits, poison events, cash flow, finish --------------------------
+
+
+def _two_positions(conn: sqlite3.Connection, broker: FakeBroker, clock: Clock) -> Engine:
+    eng = _running(conn, broker, clock)
+    _intent(conn, clock)
+    eng.tick()
+    _intent(conn, clock, action=IntentAction.ADD)
+    eng.tick()
+    assert len(_bot_positions(broker)) == 2
+    return eng
+
+
+def test_close_one_of_two_positions_closes_just_that_one(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _two_positions(conn, broker, clock)
+    a, b = _bot_positions(broker)
+    iid = _intent(conn, clock, action=IntentAction.CLOSE, lot=None, side=None, refs=[a])
+    eng.tick()
+    assert _decision(conn, iid).verdict is Verdict.ALLOW
+    assert _bot_positions(broker) == [b]
+
+
+def test_partial_close_over_several_refs_never_exceeds_the_approved_lot(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _two_positions(conn, broker, clock)
+    refs = _bot_positions(broker)
+    _intent(conn, clock, action=IntentAction.CLOSE, lot="0.01", side=None, refs=refs)
+    eng.tick()
+    left = [p for p in broker.positions() if p.magic == BOT_MAGIC]
+    assert sum(p.volume for p in left) == D("0.01")
+
+
+def test_close_with_nothing_to_close_is_denied(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _two_positions(conn, broker, clock)
+    iid = _intent(conn, clock, action=IntentAction.CLOSE, lot=None, side=None, refs=[])
+    eng.tick()
+    decision = _decision(conn, iid)
+    assert decision.verdict is Verdict.DENY and "NOTHING_TO_CLOSE" in decision.reason_codes
+
+
+class VanishingBroker(FakeBroker):
+    vanish: str | None = None
+
+    def send_close(self, req):  # type: ignore[no-untyped-def]
+        result = super().send_close(req)
+        if self.vanish is not None:
+            self._positions.pop(self.vanish, None)  # an Emergency SL fill elsewhere
+            self.vanish = None
+        return result
+
+
+def test_close_all_keeps_going_and_reports_every_close(
+    conn: sqlite3.Connection, clock: Clock
+) -> None:
+    b = VanishingBroker(balance=D("1000"), now=T0)
+    _price(b, "2000.00")
+    clock.broker = b
+    eng = _running(conn, b, clock)
+    _intent(conn, clock)
+    eng.tick()
+    for _ in range(2):
+        _intent(conn, clock, action=IntentAction.ADD)
+        eng.tick()
+    _, second, _ = _bot_positions(b)
+    b.vanish = second
+    iid = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None)
+    eng.tick()
+    assert _bot_positions(b) == []
+    updates = [
+        payload_as(e, ExecutionUpdated)
+        for e in Journal(conn).recent(["execution.updated"], limit=20)
+        if payload_as(e, ExecutionUpdated).request_id.startswith(f"req-{iid}")
+    ]
+    assert {u.state for u in updates} == {ExecutionState.FILLED, ExecutionState.REJECTED}
+    assert len(updates) == 3
+
+
+class FlakyBroker(FakeBroker):
+    fail_quote = False
+
+    def quote(self, symbol):  # type: ignore[no-untyped-def]
+        if self.fail_quote:
+            self.fail_quote = False
+            raise RuntimeError("adapter hiccup")
+        return super().quote(symbol)
+
+
+def test_a_failing_intent_is_reported_and_does_not_block_later_ones(
+    conn: sqlite3.Connection, clock: Clock
+) -> None:
+    b = FlakyBroker(balance=D("1000"), now=T0)
+    _price(b, "2000.00")
+    clock.broker = b
+    eng = _running(conn, b, clock)
+    bad = _intent(conn, clock)
+    good = _intent(conn, clock)
+    b.fail_quote = True
+    eng.tick()
+    first = _decision(conn, bad)
+    assert first.verdict is Verdict.DENY and "ENGINE_ERROR" in first.reason_codes
+    assert _decision(conn, good).verdict is Verdict.ALLOW
+    assert len(_bot_positions(b)) == 1
+
+
+def test_allowed_intent_interrupted_before_dispatch_is_reported_not_lost(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _running(conn, broker, clock)
+    iid = _intent(conn, clock)
+    Journal(conn).append(  # the process died right after deciding
+        make_event(
+            "risk.decision",
+            source="M06",
+            payload=RiskDecision(
+                intent_id=iid,
+                verdict=Verdict.ALLOW,
+                approved_lot=D("0.01"),
+                policy_version="p",
+                reason_codes=[],
+                decided_at=clock(),
+                valid_until=clock() + timedelta(seconds=5),
+            ),
+            account_id=SETTINGS.account_id,
+            bot_id=SETTINGS.bot_id,
+            mode=Mode.DEMO,
+        )
+    )
+    eng.tick()
+    found = Journal(conn).find("execution.updated", "intent_id", iid)
+    assert found is not None
+    assert payload_as(found, ExecutionUpdated).state is ExecutionState.REJECTED
+    assert _bot_positions(broker) == []  # never sent late, without a fresh decision
+
+
+def test_cash_flow_is_not_lost_when_a_tick_fails(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eng = _running(conn, broker, clock)
+    eng.tick()
+    broker.withdraw(D("300"))
+    real = DrawdownTracker.observe
+    calls = {"n": 0}
+
+    def flaky(self, *a, **kw):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(DrawdownTracker, "observe", flaky)
+    with pytest.raises(sqlite3.OperationalError):
+        eng.tick()
+    eng.tick()
+    assert not eng.control.risk_locked
+
+
+def test_safe_mode_is_not_kept_across_restart_without_a_handler(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    set_flag(conn, "m06.control_state", "SAFE_MODE")
+    eng = _engine(conn, broker, clock)
+    assert eng.start()
+    assert eng.control.state is ControlState.STOPPED
+
+
+def test_finish_cycle_completes_only_when_stopped(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _running(conn, broker, clock)
+    _intent(conn, clock)
+    eng.tick()
+    cid = _command(conn, ControlCommand.FINISH_CYCLE)
+    eng.tick()
+    assert _completed(conn, cid).status is CommandStatus.ACCEPTED
+    _price(broker, "2010.00")
+    eng.tick()
+    done = _completed(conn, cid)
+    assert done.status is CommandStatus.COMPLETED and done.resulting_state is ControlState.STOPPED
+
+
+def test_a_deposit_is_counted_once(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """AT-23: counting a deposit on every tick would inflate the peak into a false lock."""
+    eng = _running(conn, broker, clock)
+    eng.tick()
+    broker.deposit(D("100"))
+    for _ in range(5):
+        eng.tick()
+    assert not eng.control.risk_locked

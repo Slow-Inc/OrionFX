@@ -64,6 +64,28 @@ class CloseWorkflow:
                 problems.append(f"{order.order_id}: {upd.state} {upd.error or ''}".strip())
         return problems
 
+    def net_inputs(self, cycle_id: str) -> tuple[Decimal, Decimal, Decimal]:
+        """(realized, floating, estimated close cost) from one deal read. The close
+        commission is assumed equal to the opening one, pro rata to what is still
+        open [PROPOSED estimate; the final net always comes from real deals]."""
+        account = self._broker.account()
+        ids = {pid for pid, _ in self._owners.positions_of_cycle(account, cycle_id)}
+        open_volume = {p.position_id: p.volume for p in self.cycle_positions(cycle_id)}
+        realized = floating = est_close = Decimal(0)
+        opened: set[str] = set()
+        for d in self._broker.deals_since(None):
+            if d.is_balance or d.position_id not in ids:
+                continue
+            realized += d.profit - d.commission + d.swap
+            pid = d.position_id
+            if pid in open_volume and pid not in opened and d.volume > 0:
+                opened.add(pid)
+                est_close += d.commission * open_volume[pid] / d.volume
+        for p in self._broker.positions():
+            if p.position_id in open_volume:
+                floating += p.profit + p.swap
+        return realized, floating, est_close
+
     def realized_net(self, cycle_id: str) -> Decimal:
         ids = {pid for pid, _ in self._owners.positions_of_cycle(self._broker.account(), cycle_id)}
         return sum(

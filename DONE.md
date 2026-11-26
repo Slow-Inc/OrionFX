@@ -6,6 +6,20 @@
 
 ---
 
+## M06 slice D — engine loop, control commands, restart reconcile (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/16-m06-engine`)
+
+**Goal:** the M06 Risk & Execution loop that ties the broker port, risk veto, drawdown tracker and cycle book together (PRD-06 #12, slice #16).
+
+**Shipped:** `backend/app/engine/engine.py` (`Engine.start()/tick()`, `EngineSettings`, `LeaseLost`); `CloseWorkflow.net_inputs/cycle_positions/cancel_bot_orders`; `quote_fresh` in `risk/veto.py`. One tick: lease → requires_reconcile → control commands → drawdown (cash-flow aware, cursor in the same txn) → cycle target/trailing/close → trade intents (veto + engine checks CYCLE_NOT_ACTIVE / CYCLE_MISMATCH / RECONCILE_REQUIRED / NOTHING_TO_CLOSE) → account snapshot. Pending Emergency Stop / Finish Cycle persisted; restart never auto-resumes.
+
+**Validation:** `uv run pytest` → 243 passed (37 engine integration tests: AT-01..08, AT-11, AT-12, AT-13, AT-23, AT-32, AT-34, AT-42 against the fake broker); ruff + mypy clean. 20 mutation probes on the engine each turned a test red. Review fixes: exit sizing per target within the approved lot, keep going past a vanished position, NOTHING_TO_CLOSE, poison intent isolated (ENGINE_ERROR), ALLOW interrupted before dispatch reported not retried, cash-flow cursor atomic with DD update, Emergency Stop announced once / survives restart / survives a DD lock mid-close, Finish Cycle ACCEPTED then COMPLETED on stop, SAFE_MODE not kept without a handler, one deal read per Cycle Net, second protection pass only after an execution.
+
+**Skipped (recorded):** moving engine entry checks into `RiskContext`; an index for `journal.find`; per-intent read reuse; a dedicated event for system lock notices (`control.completed` is kept because `/api/status` derives control state from it). AT-09/AT-10 and AT-41 composites are not covered here (#17 needs MT5; composites land with M05).
+
+**Next:** #17 stays blocked (no MT5). Next module PRD.
+
+---
+
 ## M06 slice C — cycle book, Profit Target, basket trailing, close workflow (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/15-m06-cycle`)
 
 **Goal:** a Cycle that closes on its Profit Target or trailing floor, and only claims CLOSED when the broker agrees (PRD-06 #12, slice #15; PFT-01..05, AT-01..04, CAT-R01-04/05).

@@ -18,6 +18,7 @@ lands in STOPPED (or stays CLOSING / RISK_LOCKED), and the owner must Start agai
 the Risk Veto did not ALLOW; exits are always allowed.
 """
 
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -58,8 +59,9 @@ from app.profit.close import CloseWorkflow
 from app.profit.cycle import CycleBook, cycle_net, default_trailing
 from app.risk.drawdown import DrawdownTracker
 from app.risk.policy import DEFAULT_POLICY, RiskPolicy
-from app.risk.veto import EXITS, ConfigEligibility, RiskContext, evaluate
+from app.risk.veto import EXITS, ConfigEligibility, RiskContext, evaluate, quote_fresh
 from app.storage.config_store import ConfigStore
+from app.storage.db import transaction
 from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag, get_flag, set_bool_flag, set_flag
 from app.storage.journal import Journal, StoredEvent, payload_as
 from app.storage.lease import LeaseStore
@@ -68,15 +70,15 @@ LEASE_NAMESPACE = "m06-executor"
 CONSUMER = "m06-engine"
 CONTROL_FLAG = "m06.control_state"
 DEAL_CURSOR_FLAG = "m06.deal_cursor"
+EMERGENCY_FLAG = "m06.emergency_command"
+FINISH_FLAG = "m06.finish_command"
+
+log = logging.getLogger(__name__)
 SNAPSHOT_EVERY = timedelta(seconds=30)
 
 _S = ControlState
 # A restart never resumes trading; pending safety work survives it (§9.1, AT-07).
-_ON_RESTART = {
-    _S.CLOSING: _S.CLOSING,
-    _S.RISK_LOCKED: _S.RISK_LOCKED,
-    _S.SAFE_MODE: _S.SAFE_MODE,
-}
+_KEPT_ON_RESTART = frozenset({_S.CLOSING, _S.RISK_LOCKED})
 
 
 class LeaseLost(RuntimeError):
@@ -118,7 +120,6 @@ class Engine:
         self._dd = DrawdownTracker(conn, account=account, clock=clock)
         self._close = CloseWorkflow(conn, broker, self._ex, self._book)
         self._status = ControlStatus(_S.STOPPED, risk_locked=self._dd.state().locked)
-        self._emergency_command: str | None = None
         self._last: dict[str, ContractModel] = {}
         self._last_snapshot_at: datetime | None = None
 
@@ -133,7 +134,7 @@ class Engine:
         if not self._renew_lease():
             return False
         saved = get_flag(self._conn, CONTROL_FLAG)
-        state = _ON_RESTART.get(_S(saved), _S.STOPPED) if saved else _S.STOPPED
+        state = _S(saved) if saved in _KEPT_ON_RESTART else _S.STOPPED
         locked = self._dd.state().locked
         if locked and state is _S.STOPPED:
             state = _S.RISK_LOCKED  # a persisted lock is never shown as a clean stop
@@ -152,19 +153,36 @@ class Engine:
             self._journal.committed_offset(CONSUMER),
             event_types=["control.requested", "trade.intent"],
         )
+        # Commands first (they outrank intents); offsets are committed only after
+        # every event of the batch, so a command is never skipped past an intent.
         for ev in events:
             if ev.envelope.event_type == "control.requested":
                 self._on_command(ev, cfg, version)
         self._protect(cfg, version)
+        executed = False
         for ev in events:
             if ev.envelope.event_type == "trade.intent":
-                self._on_intent(ev, cfg)
+                executed |= self._on_intent_safely(ev, cfg)
         if events:
             self._journal.commit_offset(CONSUMER, events[-1].seq)
-        self._protect(cfg, version)  # an exit intent may have finished a close
+        if executed:
+            self._protect(cfg, version)  # an exit may have emptied the cycle
         self._snapshot(cfg)
 
     # --- infrastructure -----------------------------------------------------------------
+
+    def _pending_emergency(self) -> str | None:
+        """The Emergency Stop still being worked on; persisted so a restart finishes it."""
+        return get_flag(self._conn, EMERGENCY_FLAG) or None
+
+    def _set_pending_emergency(self, command_id: str | None) -> None:
+        set_flag(self._conn, EMERGENCY_FLAG, command_id or "")
+
+    def _pending_finish(self) -> str | None:
+        return get_flag(self._conn, FINISH_FLAG) or None
+
+    def _set_pending_finish(self, command_id: str | None) -> None:
+        set_flag(self._conn, FINISH_FLAG, command_id or "")
 
     def _renew_lease(self) -> bool:
         return self._lease.acquire(
@@ -297,8 +315,9 @@ class Engine:
         if cycle_id is not None and not self._close.cycle_positions(cycle_id):
             # Nothing to manage: close the empty cycle now (§4.5 "finish, then stop").
             self._book.begin_closing(cycle_id, CloseReason.FINISH_CYCLE)
-        self._protect(cfg, version)
-        self._announce(cfg, req.command_id, CommandStatus.COMPLETED)
+        self._set_pending_finish(req.command_id)
+        self._announce(cfg, req.command_id, CommandStatus.ACCEPTED)
+        self._protect(cfg, version)  # completes it at once when nothing is open
 
     def _cmd_emergency(self, req: ControlRequested, cfg: UserConfig, version: int) -> None:
         if self._status.state is not _S.CLOSING:
@@ -306,7 +325,7 @@ class Engine:
                 self._move(_S.STARTING, _S.CLOSING)
             else:
                 self._move(_S.CLOSING)
-        self._emergency_command = req.command_id
+        self._set_pending_emergency(req.command_id)
         cycle_id = self._book.open_cycle_id()
         if cycle_id is not None:
             self._book.begin_closing(cycle_id, CloseReason.EMERGENCY_STOP)
@@ -326,7 +345,6 @@ class Engine:
         self._status = self._status.unlock()
         if self._status.state is _S.RISK_LOCKED:
             self._move(_S.RECONCILING, _S.STOPPED)
-        self._persist_state()
         self._announce(cfg, req.command_id, CommandStatus.COMPLETED)
 
     # --- protection: drawdown, target, trailing, close ----------------------------------------
@@ -336,29 +354,30 @@ class Engine:
         if self._book.open_cycle_id() is None and target is not None:
             self._book.open_cycle(target_usd=target, config_version=version)
 
-    def _cash_flow(self) -> Decimal:
-        """Deposits/withdrawals since the last tick (AT-23), cursor persisted."""
-        cursor = get_flag(self._conn, DEAL_CURSOR_FLAG)
-        deals = self._broker.deals_since(cursor)
-        if deals:
-            set_flag(self._conn, DEAL_CURSOR_FLAG, deals[-1].deal_id)
-        return sum((d.profit for d in deals if d.is_balance), Decimal(0))
+    def _cash_flow(self) -> tuple[Decimal, str | None]:
+        """Deposits/withdrawals since the cursor (AT-23), and the new cursor."""
+        deals = self._broker.deals_since(get_flag(self._conn, DEAL_CURSOR_FLAG))
+        amount = sum((d.profit for d in deals if d.is_balance), Decimal(0))
+        return amount, deals[-1].deal_id if deals else None
 
     def _observe_drawdown(self, cfg: UserConfig) -> None:
         account = self._broker.account()
         owner_max = cfg.trading.max_drawdown_percent or self._policy.max_lifetime_ceiling_percent
-        risk = self._dd.observe(
-            account.equity, owner_max_dd=owner_max, policy=self._policy, cash_flow=self._cash_flow()
-        )
+        cash_flow, cursor = self._cash_flow()
+        with transaction(self._conn):  # a failed update must not consume the cash flow
+            risk = self._dd.observe(
+                account.equity, owner_max_dd=owner_max, policy=self._policy, cash_flow=cash_flow
+            )
+            if cursor is not None:
+                set_flag(self._conn, DEAL_CURSOR_FLAG, cursor)
         self._emit_if_changed("risk.updated", risk, cfg)
         if risk.risk_locked and not self._status.risk_locked:
             self._lock(cfg, risk)
 
     def _lock(self, cfg: UserConfig, risk: RiskUpdated) -> None:
         self._status = self._status.lock()
-        if self._status.state not in (_S.STOPPED, _S.RISK_LOCKED):
+        if self._status.state not in (_S.STOPPED, _S.RISK_LOCKED, _S.CLOSING):
             self._move(_S.RISK_LOCKED)
-        self._persist_state()
         cycle_id = self._book.open_cycle_id()
         if cycle_id is not None:
             self._book.begin_closing(cycle_id, CloseReason.RISK_LIMIT)
@@ -367,28 +386,8 @@ class Engine:
         )
 
     def _cycle_net(self, cycle_id: str) -> Decimal:
-        positions = self._close.cycle_positions(cycle_id)
-        floating = sum((p.profit + p.swap for p in positions), Decimal(0))
-        return cycle_net(
-            realized=self._close.realized_net(cycle_id),
-            floating=floating,
-            est_close_cost=self._est_close_cost(positions),
-        )
-
-    def _est_close_cost(self, positions: list[Position]) -> Decimal:
-        """Closing commission assumed equal to the opening one, pro rata to what is
-        still open [PROPOSED estimate; the final net always comes from real deals]."""
-        if not positions:
-            return Decimal(0)
-        open_ids = {p.position_id: p.volume for p in positions}
-        cost = Decimal(0)
-        seen: set[str] = set()
-        for d in self._broker.deals_since(None):
-            pid = d.position_id
-            if pid in open_ids and pid not in seen and d.volume > 0:
-                seen.add(pid)
-                cost += d.commission * open_ids[pid] / d.volume
-        return cost
+        realized, floating, est_close = self._close.net_inputs(cycle_id)
+        return cycle_net(realized=realized, floating=floating, est_close_cost=est_close)
 
     def _protect(self, cfg: UserConfig, version: int) -> None:
         self._observe_drawdown(cfg)
@@ -409,22 +408,29 @@ class Engine:
         self._emit_if_changed("cycle.updated", snap.as_event(unresolved), cfg, cycle_id=cycle_id)
         if snap.state is CycleState.CLOSED:
             self._after_cycle(cfg, version)
-        elif self._emergency_command is not None:
-            self._announce(
-                cfg, self._emergency_command, CommandStatus.UNRESOLVED, unresolved=unresolved
-            )
+        elif (command_id := self._pending_emergency()) is not None:
+            last = self._journal.find("control.completed", "command_id", command_id)
+            said = None if last is None else payload_as(last, ControlCompleted)
+            if said is None or said.unresolved != unresolved:
+                self._announce(cfg, command_id, CommandStatus.UNRESOLVED, unresolved=unresolved)
 
     def _after_cycle(self, cfg: UserConfig, version: int) -> None:
         """No open cycle: settle the control state that was waiting for it (AT-05)."""
         state = self._status.state
         if state is _S.CLOSING:
             self._move(_S.RISK_LOCKED if self._status.risk_locked else _S.STOPPED)
-            if self._emergency_command is not None:
-                self._announce(cfg, self._emergency_command, CommandStatus.COMPLETED)
-                self._emergency_command = None
-        elif state is _S.FINISHING:
+        if state is _S.FINISHING:
             self._move(_S.STOPPED)
-        elif state is _S.RUNNING and not self._status.risk_locked:
+        if (command_id := self._pending_emergency()) is not None:
+            self._announce(cfg, command_id, CommandStatus.COMPLETED)
+            self._set_pending_emergency(None)
+        if (command_id := self._pending_finish()) is not None and state in (
+            _S.FINISHING,
+            _S.CLOSING,
+        ):
+            self._announce(cfg, command_id, CommandStatus.COMPLETED)
+            self._set_pending_finish(None)
+        if state is _S.RUNNING and not self._status.risk_locked:
             self._ensure_cycle(cfg, version)  # normal mode starts the next cycle
 
     # --- trade intents ------------------------------------------------------------------------
@@ -455,8 +461,17 @@ class Engine:
             eligibility=ConfigEligibility(cfg, self._policy),
         )
 
+    def _exit_targets(self, intent: TradeIntent) -> list[Position]:
+        bot = self._owners.bot_positions(self._broker.account(), self._broker.positions())
+        bot = [p for p in bot if p.symbol == intent.symbol]
+        if intent.action is IntentAction.CLOSE_ALL:
+            return bot
+        return [p for p in bot if p.position_id in intent.position_refs]
+
     def _engine_reasons(self, intent: TradeIntent) -> list[str]:
-        """Entry checks only the engine can make: cycle and reconcile state."""
+        """Checks only the engine can make: cycle, reconcile state, exit targets."""
+        if intent.action in EXITS:
+            return [] if self._exit_targets(intent) else ["NOTHING_TO_CLOSE"]
         reasons = []
         cycle_id = self._book.open_cycle_id()
         if cycle_id is None or self._book.snapshot(cycle_id).state is not CycleState.ACTIVE:
@@ -467,26 +482,75 @@ class Engine:
             reasons.append("RECONCILE_REQUIRED")
         return reasons
 
-    def _on_intent(self, ev: StoredEvent, cfg: UserConfig) -> None:
+    def _on_intent_safely(self, ev: StoredEvent, cfg: UserConfig) -> bool:
+        """One failing intent is reported and never blocks the ones behind it."""
+        try:
+            return self._on_intent(ev, cfg)
+        except Exception as exc:
+            log.exception("intent handling failed")
+            intent = payload_as(ev, TradeIntent)
+            self._fail_intent(intent, cfg, f"engine error: {exc!r}")
+            return True  # something may have reached the broker: protect again
+
+    def _fail_intent(self, intent: TradeIntent, cfg: UserConfig, error: str) -> None:
+        if self._journal.find("risk.decision", "intent_id", intent.intent_id) is None:
+            self._emit(
+                "risk.decision",
+                RiskDecision(
+                    intent_id=intent.intent_id,
+                    verdict=Verdict.DENY,
+                    policy_version=self._policy.policy_version,
+                    reason_codes=["ENGINE_ERROR"],
+                    decided_at=self._clock(),
+                ),
+                cfg,
+            )
+        elif self._journal.find("execution.updated", "intent_id", intent.intent_id) is None:
+            self._emit(
+                "execution.updated",
+                ExecutionUpdated(
+                    request_id=f"req-{intent.intent_id}",
+                    intent_id=intent.intent_id,
+                    state=ExecutionState.REJECTED,
+                    error=error,
+                ),
+                cfg,
+            )
+
+    def _dispatched(self, intent_id: str) -> bool:
+        base = f"req-{intent_id}"
+        return any(self._ledger.state(r) is not None for r in (base, f"{base}-0"))
+
+    def _on_intent(self, ev: StoredEvent, cfg: UserConfig) -> bool:
+        """True when the intent reached the broker."""
         intent = payload_as(ev, TradeIntent)
-        if self._journal.find("risk.decision", "intent_id", intent.intent_id) is not None:
-            return  # decided before a restart
+        decided = self._journal.find("risk.decision", "intent_id", intent.intent_id)
+        if decided is not None:
+            # Decided before a restart. If it was ALLOWed but never dispatched, say so;
+            # it is not sent late on an old decision (reconcile covers what was sent).
+            allowed = payload_as(decided, RiskDecision).verdict is Verdict.ALLOW
+            if allowed and not self._dispatched(intent.intent_id):
+                self._fail_intent(intent, cfg, "interrupted before dispatch; not retried")
+            return False
         decision = evaluate(intent, self._context(intent, cfg))
-        if intent.action not in EXITS and (extra := self._engine_reasons(intent)):
-            decision = RiskDecision(
-                intent_id=intent.intent_id,
-                verdict=Verdict.DENY,
-                policy_version=decision.policy_version,
-                reason_codes=[*decision.reason_codes, *extra],
-                decided_at=decision.decided_at,
+        if extra := self._engine_reasons(intent):
+            decision = decision.model_copy(
+                update={
+                    "verdict": Verdict.DENY,
+                    "approved_lot": None,
+                    "valid_until": None,
+                    "reason_codes": [*decision.reason_codes, *extra],
+                }
             )
         cycle_id = self._book.open_cycle_id()
         self._emit(
             "risk.decision", decision, cfg, cycle_id=cycle_id, causation=ev.envelope.event_id
         )
-        if decision.verdict is Verdict.ALLOW:
-            for update in self._execute(intent, decision, cycle_id):
-                self._emit("execution.updated", update, cfg, cycle_id=cycle_id)
+        if decision.verdict is not Verdict.ALLOW:
+            return False
+        for update in self._execute(intent, decision, cycle_id):
+            self._emit("execution.updated", update, cfg, cycle_id=cycle_id)
+        return True
 
     def _execute(
         self, intent: TradeIntent, decision: RiskDecision, cycle_id: str | None
@@ -521,25 +585,35 @@ class Engine:
     def _exit(
         self, intent: TradeIntent, decision: RiskDecision, request_id: str, cycle_id: str | None
     ) -> list[ExecutionUpdated]:
-        account = self._broker.account()
-        bot = self._owners.bot_positions(account, self._broker.positions())
-        if intent.action is IntentAction.CLOSE_ALL:
-            targets = bot
-        else:
-            targets = [p for p in bot if p.position_id in intent.position_refs]
+        # A requested lot caps the total closed; without one, each target closes fully.
+        budget = decision.approved_lot if intent.requested_lot is not None else None
         updates = []
-        for n, pos in enumerate(targets):
-            volume = decision.approved_lot if len(targets) == 1 and decision.approved_lot else None
-            updates.append(
-                self._ex.close(
+        for n, pos in enumerate(self._exit_targets(intent)):
+            volume = pos.volume if budget is None else min(budget, pos.volume)
+            if volume <= 0:
+                break
+            rid = f"{request_id}-{n}"
+            try:
+                update = self._ex.close(
                     CloseRequest(
-                        request_id=f"{request_id}-{n}",
+                        request_id=rid,
                         position_id=pos.position_id,
-                        volume=volume or pos.volume,
+                        volume=volume,
                         cycle_id=cycle_id,
                     )
                 )
-            )
+            except DispatchBlocked as exc:  # e.g. an Emergency SL closed it meanwhile
+                update = ExecutionUpdated(
+                    request_id=rid,
+                    intent_id=intent.intent_id,
+                    state=ExecutionState.REJECTED,
+                    error=str(exc),
+                )
+            updates.append(update)
+            if budget is not None:
+                budget -= volume
+            if self._ledger.has_unresolved():
+                break  # an unknown outcome blocks every further write until reconciled
         return updates
 
     # --- snapshots ----------------------------------------------------------------------------
@@ -551,9 +625,7 @@ class Engine:
         self._last_snapshot_at = now
         a = self._broker.account()
         quote = self._broker.quote(cfg.trading.symbol)
-        fresh = quote is not None and now - quote.time <= timedelta(
-            seconds=self._policy.max_quote_age_seconds
-        )
+        fresh = quote is not None and quote_fresh(quote, now, self._policy)
         self._emit(
             "account.snapshot",
             AccountSnapshot(
