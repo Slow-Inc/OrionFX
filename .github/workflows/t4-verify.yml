@@ -9,17 +9,23 @@
 # lint/typecheck/test/build.
 #
 # Until then the only job is `guards`: the same three scripts as the local
-# `.githooks/pre-push`, so the local run and the CI run cannot drift.
+# `.githooks/pre-push`. They do NOT check identical things here:
+# `check-tree-budget` reads uncommitted files, and a fresh CI checkout has none,
+# so in CI it only proves the checkout is clean. The issue-ref and gate-ledger
+# checks are the ones that bind in CI. The step below checks out the PR branch
+# by name, because the default detached HEAD would hide `wip/*` and
+# `feat/<n>-...` branch names from the scripts.
 #
 # Slow-Inc is on the GitHub free plan, so this check cannot be made a required
 # status check on a private repo. `.claude/t4.json` "requireGreenCI": true is the
 # (weaker) fallback — it binds agent-run `gh pr merge` only, not a web merge.
 name: T4 verify
 
+# PR-only for now: on a push to main both branch-scoped guards skip and
+# check-tree-budget is a no-op, so a push run would be a green that checks
+# nothing. Add `push: main` back with the P1 lint/typecheck/test/build jobs.
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
 
 concurrency:
@@ -37,14 +43,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: name the branch (scripts read it via git rev-parse)
+        run: git checkout -B "$HEAD_REF"
+        env:
+          HEAD_REF: ${{ github.head_ref }}
       - run: sh .githooks/check-tree-budget
       - name: check-gate-ledger
-        if: github.event_name == 'pull_request'
         run: sh .githooks/check-gate-ledger
         env:
           BASE_REF: origin/${{ github.base_ref }}
       - name: check-issue-ref
-        if: github.event_name == 'pull_request'
         run: PR_BODY="$(gh pr view "${{ github.event.number }}" --json body -q .body)" sh .githooks/check-issue-ref
         env:
           BASE_REF: origin/${{ github.base_ref }}

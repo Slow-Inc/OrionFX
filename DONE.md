@@ -17,8 +17,11 @@
 - `CLAUDE.md`, `CONTEXT.md`, `UBIQUITOUS_LANGUAGE.md`, `PRODUCT.md`, `DESIGN.md`
 - `docs/OPEN-WORK-LEDGER.md`, `Obsidian-OrionFX/`, `docs/agents/{domain,workflow}.md`, `docs/adr/README.md`, `docs/reports/*`, `docs/research/README.md`, `docs/plans/README.md`, `docs/superpowers/{plans,specs}/README.md`
 
-**Validation:** see the bootstrap PR — hooks-layer presence check, placeholder grep, guard scripts run locally.
+- `docs/agents/{issue-tracker,triage-labels}.md` + 26 labels created on `Slow-Inc/OrionFX` (via `/setup-matt-pocock-skills` + T4 delta)
+- Review fixes after `/code-review` + `/scrutinize`: exec bits on hook/guard scripts, 8 unreachable hook files removed, CI checks out the PR branch by name and runs on PRs only, stale/inaccurate doc claims corrected
 
-**Next:** issue-tracker + triage labels wait on `setup-matt-pocock-skills` (ledger Track 0).
+**Validation:** `run-hook.cmd t4-gate` denies `git reset --hard` when invoked both via bash and via `cmd.exe`; CI `guards` green on PR #2. Not run: a session on Linux/macOS.
+
+**Next:** P0 PRD issues (ledger Track 1); upstream defects in the vendored scripts listed in `CLAUDE.md` → report to `xenodeve/xeno-skills`.
 
 ---

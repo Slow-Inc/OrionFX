@@ -6,7 +6,7 @@ Agent operating manual. OrionFX is an **agent-primary** T4 repo (Slow-Inc): the 
 
 A personal XAUUSD AI auto-trading bot on MT5 where **risk is independent of AI**: AI proposes, the Risk & Execution Engine (M06) decides, and the MQL5 Execution EA is the only trade writer. Safety and refusal-when-uncertain outrank profit and availability. Requirements of record: `docs/plans/master_planV1.md` — [LOCKED] items change only through a Change Request (§13.1).
 
-**Never:** use real money, real credentials, or real account data during build/test; let an LLM send broker orders; touch **Manual Positions**; claim guaranteed profit or exact stops.
+**Never:** use real money, real credentials, or real account data during build/test; let an LLM send broker orders; touch **Manual Positions**; claim guaranteed profit or that an **Emergency SL** / **Emergency Stop** fills at an exact price.
 
 ## Standing defaults
 
@@ -51,16 +51,18 @@ Planned code layout: master plan §7.1 (`backend/` Python/FastAPI, `frontend/` R
 
 No code yet (phase P0). When P1 Foundation lands, record here: backend lint/typecheck/test, frontend lint/typecheck/test/build, and set the fast subset as `.claude/t4.json` `"verify"` + matching CI jobs.
 
-Tooling notes (Windows): `gh` → `"/c/Program Files/GitHub CLI/gh.exe"` if not on PATH; `bun` → `~/.bun/bin/bun`. Bun for the frontend; Python tooling for the backend is decided in P1 (master plan §5.2 is [PROPOSED]).
+Tooling notes (Windows, checked 2026-11-27): in git-bash `gh` resolves to `/c/Program Files/GitHub CLI/gh` and `python -c` runs; `bun` is at `~/.bun/bin/bun`. Bun for the frontend; Python tooling for the backend is decided in P1 (master plan §5.2 is [PROPOSED]).
 
 Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 
 ## Enforcement — what is actually in place
 
-- **Claude hooks** (`.claude/settings.json`, marker `.claude/t4.json`): session-start injects `using-t4`; per-turn reminder; `PreToolUse` gate **blocks `gh pr create` with no referenced issue and dangerous git** (`reset --hard`, force-push, `clean -f`, `branch -D`). Binds Claude only.
+- **Claude hooks** (`.claude/settings.json`, marker `.claude/t4.json`): session-start injects `.claude/hooks/t4-directive.md` (a short directive to route through `using-t4`; the plugin, if installed, supplies the same); per-turn reminder; `PreToolUse` gate **blocks `gh pr create` with no referenced issue and dangerous git** (`reset --hard`, force-push, `clean -f`, `branch -D`). Binds Claude only.
 - **git pre-push** (`.githooks/`): issue reference, tree budget, `T4-Gates:` trailer. Binds anyone who enabled `core.hooksPath`.
 - **CI** (`t4-verify.yml`): `guards` job only. **Not a required check** — Slow-Inc is on the free plan and private repos can't enforce rulesets. `requireGreenCI: true` makes the agent's `gh pr merge` wait for green CI; **a human merging on the web is not blocked by anything.**
 - Local `verify` is **off** (`""`) until there is code to test.
+- `.claude/hooks/` holds only the 16 files the wired hooks reach (dependency closure checked 2026-11-27); the unwired `clink`/canary/debt/receipt scripts and the unread `using-t4.snapshot.md` were left out. The scripts are vendored from `xeno-skills` — fix bugs upstream, not here.
+- **Known upstream defects (vendored, not patched here):** `.githooks/check-gate-ledger` reads the **oldest** `T4-Gates:` trailer on the branch (`git log … | tail -n 1`), so put the trailer on the first commit correctly; `t4-gate`'s `mcp__github__merge_pull_request` path skips the `requireGreenCI` check (no GitHub MCP server is configured here, so the path is unreachable today); `gh pr merge --squash <n>` (flag before the number) is not parsed as PR `<n>` — write `gh pr merge <n> --squash`.
 - **Secret scanning / push protection: unavailable** (GitHub 422 on this private free-plan repo). Nothing server-side stops a committed secret — keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
 
 ## Developer notification
@@ -71,7 +73,7 @@ On long/AFK work, notify when a task completes, when a confirm is needed (before
 
 - **Chat, reports, status updates: Thai** (`t4-bro` register). Identifiers stay English and byte-exact.
 - **GitHub tracker bodies (issues, PRDs, PR descriptions): bilingual** — English, then a Thai mirror of the same depth; titles English, conventional-commit style. Thai never summarizes.
-- **Root governance docs:** `<!-- lang:en -->` / `<!-- lang:th -->` blocks, full mirror.
+- **Root governance docs** (`CONTEXT.md`, `UBIQUITOUS_LANGUAGE.md`, `PRODUCT.md`, `DESIGN.md`): `<!-- lang:en -->` / `<!-- lang:th -->` blocks, full mirror. **Exceptions, English only:** `CLAUDE.md` (agent operating manual), `DONE.md` and `docs/OPEN-WORK-LEDGER.md` (agent memory), `docs/agents/*`.
 - **Code, commit messages, comments: English.**
 - Domain terms come from `UBIQUITOUS_LANGUAGE.md` exactly; drifting to an "alias to avoid" is a defect.
 

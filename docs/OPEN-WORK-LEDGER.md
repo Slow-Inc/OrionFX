@@ -19,6 +19,7 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 | T4 bootstrap: hooks, guards, CI `guards` job, memory, records, governance docs | ✅ | PR merge | Merge the bootstrap PR |
 | `docs/agents/issue-tracker.md` + `docs/agents/triage-labels.md` + labels | ✅ | PR merge | Done 2026-11-27 via `/setup-matt-pocock-skills` + T4 delta |
 | CI `lint`/`typecheck`/`test`/`build` jobs + local `verify` in `.claude/t4.json` | 🔴 | P1 Foundation (no code yet) | Add jobs to `.github/workflows/t4-verify.yml` with the first `pyproject.toml` / `frontend/package.json`; set `"verify"` to the fast subset |
+| Upstream defects in vendored hook/guard scripts (see `CLAUDE.md` → Enforcement) | 🔴 | Report to `xenodeve/xeno-skills` | Not patched locally, to keep the scripts in sync with upstream |
 | Secret scanning + push protection | 🔴 | GitHub returned 422 "not available for this repository" (private, free plan) | No server-side secret gate exists; rely on `.gitignore` + `/security-review`. Revisit with the plan/visibility |
 | Required status checks / ruleset on `main` | 🔴 | Slow-Inc is on the free plan (rulesets not enforceable on private repos) | `requireGreenCI: true` is the stopgap; revisit if the org plan or repo visibility changes |
 
@@ -34,9 +35,9 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 
 ## Management Plan — phased execution order
 
-**Phase 0 — Unblock tracking.** Install matt pocock skills → triage labels exist → every item below can become a labelled issue.
+**Phase 0 — Unblock tracking.** ✅ Done 2026-11-27 — triage labels exist; merge PR #2.
 **Phase 1 — Tracking hygiene.** File issues for the 🔴 rows in Track 1 (one per PRD, one for shared contracts).
 **Phase 2 — P0 PRDs.** Contracts first (X01 + M06/M08), then module PRDs in parallel.
 **Phase 3 — P1 Foundation.** First code lands → install the real CI jobs and arm `verify` in the same PR.
 
-**Gating summary:** Phase 0 is the multiplier — without labels, issues cannot be triaged, and without issues no PR can pass `check-issue-ref`.
+**Gating summary:** Phase 1 is now the multiplier — without an issue per PRD, no PRD work can pass `check-issue-ref`.
