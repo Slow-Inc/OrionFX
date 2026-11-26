@@ -19,7 +19,7 @@ Delegation: `clink` is not configured on this machine, so `clink-subagents` / `c
 Companion ecosystems (recorded 2026-11-27):
 - **superpowers** — installed.
 - **9arm** — present (`debug-mantra`, `scrutinize`, `post-mortem`); `qwen-agent` not installed.
-- **matt pocock** — `grilling`, `to-prd`, `to-issues`, `tdd`, `triage` present; `setup-matt-pocock-skills` **pending install by the developer** (blocks `docs/agents/issue-tracker.md` + `triage-labels.md`).
+- **matt pocock** — installed; `setup-matt-pocock-skills` ran 2026-11-27 (see "Agent skills" below).
 
 ## Session-start read protocol
 
@@ -37,7 +37,7 @@ Companion ecosystems (recorded 2026-11-27):
 CLAUDE.md  CONTEXT.md  UBIQUITOUS_LANGUAGE.md  PRODUCT.md  DESIGN.md  DONE.md
 docs/plans/master_planV1.md     requirements source
 docs/OPEN-WORK-LEDGER.md        open work
-docs/agents/                    domain.md, workflow.md (issue-tracker.md, triage-labels.md pending)
+docs/agents/                    domain.md, workflow.md, issue-tracker.md, triage-labels.md
 docs/adr/  docs/reports/  docs/research/  docs/superpowers/{plans,specs}/
 Obsidian-OrionFX/               team memory vault
 .claude/                        t4.json marker, hooks, settings
@@ -74,6 +74,20 @@ On long/AFK work, notify when a task completes, when a confirm is needed (before
 - **Root governance docs:** `<!-- lang:en -->` / `<!-- lang:th -->` blocks, full mirror.
 - **Code, commit messages, comments: English.**
 - Domain terms come from `UBIQUITOUS_LANGUAGE.md` exactly; drifting to an "alias to avoid" is a defect.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `Slow-Inc/OrionFX` via `gh`; bodies bilingual EN + TH. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles with default names, plus T4 Component/Type/Severity/Lifecycle groups. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context; the glossary is `UBIQUITOUS_LANGUAGE.md` (read it wherever a skill says `GLOSSARY.md`). See `docs/agents/domain.md`.
 
 ## Pointers
 

@@ -18,6 +18,8 @@ One `CONTEXT.md` at the root covers the whole codebase.
 (Revisit as multi-context — a root `CONTEXT-MAP.md` pointing at one `CONTEXT.md` per
 context, plus context-scoped `docs/adr/` — once module boundaries harden into separate packages.)
 
+> **`GLOSSARY.md` = `UBIQUITOUS_LANGUAGE.md` here.** When a mattpocock skill (`/domain-modeling`, `/grill-with-docs`, `/improve-codebase-architecture`) says `GLOSSARY.md`, read and update `UBIQUITOUS_LANGUAGE.md`. Never create a separate `GLOSSARY.md`.
+
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root — the system-context doc; the **canonical term glossary is `UBIQUITOUS_LANGUAGE.md`** (`CONTEXT.md` points at it and defers to it on any conflict).
