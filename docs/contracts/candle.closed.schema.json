@@ -47,6 +47,13 @@
       "title": "Open Time",
       "type": "string"
     },
+    "quality_flags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Quality Flags",
+      "type": "array"
+    },
     "spread": {
       "anyOf": [
         {

@@ -19,3 +19,20 @@ def require_utc(value: datetime) -> datetime:
     if value.utcoffset() != timedelta(0):
         raise ValueError("timestamp must be UTC (offset +00:00)")
     return value
+
+
+CLOCK_SKEW = timedelta(seconds=2)
+"""Tolerance for a timestamp slightly ahead of our clock; beyond it, data is from the future."""
+
+
+def broker_to_utc(broker_time: datetime, offset_minutes: int) -> datetime:
+    """MT5 reports naive broker wall time; the offset in force (it changes at DST) is
+    passed separately. UTC is the only time stored."""
+    if broker_time.tzinfo is not None:
+        raise ValueError("broker time must be naive wall time; its offset is passed separately")
+    return (broker_time - timedelta(minutes=offset_minutes)).replace(tzinfo=UTC)
+
+
+def fresh(observed_at: datetime, now: datetime, max_age: timedelta) -> bool:
+    """Not older than `max_age`, and not from the future beyond the clock skew."""
+    return -CLOCK_SKEW <= now - observed_at <= max_age
