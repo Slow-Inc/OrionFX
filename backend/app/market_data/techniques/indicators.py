@@ -30,7 +30,7 @@ D = Decimal
 BB_K = Decimal(2)
 RECURSIVE_LOOKBACK = 5  # [PROPOSED] smoothed indicators read 5x their period
 
-Values = dict[str, Decimal]
+Values = dict[str, Decimal | None]
 
 
 # --- series math (pure) ----------------------------------------------------------------------
@@ -77,7 +77,7 @@ def rsi(closes: Sequence[Decimal], n: int) -> Decimal:
     return D(100) - D(100) / (1 + gain / loss)
 
 
-def dmi(bars: Sequence[CandleClosed], n: int) -> Values:
+def dmi(bars: Sequence[CandleClosed], n: int) -> dict[str, Decimal]:
     plus_dm, minus_dm = [], []
     for p, b in pairwise(bars):
         up, down = b.high - p.high, p.low - b.low

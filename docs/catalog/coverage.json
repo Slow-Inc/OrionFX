@@ -769,7 +769,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M5/M15/H1; closed bars and confirmed pivots",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/price_action.py",
+      "backend/app/market_data/features.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_price_action.py::test_price_action_techniques_cover_the_mvp_rows",
+      "tests/unit/market_data/test_price_action.py::test_feature_snapshot_is_point_in_time_and_versioned"
+    ],
+    "note": "Thresholds (swing window, S/R tolerance, ADX/ATR regime cut-offs) PROPOSED; replay data only."
   },
   {
     "catalog_id": "CAT-T03-02",
@@ -778,7 +787,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M5/M15/H1; closed bars and confirmed pivots",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/price_action.py",
+      "backend/app/market_data/features.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_price_action.py::test_candle_patterns",
+      "tests/unit/market_data/test_price_action.py::test_a_bullish_bar_that_does_not_engulf_is_not_engulfing"
+    ],
+    "note": "Thresholds (swing window, S/R tolerance, ADX/ATR regime cut-offs) PROPOSED; replay data only."
   },
   {
     "catalog_id": "CAT-T03-03",
@@ -787,7 +805,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M5/M15/H1; closed bars and confirmed pivots",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/price_action.py",
+      "backend/app/market_data/features.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_price_action.py::test_support_resistance_from_clustered_swings",
+      "tests/unit/market_data/test_price_action.py::test_a_level_touched_once_is_not_support_or_resistance"
+    ],
+    "note": "Thresholds (swing window, S/R tolerance, ADX/ATR regime cut-offs) PROPOSED; replay data only."
   },
   {
     "catalog_id": "CAT-T03-04",
@@ -796,7 +823,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M5/M15/H1; closed bars and confirmed pivots",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/price_action.py",
+      "backend/app/market_data/features.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_price_action.py::test_market_structure_up_down_and_mixed",
+      "tests/unit/market_data/test_price_action.py::test_expanding_swings_are_not_a_trend",
+      "tests/unit/market_data/test_price_action.py::test_price_action_observations_refuse_warmup"
+    ],
+    "note": "Thresholds (swing window, S/R tolerance, ADX/ATR regime cut-offs) PROPOSED; replay data only."
   },
   {
     "catalog_id": "CAT-T03-05",
@@ -805,7 +842,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M5/M15/H1; closed bars and confirmed pivots",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/price_action.py",
+      "backend/app/market_data/features.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_price_action.py::test_swing_needs_closed_confirmation_bars",
+      "tests/unit/market_data/test_price_action.py::test_swing_low"
+    ],
+    "note": "Thresholds (swing window, S/R tolerance, ADX/ATR regime cut-offs) PROPOSED; replay data only."
   },
   {
     "catalog_id": "CAT-T03-06",
@@ -814,7 +860,15 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M5/M15/H1; closed bars and confirmed pivots",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/price_action.py",
+      "backend/app/market_data/features.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_price_action.py::test_regime_reports_trend_in_a_steady_climb"
+    ],
+    "note": "Thresholds (swing window, S/R tolerance, ADX/ATR regime cut-offs) PROPOSED; replay data only."
   },
   {
     "catalog_id": "CAT-T03-07",
@@ -823,7 +877,15 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M5/M15/H1; closed bars and confirmed pivots",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/price_action.py",
+      "backend/app/market_data/features.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_price_action.py::test_multi_timeframe_uses_only_available_higher_bars"
+    ],
+    "note": "Thresholds (swing window, S/R tolerance, ADX/ATR regime cut-offs) PROPOSED; replay data only."
   },
   {
     "catalog_id": "CAT-T04-01",
