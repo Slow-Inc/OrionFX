@@ -1,16 +1,13 @@
 -- M08 core tables (PRD-08). Timestamps are ISO-8601 UTC text.
 
+-- `body` is the validated envelope JSON; the other columns exist only to index it.
 CREATE TABLE events (
-    seq            INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id       TEXT NOT NULL UNIQUE,
-    event_type     TEXT NOT NULL,
-    occurred_at    TEXT NOT NULL,
-    recorded_at    TEXT NOT NULL,
-    account_id     TEXT NOT NULL,
-    bot_id         TEXT NOT NULL,
-    cycle_id       TEXT,
-    correlation_id TEXT NOT NULL,
-    body           TEXT NOT NULL
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id    TEXT NOT NULL UNIQUE,
+    event_type  TEXT NOT NULL,
+    cycle_id    TEXT,
+    occurred_at TEXT NOT NULL,
+    body        TEXT NOT NULL
 );
 CREATE INDEX events_by_type ON events (event_type, seq);
 CREATE INDEX events_by_cycle ON events (cycle_id, seq);

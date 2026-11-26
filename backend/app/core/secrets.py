@@ -9,16 +9,21 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-SecretRef = Annotated[str, Field(pattern=r"^env:[A-Z][A-Z0-9_]*$")]
+SECRET_REF_PATTERN = r"^env:[A-Z][A-Z0-9_]*$"
+SecretRef = Annotated[str, Field(pattern=SECRET_REF_PATTERN)]
 
-SECRET_KEY = re.compile(r"key|secret|token|password|authorization|cookie", re.IGNORECASE)
+SECRET_KEY = re.compile(
+    r"(^|[_-])(api_?keys?|secrets?|tokens?|passwords?|passwd|authorization|cookies?|credentials?)"
+    r"($|[_-])",
+    re.IGNORECASE,
+)
 MASK = "***"
 
 
 def resolve_secret(ref: str, env: Mapping[str, str] | None = None) -> str | None:
-    if not re.fullmatch(r"env:[A-Z][A-Z0-9_]*", ref):
+    if not re.match(SECRET_REF_PATTERN, ref):
         raise ValueError("secret reference must look like env:NAME")
     source = os.environ if env is None else env
     return source.get(ref.removeprefix("env:"))
@@ -29,15 +34,20 @@ def redact(value: Any, secrets: Iterable[str] = ()) -> Any:
     known = [s for s in secrets if s]
 
     def walk(v: Any, key: str | None = None) -> Any:
-        if key is not None and SECRET_KEY.search(key) and not isinstance(v, dict | list):
-            return MASK
+        if key is not None and SECRET_KEY.search(key):
+            return MASK  # whatever its shape: str, list, dict, model
+        if isinstance(v, BaseModel):
+            v = v.model_dump(mode="json")
         if isinstance(v, dict):
             return {k: walk(item, str(k)) for k, item in v.items()}
-        if isinstance(v, list):
+        if isinstance(v, list | tuple | set | frozenset):
             return [walk(item) for item in v]
         if isinstance(v, str):
             for s in known:
                 v = v.replace(s, MASK)
-        return v
+            return v
+        if isinstance(v, int | float | bool) or v is None:
+            return v
+        return walk(str(v))  # unknown objects are logged as text, still scrubbed
 
     return walk(value)

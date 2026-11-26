@@ -166,3 +166,48 @@ def test_verify_backup_rejects_corrupt_file(tmp_path: Path) -> None:
     bad = tmp_path / "bad.db"
     bad.write_bytes(b"not a database" * 100)
     assert verify_backup(bad).ok is False
+
+
+def test_backup_path_with_hash_and_space(tmp_path: Path) -> None:
+    d = tmp_path / "x y#z"
+    d.mkdir()
+    c = connect(d / "live.db")
+    migrate(c)
+    Journal(c).append(_health_event())  # type: ignore[arg-type]
+    report = backup_database(c, d / "bk 1.db")
+    assert report.ok, report.error
+    assert report.row_counts["events"] == 1
+
+
+def test_nested_transaction_is_atomic(conn: sqlite3.Connection) -> None:
+    from app.storage.db import transaction
+
+    with pytest.raises(RuntimeError), transaction(conn):
+        set_flag(conn, "a", "1")  # nested -> savepoint
+        raise RuntimeError("boom")
+    assert get_flag(conn, "a") is None
+    assert not conn.in_transaction
+
+
+def test_concurrent_migrate_second_process_skips(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite"
+    first, second = connect(db), connect(db)
+    second.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT)"
+    )
+    migrate(first)
+    assert migrate(second) == []
+
+
+def test_split_keeps_trigger_body_whole(tmp_path: Path) -> None:
+    mig = tmp_path / "migs"
+    mig.mkdir()
+    (mig / "0001_t.sql").write_text(
+        "CREATE TABLE a(x INTEGER);\n"
+        "CREATE TABLE b(n INTEGER);\n"
+        "CREATE TRIGGER t AFTER INSERT ON a BEGIN INSERT INTO b VALUES (1); END;\n"
+    )
+    c = connect(tmp_path / "db.sqlite")
+    migrate(c, mig)
+    c.execute("INSERT INTO a VALUES (1)")
+    assert c.execute("SELECT COUNT(*) FROM b").fetchone()[0] == 1

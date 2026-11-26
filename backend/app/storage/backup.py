@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.storage.db import connect
-from app.storage.flags import REQUIRES_RECONCILE, set_flag
+from app.storage.flags import REQUIRES_RECONCILE, set_bool_flag
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,9 +31,14 @@ def _row_counts(conn: sqlite3.Connection) -> dict[str, int]:
     return {t: int(conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]) for t in tables}
 
 
+def _open_readonly(path: Path) -> sqlite3.Connection:
+    # as_uri() percent-encodes spaces, '#' and '?', which a raw f-string would not.
+    return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+
+
 def verify_backup(path: Path) -> BackupReport:
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn = _open_readonly(path)
         try:
             check = conn.execute("PRAGMA integrity_check").fetchone()[0]
             if check != "ok":
@@ -46,15 +51,20 @@ def verify_backup(path: Path) -> BackupReport:
 
 
 def backup_database(conn: sqlite3.Connection, dest: Path) -> BackupReport:
-    """Online backup, then verify the copy and compare row counts with the source."""
+    """Online backup (a consistent snapshot), then verify the copy's integrity.
+
+    Row counts are reported from the copy. They are not compared with the live
+    source, which keeps changing after the snapshot. A copy that fails
+    verification is deleted so a later restore cannot pick it up.
+    """
     target = sqlite3.connect(str(dest))
     try:
         conn.backup(target)
     finally:
         target.close()
     report = verify_backup(dest)
-    if report.ok and report.row_counts != _row_counts(conn):
-        return BackupReport(dest, ok=False, row_counts=report.row_counts, error="count mismatch")
+    if not report.ok:
+        dest.unlink(missing_ok=True)
     return report
 
 
@@ -63,12 +73,27 @@ def restore_database(src: Path, db_path: Path) -> BackupReport:
     report = verify_backup(src)
     if not report.ok:
         raise ValueError(f"refusing to restore unverified backup: {report.error}")
-    source = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
-    target = connect(db_path)
+    # Mark the image BEFORE it goes live: a crash mid-restore must never leave
+    # restored old state without the reconcile demand (AT-22).
+    staged = db_path.with_name(db_path.name + ".restore-staging")
+    _remove_db_files(staged)
+    source = _open_readonly(src)
+    staging = connect(staged)
     try:
-        source.backup(target)
-        set_flag(target, REQUIRES_RECONCILE, "true")
+        source.backup(staging)
+        set_bool_flag(staging, REQUIRES_RECONCILE, True)
+        target = connect(db_path)
+        try:
+            staging.backup(target)
+        finally:
+            target.close()
     finally:
         source.close()
-        target.close()
+        staging.close()
+        _remove_db_files(staged)
     return report
+
+
+def _remove_db_files(path: Path) -> None:
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(path) + suffix).unlink(missing_ok=True)

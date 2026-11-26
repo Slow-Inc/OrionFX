@@ -118,3 +118,26 @@ def test_health_goes_stale_after_ttl() -> None:
     assert reg.status("M02") is HealthStatus.DOWN
     assert reg.status("never-seen") is HealthStatus.DOWN
     assert reg.snapshot()["M02"].status is HealthStatus.DOWN
+
+
+def test_redact_masks_whole_values_under_secret_keys() -> None:
+    out = redact(
+        {
+            "api_keys": ["sk-1"],
+            "authorization": {"scheme": "Bearer", "credentials": "tok"},
+            "password": ("pw",),
+            "idempotency_id": "cmd-42",
+            "monkey": "banana",
+        }
+    )
+    assert out["api_keys"] == "***"
+    assert out["authorization"] == "***"
+    assert out["password"] == "***"
+    assert out["monkey"] == "banana"
+
+
+def test_redact_scrubs_models_and_unknown_objects() -> None:
+    from app.core.config import LlmConfig
+
+    out = redact({"cfg": LlmConfig(api_key_ref="env:K"), "x": object()}, secrets=["env:K"])
+    assert out["cfg"]["api_key_ref"] == "***"

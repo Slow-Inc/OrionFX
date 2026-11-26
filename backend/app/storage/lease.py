@@ -6,7 +6,7 @@ storage and is open (PRD-08 M08-OD-1).
 
 import sqlite3
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.core.time import utc_now
 from app.storage.db import transaction
@@ -19,9 +19,13 @@ class LeaseStore:
         self._conn = conn
         self._clock = clock
 
+    def _now(self) -> datetime:
+        # Expiry is compared as ISO text, so every timestamp must share one offset form.
+        return self._clock().astimezone(UTC)
+
     def acquire(self, namespace: str, holder: str, *, ttl: timedelta) -> bool:
         """Take or renew the lease. False if another holder's lease is still live."""
-        now = self._clock()
+        now = self._now()
         expires = (now + ttl).isoformat()
         with transaction(self._conn):
             cur = self._conn.execute(
@@ -37,7 +41,7 @@ class LeaseStore:
     def holder(self, namespace: str) -> str | None:
         row = self._conn.execute(
             "SELECT holder FROM executor_leases WHERE namespace = ? AND expires_at > ?",
-            (namespace, self._clock().isoformat()),
+            (namespace, self._now().isoformat()),
         ).fetchone()
         return str(row[0]) if row else None
 

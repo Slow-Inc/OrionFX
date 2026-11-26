@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import Field
 
 from app.core.contracts import ContractModel
-from app.core.enums import RiskProfile
+from app.core.enums import Mode, RiskProfile
 from app.core.secrets import SecretRef
 from app.core.types import Lot, Percent, PositiveMoney
 
@@ -21,7 +21,7 @@ class TradingConfig(ContractModel):
     max_drawdown_percent: Percent | None = Field(default=None, gt=0)
     order_scope: Literal["BOT_ONLY"] = "BOT_ONLY"
     drawdown_scope: Literal["ACCOUNT_EQUITY"] = "ACCOUNT_EQUITY"
-    account_mode: Literal["SHADOW", "DEMO"] = "DEMO"
+    account_mode: Literal[Mode.SHADOW, Mode.DEMO] = Mode.DEMO
     risk_profile: RiskProfile = RiskProfile.LOW
     strategies_enabled: list[str] = Field(default_factory=list)
 

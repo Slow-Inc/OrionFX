@@ -3,7 +3,8 @@
 import sqlite3
 
 from app.core.config import UserConfig
-from app.core.time import utc_now
+from app.core.time import utc_now_iso
+from app.storage.audit import audit
 from app.storage.db import transaction
 
 
@@ -18,30 +19,30 @@ class ConfigStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
+    def _latest_version(self) -> int:
+        row = self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM config_versions")
+        return int(row.fetchone()[0])
+
     def current(self) -> tuple[int, UserConfig]:
         """Latest (version, config); version 0 is the built-in not-ready default."""
-        row = self._conn.execute(
-            "SELECT version, body FROM config_versions ORDER BY version DESC LIMIT 1"
-        ).fetchone()
-        if row is None:
+        version = self._latest_version()
+        if version == 0:
             return 0, UserConfig()
-        return int(row["version"]), UserConfig.model_validate_json(row["body"])
+        row = self._conn.execute(
+            "SELECT body FROM config_versions WHERE version = ?", (version,)
+        ).fetchone()
+        return version, UserConfig.model_validate_json(row["body"])
 
     def update(self, cfg: UserConfig, *, expected_version: int, actor: str) -> int:
         with transaction(self._conn):
-            row = self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM config_versions")
-            actual = int(row.fetchone()[0])
+            actual = self._latest_version()
             if actual != expected_version:
                 raise VersionConflict(expected_version, actual)
             version = actual + 1
-            now = utc_now().isoformat()
             self._conn.execute(
                 "INSERT INTO config_versions (version, body, created_at, actor)"
                 " VALUES (?, ?, ?, ?)",
-                (version, cfg.model_dump_json(), now, actor),
+                (version, cfg.model_dump_json(), utc_now_iso(), actor),
             )
-            self._conn.execute(
-                "INSERT INTO audit_log (at, actor, action, detail) VALUES (?, ?, ?, ?)",
-                (now, actor, "config.update", f"version {version}"),
-            )
+            audit(self._conn, actor=actor, action="config.update", detail=f"version {version}")
         return version
