@@ -6,6 +6,18 @@
 
 ---
 
+## M02 slice A — timestamps, symbol mapping, candles, data quality (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/29-m02-candles`)
+
+**Goal:** one honest source of XAUUSD candles (PRD-02 #28, slice #29; DAT-01, DAT-04, UST-03).
+
+**Shipped:** `backend/app/market_data/{port,candles}.py` (`MarketDataPort`, `ReplaySource`, `CandleEngine`, `ClosedBar`); `broker_to_utc`, `fresh`, `CLOCK_SKEW` in `core/time.py` (veto's `quote_fresh` now uses `fresh`); `CandleClosed.quality_flags`.
+
+**Validation:** `uv run pytest` → 305 passed (18 market-data tests: DST, finality, M5/M15/H1 agreement, out-of-order, duplicate, crossed/NaN/zero quotes, future tick, gap in and after bars, staleness). 13 mutation probes caught. Review fixes: future ticks refused (a stale DST offset no longer freezes the feed), gap flags published and propagated to M15/H1, one symbol per engine, non-finite quotes invalid, same-timestamp duplicates, one count per outage.
+
+**Not done:** MT5 read adapter (blocked like #17). Snapshot does not downgrade to DEGRADED on recent issues (issues are counted on the engine).
+
+---
+
 ## M08 V1.1 — versioned registry, trusted artifact loading, isolated runs (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/20-m08-registry`)
 
 **Goal:** registry storage and safe loading for strategies/techniques (#20; §15.5, UST-01, UST-07..10, CAT-X04-01).

@@ -89,6 +89,8 @@ class CandleClosed(ContractModel):
     volume: NonNegative | None
     spread: NonNegative | None = None
     available_at: UtcDatetime
+    quality_flags: list[str] = Field(default_factory=list)
+    """e.g. GAP: the bar contains or follows missing data (DAT-04)."""
 
     @model_validator(mode="after")
     def _consistent_bar(self) -> Self:

@@ -18,16 +18,15 @@ from app.core.config import UserConfig, missing_for_start
 from app.core.contracts import RiskDecision, TradeIntent
 from app.core.enums import IntentAction, Mode, Verdict
 from app.core.states import ControlStatus, allows_new_exposure
+from app.core.time import fresh
 from app.execution.broker import AccountInfo, Position, Quote, SymbolSpec
 from app.risk.policy import RiskPolicy
 
 EXITS = (IntentAction.CLOSE, IntentAction.CLOSE_ALL)
-CLOCK_SKEW = timedelta(seconds=2)
 
 
 def quote_fresh(quote: Quote, now: datetime, policy: RiskPolicy) -> bool:
-    age = now - quote.time
-    return -CLOCK_SKEW <= age <= timedelta(seconds=policy.max_quote_age_seconds)
+    return fresh(quote.time, now, timedelta(seconds=policy.max_quote_age_seconds))
 
 
 class Eligibility(Protocol):
