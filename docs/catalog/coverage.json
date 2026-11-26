@@ -472,7 +472,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_sma_wma_ema",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-02",
@@ -481,7 +491,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_sma_wma_ema",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-03",
@@ -490,7 +510,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_sma_wma_ema",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-04",
@@ -499,7 +529,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_rsi",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-05",
@@ -508,7 +548,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_macd",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-06",
@@ -517,7 +567,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_atr_adx_dmi",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-07",
@@ -526,7 +586,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_atr_adx_dmi",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-08",
@@ -535,7 +605,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_atr_adx_dmi",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T01-09",
@@ -544,7 +624,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Closed OHLC; exact periods/warm-up TBD",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_bollinger",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T02-01",
@@ -1288,7 +1378,17 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Broker tick count explicitly labeled, not global traded volume",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/market_data/techniques/indicators.py"
+    ],
+    "test_ids": [
+      "tests/unit/market_data/test_indicators.py::test_tick_volume_is_labelled_as_broker_ticks",
+      "tests/unit/market_data/test_indicators.py::test_warmup_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_gap_inside_the_window_gives_no_values",
+      "tests/unit/market_data/test_indicators.py::test_stale_input_gives_no_values"
+    ],
+    "note": "Default periods PROPOSED; tested on replay data only (no MT5 feed yet)."
   },
   {
     "catalog_id": "CAT-T10-01",
