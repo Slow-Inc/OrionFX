@@ -1,22 +1,20 @@
 """Versioned strategy/technique/composition registry and eligibility history (#20;
 master plan §15.5, §16.4; UST-01, UST-08; AT-28).
 
-- A (kind, id, version) is immutable: re-registering the same hash is a no-op, a
-  different hash for an existing version is refused (code changes make versions).
-- Eligibility is append-only history; the newest record is current. A record must
-  name a registered subject and its exact hash, so it can never approve code that
-  was swapped after review. Every change is audited.
+- A (kind, id, version) is immutable: re-registering the identical manifest is a
+  no-op; any difference (hash or metadata) is refused, because changes make new
+  versions. Storage triggers forbid UPDATE/DELETE too.
+- Eligibility is append-only history (FK to the registered version). A record must
+  carry the registered artifact hash and may approve only modes the manifest
+  supports. The newest unexpired record is current. Every change is audited.
 """
 
 import sqlite3
-from typing import Literal
 
-from app.core.contracts import EligibilityRecord, StrategyManifest
+from app.core.contracts import EligibilityRecord, StrategyManifest, SubjectKind
 from app.core.time import Clock, utc_now
 from app.storage.audit import audit
 from app.storage.db import transaction
-
-Kind = Literal["strategy", "technique", "composition", "model"]
 
 
 class RegistryConflict(ValueError):
@@ -27,8 +25,16 @@ class UnknownSubject(KeyError):
     pass
 
 
-def _ref(manifest: StrategyManifest) -> str:
-    return f"{manifest.strategy_id}@{manifest.version}"
+def subject_ref(subject_id: str, version: str) -> str:
+    return f"{subject_id}@{version}"
+
+
+def split_ref(ref: str) -> tuple[str, str]:
+    """Ids and versions cannot contain '@' (contract pattern), so the split is exact."""
+    subject_id, sep, version = ref.partition("@")
+    if not sep or "@" in version:
+        raise UnknownSubject(f"malformed subject ref {ref!r}")
+    return subject_id, version
 
 
 class ArtifactRegistry:
@@ -36,13 +42,14 @@ class ArtifactRegistry:
         self._conn = conn
         self._clock = clock
 
-    def register(self, kind: Kind, manifest: StrategyManifest, *, actor: str) -> None:
+    def register(self, kind: SubjectKind, manifest: StrategyManifest, *, actor: str) -> None:
+        ref = subject_ref(manifest.strategy_id, manifest.version)
         with transaction(self._conn):
             existing = self.get(kind, manifest.strategy_id, manifest.version)
             if existing is not None:
-                if existing.artifact_hash != manifest.artifact_hash:
+                if existing != manifest:
                     raise RegistryConflict(
-                        f"{kind} {_ref(manifest)} is registered with another hash;"
+                        f"{kind} {ref} is registered with different content;"
                         " publish a new version instead"
                     )
                 return
@@ -63,10 +70,10 @@ class ArtifactRegistry:
                 self._conn,
                 actor=actor,
                 action="registry.register",
-                detail=f"{kind} {_ref(manifest)} {manifest.artifact_hash}",
+                detail=f"{kind} {ref} {manifest.artifact_hash}",
             )
 
-    def get(self, kind: Kind, subject_id: str, version: str) -> StrategyManifest | None:
+    def get(self, kind: SubjectKind, subject_id: str, version: str) -> StrategyManifest | None:
         row = self._conn.execute(
             "SELECT manifest FROM registry_artifacts"
             " WHERE kind = ? AND subject_id = ? AND version = ?",
@@ -74,17 +81,18 @@ class ArtifactRegistry:
         ).fetchone()
         return None if row is None else StrategyManifest.model_validate_json(row[0])
 
-    def versions(self, kind: Kind, subject_id: str) -> list[StrategyManifest]:
+    def versions(self, kind: SubjectKind, subject_id: str) -> list[StrategyManifest]:
+        """In registration order."""
         rows = self._conn.execute(
             "SELECT manifest FROM registry_artifacts WHERE kind = ? AND subject_id = ?"
-            " ORDER BY registered_at, version",
+            " ORDER BY rowid",
             (kind, subject_id),
         )
         return [StrategyManifest.model_validate_json(r[0]) for r in rows]
 
     def set_eligibility(self, record: EligibilityRecord, *, actor: str) -> None:
-        kind: Kind = record.subject_kind
-        subject_id, _, version = record.subject_ref.partition("@")
+        kind = record.subject_kind
+        subject_id, version = split_ref(record.subject_ref)
         with transaction(self._conn):
             manifest = self.get(kind, subject_id, version)
             if manifest is None:
@@ -93,13 +101,18 @@ class ArtifactRegistry:
                 raise RegistryConflict(
                     f"eligibility for {record.subject_ref} names another artifact hash"
                 )
+            unsupported = set(record.approved_modes) - set(manifest.supported_modes)
+            if unsupported:
+                raise RegistryConflict(
+                    f"{record.subject_ref} does not support {sorted(unsupported)}"
+                )
             self._conn.execute(
-                "INSERT INTO registry_eligibility (kind, subject_ref, subject_hash, record,"
+                "INSERT INTO registry_eligibility (kind, subject_id, version, record,"
                 " recorded_at, recorded_by) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     kind,
-                    record.subject_ref,
-                    record.subject_hash,
+                    subject_id,
+                    version,
                     record.model_dump_json(),
                     self._clock().isoformat(),
                     actor,
@@ -112,10 +125,17 @@ class ArtifactRegistry:
                 detail=f"{kind} {record.subject_ref} -> {record.eligibility}",
             )
 
-    def eligibility(self, kind: Kind, subject_ref: str) -> EligibilityRecord | None:
+    def eligibility(self, kind: SubjectKind, ref: str) -> EligibilityRecord | None:
+        """The current record: the newest one, unless it has expired (then None)."""
+        subject_id, version = split_ref(ref)
         row = self._conn.execute(
-            "SELECT record FROM registry_eligibility WHERE kind = ? AND subject_ref = ?"
-            " ORDER BY id DESC LIMIT 1",
-            (kind, subject_ref),
+            "SELECT record FROM registry_eligibility"
+            " WHERE kind = ? AND subject_id = ? AND version = ? ORDER BY id DESC LIMIT 1",
+            (kind, subject_id, version),
         ).fetchone()
-        return None if row is None else EligibilityRecord.model_validate_json(row[0])
+        if row is None:
+            return None
+        record = EligibilityRecord.model_validate_json(row[0])
+        if record.expires_at is not None and record.expires_at <= self._clock():
+            return None
+        return record

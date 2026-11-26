@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.contracts import EligibilityRecord, ParameterBound, StrategyManifest
 from app.core.enums import Eligibility, Mode
@@ -118,7 +119,7 @@ def test_latest_eligibility_wins_and_every_change_is_audited(conn: sqlite3.Conne
 
 
 @pytest.fixture
-def trusted_pkg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def trusted_pkg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     pkg = tmp_path / "trusted_artifacts"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("", encoding="utf-8")
@@ -139,7 +140,10 @@ def test_loads_only_an_allowlisted_module_whose_hash_matches(
     reg = ArtifactRegistry(conn)
     reg.register("strategy", _manifest(sha=_sha(trusted_pkg / "trend.py")), actor="m05")
     loader = ArtifactLoader(reg, allowed_packages=("trusted_artifacts",))
-    module = loader.load("strategy", "trend_following", "1.0.0", "trusted_artifacts.trend")
+    reg.set_eligibility(_eligibility(sha=_sha(trusted_pkg / "trend.py")), actor="owner")
+    module = loader.load(
+        "strategy", "trend_following", "1.0.0", "trusted_artifacts.trend", mode=Mode.DEMO
+    )
     assert module.signal(2) == 4
 
 
@@ -149,7 +153,7 @@ def test_tampered_artifact_is_refused(conn: sqlite3.Connection, trusted_pkg: Pat
     (trusted_pkg / "trend.py").write_text("def signal(x):\n    return 0\n", encoding="utf-8")
     loader = ArtifactLoader(reg, allowed_packages=("trusted_artifacts",))
     with pytest.raises(UntrustedArtifact, match="hash"):
-        loader.load("strategy", "trend_following", "1.0.0", "trusted_artifacts.trend")
+        loader.load_for_research("strategy", "trend_following", "1.0.0", "trusted_artifacts.trend")
 
 
 @pytest.mark.parametrize(
@@ -163,13 +167,13 @@ def test_modules_outside_the_allowlist_are_refused(
     reg.register("strategy", _manifest(sha=_sha(trusted_pkg / "trend.py")), actor="m05")
     loader = ArtifactLoader(reg, allowed_packages=("trusted_artifacts",))
     with pytest.raises(UntrustedArtifact):
-        loader.load("strategy", "trend_following", "1.0.0", module_name)
+        loader.load_for_research("strategy", "trend_following", "1.0.0", module_name)
 
 
 def test_unregistered_artifact_is_refused(conn: sqlite3.Connection, trusted_pkg: Path) -> None:
     loader = ArtifactLoader(ArtifactRegistry(conn), allowed_packages=("trusted_artifacts",))
     with pytest.raises(UntrustedArtifact, match="not registered"):
-        loader.load("strategy", "trend_following", "1.0.0", "trusted_artifacts.trend")
+        loader.load_for_research("strategy", "trend_following", "1.0.0", "trusted_artifacts.trend")
 
 
 # --- isolation for research candidates (UST-07) ----------------------------------------------
@@ -200,3 +204,96 @@ def _boom(_: int) -> int:
 def test_a_failing_candidate_is_reported_not_mistaken_for_a_timeout() -> None:
     with pytest.raises(IsolatedRunFailed, match="bad candidate"):
         run_isolated(_boom, 0, timeout_s=10)
+
+
+# --- review findings -------------------------------------------------------------------------
+
+
+def test_same_version_with_changed_metadata_is_refused(conn: sqlite3.Connection) -> None:
+    reg = ArtifactRegistry(conn)
+    reg.register("strategy", _manifest(), actor="m05")
+    with pytest.raises(RegistryConflict):
+        reg.register("strategy", _manifest(risk_tags=["high_vol"]), actor="m05")
+
+
+def test_eligibility_cannot_approve_unsupported_modes(conn: sqlite3.Connection) -> None:
+    reg = ArtifactRegistry(conn)
+    reg.register("strategy", _manifest(), actor="m05")  # supports SHADOW, DEMO
+    live = _eligibility(
+        eligibility=Eligibility.LIVE_ELIGIBLE, approved_modes=[Mode.SHADOW, Mode.DEMO, Mode.LIVE]
+    )
+    with pytest.raises(RegistryConflict, match="does not support"):
+        reg.set_eligibility(live, actor="owner")
+
+
+def test_ids_cannot_contain_the_ref_separator() -> None:
+    with pytest.raises(ValidationError):
+        _manifest(strategy_id="a@b")
+    with pytest.raises(ValidationError):
+        _manifest(version="b@1")
+
+
+def test_expired_eligibility_is_not_current(conn: sqlite3.Connection) -> None:
+    reg = ArtifactRegistry(conn, clock=lambda: datetime(2026, 6, 1, tzinfo=UTC))
+    reg.register("strategy", _manifest(), actor="m05")
+    reg.set_eligibility(_eligibility(expires_at=NOW), actor="owner")
+    assert reg.eligibility("strategy", "trend_following@1.0.0") is None
+
+
+def test_history_is_immutable_in_storage(conn: sqlite3.Connection) -> None:
+    reg = ArtifactRegistry(conn)
+    reg.register("strategy", _manifest(), actor="m05")
+    reg.set_eligibility(_eligibility(), actor="owner")
+    for sql in (
+        "UPDATE registry_artifacts SET artifact_hash = 'x'",
+        "DELETE FROM registry_artifacts",
+        "UPDATE registry_eligibility SET record = '{}'",
+        "DELETE FROM registry_eligibility",
+    ):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(sql)
+
+
+def test_trading_load_needs_eligibility_for_the_mode(
+    conn: sqlite3.Connection, trusted_pkg: Path
+) -> None:
+    sha = _sha(trusted_pkg / "trend.py")
+    reg = ArtifactRegistry(conn)
+    reg.register("strategy", _manifest(sha=sha), actor="m05")
+    loader = ArtifactLoader(reg, allowed_packages=("trusted_artifacts",))
+    args = ("strategy", "trend_following", "1.0.0", "trusted_artifacts.trend")
+    with pytest.raises(UntrustedArtifact, match="not eligible"):
+        loader.load(*args, mode=Mode.DEMO)  # no record yet
+    reg.set_eligibility(
+        _eligibility(sha=sha, eligibility=Eligibility.SHADOW_ONLY, approved_modes=[Mode.SHADOW]),
+        actor="owner",
+    )
+    with pytest.raises(UntrustedArtifact, match="not eligible"):
+        loader.load(*args, mode=Mode.DEMO)
+    assert loader.load(*args, mode=Mode.SHADOW).signal(1) == 2
+    revoked = _eligibility(
+        sha=sha,
+        eligibility=Eligibility.DISABLED,
+        approved_modes=[],
+        revoked_at=NOW,
+        user_enabled=False,
+    )
+    reg.set_eligibility(revoked, actor="owner")
+    with pytest.raises(UntrustedArtifact, match="not eligible"):
+        loader.load(*args, mode=Mode.SHADOW)
+
+
+def test_parent_package_init_is_not_executed_before_the_check(
+    conn: sqlite3.Connection, trusted_pkg: Path
+) -> None:
+    (trusted_pkg / "__init__.py").write_text(
+        "raise RuntimeError('unverified init ran')", encoding="utf-8"
+    )
+    sha = _sha(trusted_pkg / "trend.py")
+    reg = ArtifactRegistry(conn)
+    reg.register("strategy", _manifest(sha=sha), actor="m05")
+    loader = ArtifactLoader(reg, allowed_packages=("trusted_artifacts",))
+    module = loader.load_for_research(
+        "strategy", "trend_following", "1.0.0", "trusted_artifacts.trend"
+    )
+    assert module.signal(3) == 6

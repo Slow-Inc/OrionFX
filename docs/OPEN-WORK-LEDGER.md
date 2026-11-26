@@ -28,7 +28,7 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 | Item | Status | Gate | Next action |
 |---|---|---|---|
 | Adopt V1.1 in repo docs | ✅ | PR merge | #19 |
-| M08 follow-up: catalog storage, trusted artifact loading, isolation, audit (UST-01,07–10) | 🟢 | — | #20 |
+| M08 follow-up: catalog storage, trusted artifact loading, isolation, audit (UST-01,07–10) | ✅ | — | #20 — sandboxing beyond a time budget stays ADV (UST-07) |
 | X01 follow-up: strategy/technique contracts + consolidated CAT coverage matrix (UST-01–04,11; AT-37) | ✅ | — | #21 — `docs/catalog/coverage.json`; update a row's state whenever its implementation lands |
 | M06 V1.1 obligations (UST-03,04,06–09,11,13; CAT-R01-*, CAT-X02-*) | 🟢 | — | folded into PRD-06 #12 |
 | ADV catalog rows (P6–P8) | 🟡 | Phase P6+ | Tracked as `planned` in the coverage matrix (#21); not implemented in this run |

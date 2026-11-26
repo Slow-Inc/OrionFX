@@ -95,7 +95,7 @@
       "type": "array"
     },
     "strategy_id": {
-      "minLength": 1,
+      "pattern": "^[^@\\s]+$",
       "title": "Strategy Id",
       "type": "string"
     },
@@ -123,7 +123,7 @@
       "type": "array"
     },
     "version": {
-      "minLength": 1,
+      "pattern": "^[^@\\s]+$",
       "title": "Version",
       "type": "string"
     },

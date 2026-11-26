@@ -6,6 +6,20 @@
 
 ---
 
+## M08 V1.1 — versioned registry, trusted artifact loading, isolated runs (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/20-m08-registry`)
+
+**Goal:** registry storage and safe loading for strategies/techniques (#20; §15.5, UST-01, UST-07..10, CAT-X04-01).
+
+**Shipped:** `migrations/0005_registry.sql` (immutable versions, append-only eligibility with FK, UPDATE/DELETE triggers); `backend/app/storage/registry.py` (`ArtifactRegistry`); `backend/app/storage/artifacts.py` (`ArtifactLoader.load(mode=)` / `load_for_research`, `run_isolated`); `SubjectKind`, `sha256_ref`, id/version may not contain '@'.
+
+**Validation:** `uv run pytest` → 287 passed. 14 mutation probes (hash check, allowlist dot, registered check, child error, version immutability, eligibility hash, latest wins, eligibility gate, parent init, metadata compare, modes subset, expiry, …) each caught; one survivor showed a redundant check, removed. security-review: no finding ≥ 8 (nothing reachable from HTTP; re-run when a route or LLM path calls the loader/registry).
+
+**Skipped (recorded):** moving the loader/runner into `decision/registry` and `learning/strategy_research` (those packages land with M05/M07); audit rows still use wall-clock time (same as config_store).
+
+**Not done:** isolation is a time-budgeted process, not a security sandbox (UST-07 ADV); functions returned by `load` cannot be pickled into `run_isolated` (refused, not run unverified).
+
+---
+
 ## X01 V1.1 — strategy/technique contracts + CAT coverage matrix (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/21-x01-catalog`)
 
 **Goal:** the §15.5 shared contracts and one machine-readable disposition for all 201 catalog rows (#21; AT-37, §16.4).
