@@ -3,7 +3,7 @@
 
 Canonical term glossary for OrionFX. When a term appears in **bold**, use it exactly
 as written — in code identifiers, PR descriptions, issue titles, and team conversations.
-Source of meaning: `docs/plans/master_planV1.md` (section refs in brackets).
+Source of meaning: `docs/plans/master_planV1.1.md` (section refs in brackets).
 
 ## Trading cycle & profit
 
@@ -45,6 +45,17 @@ Source of meaning: `docs/plans/master_planV1.md` (section refs in brackets).
 |------|-----------|-----------------|
 | **Start** / **Pause** / **Finish Cycle** / **Emergency Stop** / **Approve Recovery** | The five control commands and their non-negotiable behaviours [§4.5]. | stop (unqualified), kill |
 
+## Strategies, techniques and the catalog (master plan V1.1 §15–16)
+
+| Term | Definition | Aliases to avoid |
+|------|-----------|-----------------|
+| **Strategy** | A trading policy that produces candidate entry, exit, recovery, sizing or WAIT proposals; never an execution permission [§15.1]. | system, bot (unqualified) |
+| **Technique** | A reproducible chart/market analysis that produces observations, features or signals; never an execution permission [§15.1]. | indicator (when it is not one), signal source |
+| **Composition** | A versioned combination of strategies/techniques with exact component versions [§15.5, AT-41]. | combo, blend |
+| **Catalog Item** | One row of the mandatory capability catalog, identified by a stable `CAT-*` ID, with owner, phase, class R/C/D/X [§16.2–16.3]. | feature request |
+| **Coverage State** | `planned`, `blocked`, `implemented`, `tested`, `certified`, `suspended`, `excluded` — what has been built and evidenced [§16.4]. | done, supported (unqualified) |
+| **Operational Eligibility** | `disabled`, `shadow_only`, `demo_eligible`, `live_eligible` — where a version may run; separate from coverage [§16.4]. | enabled (unqualified) |
+
 ## Relationships
 
 - A **Cycle** contains one or more **Bot Positions**; **Cycle Net** is computed per **Cycle**.
@@ -63,7 +74,7 @@ Source of meaning: `docs/plans/master_planV1.md` (section refs in brackets).
 # Ubiquitous Language — คำศัพท์มาตรฐาน
 
 คำศัพท์มาตรฐานของ OrionFX คำที่เป็น **ตัวหนา** ให้ใช้ตามที่เขียนไว้ทุกตัวอักษร ทั้งในชื่อ identifier ในโค้ด คำอธิบาย PR ชื่อ issue และการคุยในทีม
-ความหมายอ้างอิงจาก `docs/plans/master_planV1.md` (เลขหัวข้ออยู่ในวงเล็บ)
+ความหมายอ้างอิงจาก `docs/plans/master_planV1.1.md` (เลขหัวข้ออยู่ในวงเล็บ)
 
 ## รอบการเทรดและกำไร
 
@@ -104,6 +115,17 @@ Source of meaning: `docs/plans/master_planV1.md` (section refs in brackets).
 | Term | ความหมาย | คำที่ห้ามใช้แทน |
 |------|-----------|-----------------|
 | **Start** / **Pause** / **Finish Cycle** / **Emergency Stop** / **Approve Recovery** | คำสั่งควบคุมห้าตัวและพฤติกรรมที่ต่อรองไม่ได้ของแต่ละตัว [§4.5] | stop (แบบไม่ระบุ), kill |
+
+## Strategy, technique และ catalog (master plan V1.1 §15–16)
+
+| Term | ความหมาย | คำที่ห้ามใช้แทน |
+|------|-----------|-----------------|
+| **Strategy** | นโยบายการเทรดที่สร้างข้อเสนอการเข้า, ออก, แก้ไม้, กำหนดขนาด หรือ WAIT ไม่เคยเป็นสิทธิ์ในการส่งคำสั่ง [§15.1] | system, bot (แบบไม่ระบุ) |
+| **Technique** | การวิเคราะห์กราฟ/ตลาดที่ทำซ้ำได้ ให้ผลเป็น observation, feature หรือ signal ไม่เคยเป็นสิทธิ์ในการส่งคำสั่ง [§15.1] | indicator (เมื่อมันไม่ใช่), signal source |
+| **Composition** | การผสม strategy/technique ที่มีเวอร์ชัน และระบุเวอร์ชันของส่วนประกอบแน่นอน [§15.5, AT-41] | combo, blend |
+| **Catalog Item** | หนึ่งแถวของ catalog ความสามารถบังคับ ระบุด้วย ID `CAT-*` ที่คงที่ มี owner, phase และ class R/C/D/X [§16.2–16.3] | feature request |
+| **Coverage State** | `planned`, `blocked`, `implemented`, `tested`, `certified`, `suspended`, `excluded` — สิ่งที่สร้างและมีหลักฐานแล้ว [§16.4] | done, supported (แบบไม่ระบุ) |
+| **Operational Eligibility** | `disabled`, `shadow_only`, `demo_eligible`, `live_eligible` — เวอร์ชันนั้นรันได้ที่ไหน แยกจาก coverage [§16.4] | enabled (แบบไม่ระบุ) |
 
 ## ความสัมพันธ์
 

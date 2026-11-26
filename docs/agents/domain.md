@@ -10,7 +10,7 @@ One `CONTEXT.md` at the root covers the whole codebase.
 /
 ├── CONTEXT.md                    ← system context; defers to UBIQUITOUS_LANGUAGE.md
 ├── UBIQUITOUS_LANGUAGE.md        ← canonical term glossary
-├── docs/plans/master_planV1.md   ← requirements source ([LOCKED] / [PROPOSED] / [TBD])
+├── docs/plans/master_planV1.1.md   ← requirements source ([LOCKED] / [PROPOSED] / [TBD])
 ├── docs/adr/                     ← architectural decision records
 └── backend/ frontend/ mt5/       ← (planned, master plan §7.1)
 ```
@@ -23,7 +23,7 @@ context, plus context-scoped `docs/adr/` — once module boundaries harden into 
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root — the system-context doc; the **canonical term glossary is `UBIQUITOUS_LANGUAGE.md`** (`CONTEXT.md` points at it and defers to it on any conflict).
-- **`docs/plans/master_planV1.md`** — requirement IDs (TRD/PFT/RSK/…), shared business rules (§4), module ownership (§2).
+- **`docs/plans/master_planV1.1.md`** — requirement IDs (TRD/PFT/RSK/…), shared business rules (§4), module ownership (§2).
 - **`docs/adr/`** — read ADRs touching the area you're about to work in before proposing alternatives.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't

@@ -7,7 +7,7 @@
 - [[talk-thai]] — chat and reports to the developer are in Thai; identifiers stay English
 
 ## project — ongoing goals / constraints not derivable from the code
-- [[master-plan-authority]] — `docs/plans/master_planV1.md` is the requirements source; [LOCKED] items change only via Change Request
+- [[master-plan-authority]] — `docs/plans/master_planV1.1.md` is the requirements source; [LOCKED] items change only via Change Request
 - [[no-real-money]] — no live funds, credentials or real account data anywhere during build and test
 
 ## reference — pointers to external resources (URLs, dashboards, tickets)

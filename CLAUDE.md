@@ -4,7 +4,9 @@ Agent operating manual. OrionFX is an **agent-primary** T4 repo (Slow-Inc): the 
 
 ## Engineering north-star
 
-A personal XAUUSD AI auto-trading bot on MT5 where **risk is independent of AI**: AI proposes, the Risk & Execution Engine (M06) decides, and the MQL5 Execution EA is the only trade writer. Safety and refusal-when-uncertain outrank profit and availability. Requirements of record: `docs/plans/master_planV1.md` — [LOCKED] items change only through a Change Request (§13.1).
+A personal XAUUSD AI auto-trading bot on MT5 where **risk is independent of AI**: AI proposes, the Risk & Execution Engine (M06) decides, and the MQL5 Execution EA is the only trade writer. Safety and refusal-when-uncertain outrank profit and availability. Requirements of record: `docs/plans/master_planV1.1.md` — [LOCKED] items change only through a Change Request (§13.1).
+
+**Catalog honesty (V1.1 §16.4):** never report a **Catalog Item** as delivered unless its **Coverage State** says so with evidence; planned/blocked/excluded rows are tracked, not hidden; no 100% coverage claim.
 
 **Never:** use real money, real credentials, or real account data during build/test; let an LLM send broker orders; touch **Manual Positions**; claim guaranteed profit or that an **Emergency SL** / **Emergency Stop** fills at an exact price.
 
@@ -35,7 +37,7 @@ Companion ecosystems (recorded 2026-11-27):
 
 ```
 CLAUDE.md  CONTEXT.md  UBIQUITOUS_LANGUAGE.md  PRODUCT.md  DESIGN.md  DONE.md
-docs/plans/master_planV1.md     requirements source
+docs/plans/master_planV1.1.md     requirements source
 docs/OPEN-WORK-LEDGER.md        open work
 docs/agents/                    domain.md, workflow.md, issue-tracker.md, triage-labels.md
 docs/adr/  docs/reports/  docs/research/  docs/superpowers/{plans,specs}/

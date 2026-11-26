@@ -5,7 +5,7 @@
 - Reviewers: M06, M08 owners (contracts they consume); X02 (acceptance)
 - Status: Implemented (see issue #5)
 - Version: 0.1
-- Parent: `docs/plans/master_planV1.md` (V1.0)
+- Parent: `docs/plans/master_planV1.1.md` (V1.1; drafted against V1.0, whose rules V1.1 keeps unchanged. V1.1 §15–16 obligations for this module are tracked in #21)
 - Target phase: P0–P1
 - Requirement IDs: INT-01, INT-02, INT-03, INT-04; SYS-01; cross-cutting §8.1–8.2, §9.1, §9.3
 

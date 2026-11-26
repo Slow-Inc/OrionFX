@@ -1,3 +1,5 @@
+> **Superseded:** this is V1.0, kept as historical reference. New work follows [`master_planV1.1.md`](master_planV1.1.md) (V1.1 §16.7).
+
 # XAUUSD AI Auto Trading Bot — Master Plan V1.0
 
 > **ไฟล์:** `master_planV1.md`  
