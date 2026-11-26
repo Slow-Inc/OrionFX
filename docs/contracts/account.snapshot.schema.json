@@ -1,0 +1,90 @@
+{
+  "$defs": {
+    "DataQuality": {
+      "enum": [
+        "OK",
+        "STALE",
+        "DEGRADED",
+        "MISSING"
+      ],
+      "title": "DataQuality",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "balance": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Balance"
+    },
+    "connected": {
+      "title": "Connected",
+      "type": "boolean"
+    },
+    "currency": {
+      "title": "Currency",
+      "type": "string"
+    },
+    "equity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Equity"
+    },
+    "free_margin": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Free Margin"
+    },
+    "margin": {
+      "anyOf": [
+        {
+          "ge": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Margin"
+    },
+    "observed_at": {
+      "format": "date-time",
+      "title": "Observed At",
+      "type": "string"
+    },
+    "quote_status": {
+      "$ref": "#/$defs/DataQuality"
+    }
+  },
+  "required": [
+    "currency",
+    "balance",
+    "equity",
+    "margin",
+    "free_margin",
+    "connected",
+    "quote_status",
+    "observed_at"
+  ],
+  "title": "AccountSnapshot",
+  "type": "object"
+}

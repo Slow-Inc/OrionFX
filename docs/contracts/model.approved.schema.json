@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "Mode": {
+      "description": "Account operating mode \u2014 isolated from control and cycle lifecycle (\u00a79.1).",
+      "enum": [
+        "SHADOW",
+        "DEMO",
+        "LIVE"
+      ],
+      "title": "Mode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "allowed_modes": {
+      "items": {
+        "$ref": "#/$defs/Mode"
+      },
+      "minItems": 1,
+      "title": "Allowed Modes",
+      "type": "array"
+    },
+    "approval_ref": {
+      "title": "Approval Ref",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "model_id": {
+      "title": "Model Id",
+      "type": "string"
+    },
+    "model_version": {
+      "title": "Model Version",
+      "type": "string"
+    },
+    "policy_ref": {
+      "title": "Policy Ref",
+      "type": "string"
+    }
+  },
+  "required": [
+    "model_id",
+    "model_version",
+    "approval_ref",
+    "evidence_refs",
+    "policy_ref",
+    "allowed_modes"
+  ],
+  "title": "ModelApproved",
+  "type": "object"
+}

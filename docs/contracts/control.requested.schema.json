@@ -1,0 +1,49 @@
+{
+  "$defs": {
+    "ControlCommand": {
+      "description": "The five control commands (\u00a74.5).",
+      "enum": [
+        "START",
+        "PAUSE",
+        "FINISH_CYCLE",
+        "EMERGENCY_STOP",
+        "APPROVE_RECOVERY"
+      ],
+      "title": "ControlCommand",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "title": "Actor",
+      "type": "string"
+    },
+    "command": {
+      "$ref": "#/$defs/ControlCommand"
+    },
+    "command_id": {
+      "title": "Command Id",
+      "type": "string"
+    },
+    "expected_state_version": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected State Version"
+    }
+  },
+  "required": [
+    "command_id",
+    "command",
+    "actor"
+  ],
+  "title": "ControlRequested",
+  "type": "object"
+}

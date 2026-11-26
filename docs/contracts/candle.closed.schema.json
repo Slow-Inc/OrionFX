@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "Timeframe": {
+      "enum": [
+        "M5",
+        "M15",
+        "H1"
+      ],
+      "title": "Timeframe",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "available_at": {
+      "format": "date-time",
+      "title": "Available At",
+      "type": "string"
+    },
+    "close": {
+      "gt": 0,
+      "title": "Close",
+      "type": "string"
+    },
+    "close_time": {
+      "format": "date-time",
+      "title": "Close Time",
+      "type": "string"
+    },
+    "high": {
+      "gt": 0,
+      "title": "High",
+      "type": "string"
+    },
+    "low": {
+      "gt": 0,
+      "title": "Low",
+      "type": "string"
+    },
+    "open": {
+      "gt": 0,
+      "title": "Open",
+      "type": "string"
+    },
+    "open_time": {
+      "format": "date-time",
+      "title": "Open Time",
+      "type": "string"
+    },
+    "spread": {
+      "anyOf": [
+        {
+          "ge": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Spread"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "timeframe": {
+      "$ref": "#/$defs/Timeframe"
+    },
+    "volume": {
+      "anyOf": [
+        {
+          "ge": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Volume"
+    }
+  },
+  "required": [
+    "symbol",
+    "timeframe",
+    "open_time",
+    "close_time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "available_at"
+  ],
+  "title": "CandleClosed",
+  "type": "object"
+}

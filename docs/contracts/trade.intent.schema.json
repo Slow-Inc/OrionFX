@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "IntentAction": {
+      "enum": [
+        "OPEN",
+        "ADD",
+        "CLOSE",
+        "CLOSE_ALL"
+      ],
+      "title": "IntentAction",
+      "type": "string"
+    },
+    "Mode": {
+      "description": "Account operating mode \u2014 isolated from control and cycle lifecycle (\u00a79.1).",
+      "enum": [
+        "SHADOW",
+        "DEMO",
+        "LIVE"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "Side": {
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "title": "Side",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A proposal to trade \u2014 never a broker order (\u00a78.3).",
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/IntentAction"
+    },
+    "cycle_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Cycle Id"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "expected_value_usd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Expected Value Usd"
+    },
+    "intent_id": {
+      "title": "Intent Id",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/Mode"
+    },
+    "position_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Position Refs",
+      "type": "array"
+    },
+    "prediction_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Prediction Ids",
+      "type": "array"
+    },
+    "requested_lot": {
+      "anyOf": [
+        {
+          "gt": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Requested Lot"
+    },
+    "side": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Side"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "strategy_id": {
+      "title": "Strategy Id",
+      "type": "string"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    }
+  },
+  "required": [
+    "intent_id",
+    "decision_id",
+    "action",
+    "side",
+    "symbol",
+    "requested_lot",
+    "strategy_id",
+    "cycle_id",
+    "mode",
+    "expected_value_usd",
+    "prediction_ids",
+    "valid_until"
+  ],
+  "title": "TradeIntent",
+  "type": "object"
+}

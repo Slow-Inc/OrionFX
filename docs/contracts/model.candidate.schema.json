@@ -1,0 +1,65 @@
+{
+  "$defs": {
+    "ModelStatus": {
+      "enum": [
+        "CANDIDATE",
+        "APPROVED",
+        "CHAMPION",
+        "RETIRED",
+        "REJECTED"
+      ],
+      "title": "ModelStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Artifact Sha256",
+      "type": "string"
+    },
+    "dataset_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Dataset Refs",
+      "type": "array"
+    },
+    "evaluation": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Evaluation",
+      "type": "object"
+    },
+    "model_id": {
+      "title": "Model Id",
+      "type": "string"
+    },
+    "model_version": {
+      "title": "Model Version",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/ModelStatus",
+      "default": "CANDIDATE"
+    }
+  },
+  "required": [
+    "model_id",
+    "model_version",
+    "dataset_refs",
+    "artifact_sha256",
+    "evaluation"
+  ],
+  "title": "ModelCandidate",
+  "type": "object"
+}

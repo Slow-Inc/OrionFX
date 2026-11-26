@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "Confidence": {
+      "additionalProperties": false,
+      "description": "A 0-1 score is never shipped without what it means (master plan \u00a74.6).\n\n`semantics` names the target and method, e.g. \"calibrated P(close up) over 3 H1 bars\"\nor \"uncalibrated LLM score\". An LLM score is not a calibrated probability.",
+      "properties": {
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "semantics": {
+          "minLength": 1,
+          "title": "Semantics",
+          "type": "string"
+        },
+        "value": {
+          "ge": 0,
+          "le": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "semantics"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "DataQuality": {
+      "enum": [
+        "OK",
+        "STALE",
+        "DEGRADED",
+        "MISSING"
+      ],
+      "title": "DataQuality",
+      "type": "string"
+    },
+    "Direction": {
+      "enum": [
+        "UP",
+        "DOWN",
+        "NEUTRAL"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "ForecastLineage": {
+      "description": "Chart-only and news-enhanced forecasts keep separate lineage (PRE-04, AT-17).",
+      "enum": [
+        "CHART_ONLY",
+        "NEWS_ENHANCED"
+      ],
+      "title": "ForecastLineage",
+      "type": "string"
+    },
+    "Timeframe": {
+      "enum": [
+        "M5",
+        "M15",
+        "H1"
+      ],
+      "title": "Timeframe",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "data_quality": {
+      "$ref": "#/$defs/DataQuality"
+    },
+    "direction": {
+      "$ref": "#/$defs/Direction"
+    },
+    "expected_range_high": {
+      "anyOf": [
+        {
+          "gt": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Range High"
+    },
+    "expected_range_low": {
+      "anyOf": [
+        {
+          "gt": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Range Low"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "horizon": {
+      "$ref": "#/$defs/Timeframe"
+    },
+    "horizon_bars": {
+      "exclusiveMinimum": 0,
+      "title": "Horizon Bars",
+      "type": "integer"
+    },
+    "input_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Input Refs",
+      "type": "array"
+    },
+    "lineage": {
+      "$ref": "#/$defs/ForecastLineage"
+    },
+    "model_id": {
+      "title": "Model Id",
+      "type": "string"
+    },
+    "model_version": {
+      "title": "Model Version",
+      "type": "string"
+    },
+    "prediction_id": {
+      "title": "Prediction Id",
+      "type": "string"
+    },
+    "probability": {
+      "$ref": "#/$defs/Confidence"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    }
+  },
+  "required": [
+    "prediction_id",
+    "model_id",
+    "model_version",
+    "lineage",
+    "horizon",
+    "horizon_bars",
+    "direction",
+    "probability",
+    "data_quality",
+    "input_refs",
+    "generated_at",
+    "valid_until"
+  ],
+  "title": "PredictionGenerated",
+  "type": "object"
+}

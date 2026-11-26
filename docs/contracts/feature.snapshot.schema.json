@@ -1,0 +1,68 @@
+{
+  "$defs": {
+    "DataQuality": {
+      "enum": [
+        "OK",
+        "STALE",
+        "DEGRADED",
+        "MISSING"
+      ],
+      "title": "DataQuality",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "available_at": {
+      "format": "date-time",
+      "title": "Available At",
+      "type": "string"
+    },
+    "feature_schema": {
+      "title": "Feature Schema",
+      "type": "string"
+    },
+    "quality": {
+      "$ref": "#/$defs/DataQuality"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    },
+    "values": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Values",
+      "type": "object"
+    }
+  },
+  "required": [
+    "symbol",
+    "feature_schema",
+    "values",
+    "quality",
+    "as_of",
+    "available_at",
+    "valid_until"
+  ],
+  "title": "FeatureSnapshot",
+  "type": "object"
+}
