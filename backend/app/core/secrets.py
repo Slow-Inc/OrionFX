@@ -35,7 +35,7 @@ def redact(value: Any, secrets: Iterable[str] = ()) -> Any:
 
     def walk(v: Any, key: str | None = None) -> Any:
         if key is not None and SECRET_KEY.search(key):
-            return MASK  # whatever its shape: str, list, dict, model
+            return None if v is None else MASK  # whatever its shape; "unset" stays visible
         if isinstance(v, BaseModel):
             v = v.model_dump(mode="json")
         if isinstance(v, dict):
@@ -51,3 +51,20 @@ def redact(value: Any, secrets: Iterable[str] = ()) -> Any:
         return walk(str(v))  # unknown objects are logged as text, still scrubbed
 
     return walk(value)
+
+
+def unredact(incoming: Any, current: Any) -> Any:
+    """Inverse of `redact` for round-trips: wherever `incoming` holds MASK under a
+    secret-named key, put back the value stored in `current`."""
+    if isinstance(incoming, dict):
+        cur = current if isinstance(current, dict) else {}
+        out: dict[str, Any] = {}
+        for k, v in incoming.items():
+            if v == MASK and SECRET_KEY.search(str(k)):
+                out[k] = cur.get(k)
+            else:
+                out[k] = unredact(v, cur.get(k))
+        return out
+    if isinstance(incoming, list):
+        return [unredact(v, None) for v in incoming]
+    return incoming
