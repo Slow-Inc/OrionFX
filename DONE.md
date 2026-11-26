@@ -6,6 +6,18 @@
 
 ---
 
+## M08 slice A — storage, journal, config, lease, backup, health, logging (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, branch `feat/8-m08-storage`)
+
+**Goal:** the durable local core every module shares (PRD-08 #7, slice #8).
+
+**Shipped:** `migrations/0001_core.sql`; `backend/app/storage/{db,journal,flags,lease,backup,config_store,audit}.py`; `backend/app/core/{config,secrets,health,logging}.py`; `RiskProfile`, `Clock`, `utc_now_iso`.
+
+**Validation:** `uv run pytest` → 76 passed; ruff + mypy clean. Five mutation probes (dedupe, offset monotonicity, lease exclusivity, restore reconcile flag, LIVE in owner config) each turned the matching test red. Review fixes: redaction of nested/list secrets, atomic reconcile marker on restore, migration splitting and concurrent-migrate race, transaction rollback/commit safety + savepoints, URI-safe backup paths.
+
+**Next:** slice B (#9) API/auth/WS.
+
+---
+
 ## X01 shared contracts + P1 Python foundation (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, branch `feat/5-x01-contracts`)
 
 **Goal:** one typed vocabulary every module builds against (PRD-X01, issue #5).

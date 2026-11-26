@@ -11,6 +11,14 @@ class Mode(StrEnum):
     LIVE = "LIVE"
 
 
+class RiskProfile(StrEnum):
+    """Profiles sit under the owner's max loss (RSK-09); Live starts LOW."""
+
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+
+
 class ControlState(StrEnum):
     STOPPED = "STOPPED"
     STARTING = "STARTING"
