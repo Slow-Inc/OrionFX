@@ -1,0 +1,119 @@
+{
+  "$defs": {
+    "Eligibility": {
+      "description": "\u00a716.4 operational eligibility, per context and version.",
+      "enum": [
+        "disabled",
+        "shadow_only",
+        "demo_eligible",
+        "live_eligible"
+      ],
+      "title": "Eligibility",
+      "type": "string"
+    },
+    "Mode": {
+      "description": "Account operating mode \u2014 isolated from control and cycle lifecycle (\u00a79.1).",
+      "enum": [
+        "SHADOW",
+        "DEMO",
+        "LIVE"
+      ],
+      "title": "Mode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "approved_modes": {
+      "items": {
+        "$ref": "#/$defs/Mode"
+      },
+      "title": "Approved Modes",
+      "type": "array"
+    },
+    "context": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Context",
+      "type": "object"
+    },
+    "eligibility": {
+      "$ref": "#/$defs/Eligibility"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Expires At"
+    },
+    "policy_version": {
+      "minLength": 1,
+      "title": "Policy Version",
+      "type": "string"
+    },
+    "revoked_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Revoked At"
+    },
+    "subject_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Subject Hash",
+      "type": "string"
+    },
+    "subject_kind": {
+      "enum": [
+        "strategy",
+        "technique",
+        "composition",
+        "model"
+      ],
+      "title": "Subject Kind",
+      "type": "string"
+    },
+    "subject_ref": {
+      "title": "Subject Ref",
+      "type": "string"
+    },
+    "user_enabled": {
+      "title": "User Enabled",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "subject_hash",
+    "subject_kind",
+    "subject_ref",
+    "user_enabled",
+    "eligibility",
+    "approved_modes",
+    "context",
+    "evidence_refs",
+    "policy_version",
+    "expires_at",
+    "revoked_at"
+  ],
+  "title": "EligibilityRecord",
+  "type": "object"
+}

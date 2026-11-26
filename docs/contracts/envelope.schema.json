@@ -1093,6 +1093,203 @@
       "title": "Direction",
       "type": "string"
     },
+    "Eligibility": {
+      "description": "\u00a716.4 operational eligibility, per context and version.",
+      "enum": [
+        "disabled",
+        "shadow_only",
+        "demo_eligible",
+        "live_eligible"
+      ],
+      "title": "Eligibility",
+      "type": "string"
+    },
+    "EligibilityRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "approved_modes": {
+          "items": {
+            "$ref": "#/$defs/Mode"
+          },
+          "title": "Approved Modes",
+          "type": "array"
+        },
+        "context": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Context",
+          "type": "object"
+        },
+        "eligibility": {
+          "$ref": "#/$defs/Eligibility"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expires At"
+        },
+        "policy_version": {
+          "minLength": 1,
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "revoked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revoked At"
+        },
+        "subject_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Subject Hash",
+          "type": "string"
+        },
+        "subject_kind": {
+          "enum": [
+            "strategy",
+            "technique",
+            "composition",
+            "model"
+          ],
+          "title": "Subject Kind",
+          "type": "string"
+        },
+        "subject_ref": {
+          "title": "Subject Ref",
+          "type": "string"
+        },
+        "user_enabled": {
+          "title": "User Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subject_hash",
+        "subject_kind",
+        "subject_ref",
+        "user_enabled",
+        "eligibility",
+        "approved_modes",
+        "context",
+        "evidence_refs",
+        "policy_version",
+        "expires_at",
+        "revoked_at"
+      ],
+      "title": "EligibilityRecord",
+      "type": "object"
+    },
+    "EligibilityRecordEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "strategy.eligibility.updated",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/EligibilityRecord"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "EligibilityRecordEvent",
+      "type": "object"
+    },
     "ExecutionState": {
       "enum": [
         "PENDING",
@@ -2363,6 +2560,25 @@
       "title": "NewsAssessmentEvent",
       "type": "object"
     },
+    "ParameterBound": {
+      "additionalProperties": false,
+      "properties": {
+        "high": {
+          "title": "High",
+          "type": "string"
+        },
+        "low": {
+          "title": "Low",
+          "type": "string"
+        }
+      },
+      "required": [
+        "low",
+        "high"
+      ],
+      "title": "ParameterBound",
+      "type": "object"
+    },
     "PredictionGenerated": {
       "additionalProperties": false,
       "properties": {
@@ -2869,6 +3085,593 @@
       "title": "Side",
       "type": "string"
     },
+    "StrategyManifest": {
+      "additionalProperties": false,
+      "description": "A versioned, hashed strategy artifact. Never executable by itself.",
+      "properties": {
+        "artifact_hash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Artifact Hash",
+          "type": "string"
+        },
+        "catalog_ids": {
+          "items": {
+            "pattern": "^CAT-[A-Z]\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Catalog Ids",
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "family": {
+          "title": "Family",
+          "type": "string"
+        },
+        "max_latency_ms": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Latency Ms"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ParameterBound"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "risk_tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Risk Tags",
+          "type": "array"
+        },
+        "strategy_id": {
+          "minLength": 1,
+          "title": "Strategy Id",
+          "type": "string"
+        },
+        "supported_modes": {
+          "items": {
+            "$ref": "#/$defs/Mode"
+          },
+          "minItems": 1,
+          "title": "Supported Modes",
+          "type": "array"
+        },
+        "technique_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Technique Refs",
+          "type": "array"
+        },
+        "timeframes": {
+          "items": {
+            "$ref": "#/$defs/Timeframe"
+          },
+          "minItems": 1,
+          "title": "Timeframes",
+          "type": "array"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "warmup_bars": {
+          "minimum": 0,
+          "title": "Warmup Bars",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "strategy_id",
+        "version",
+        "artifact_hash",
+        "family",
+        "catalog_ids",
+        "technique_refs",
+        "timeframes",
+        "warmup_bars",
+        "parameters",
+        "risk_tags",
+        "supported_modes"
+      ],
+      "title": "StrategyManifest",
+      "type": "object"
+    },
+    "StrategyManifestEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "strategy.candidate",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/StrategyManifest"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "StrategyManifestEvent",
+      "type": "object"
+    },
+    "StrategyProposal": {
+      "additionalProperties": false,
+      "description": "What M05 proposes; M06 decides. Never a broker order (\u00a74.6).",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/IntentAction"
+        },
+        "composition_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Composition Id"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "cost_estimate_usd": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Estimate Usd"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "expected_value_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Value Usd"
+        },
+        "horizon": {
+          "$ref": "#/$defs/Timeframe"
+        },
+        "proposal_id": {
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "requested_lot": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Requested Lot"
+        },
+        "strategy_id": {
+          "title": "Strategy Id",
+          "type": "string"
+        },
+        "strategy_version": {
+          "title": "Strategy Version",
+          "type": "string"
+        },
+        "technique_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Technique Refs",
+          "type": "array"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal_id",
+        "strategy_id",
+        "strategy_version",
+        "technique_refs",
+        "composition_id",
+        "decision_id",
+        "direction",
+        "action",
+        "horizon",
+        "expected_value_usd",
+        "cost_estimate_usd",
+        "requested_lot",
+        "valid_until",
+        "rationale",
+        "constraints"
+      ],
+      "title": "StrategyProposal",
+      "type": "object"
+    },
+    "StrategyProposalEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "strategy.proposed",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/StrategyProposal"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "StrategyProposalEvent",
+      "type": "object"
+    },
+    "TechniqueObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "input_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "quality_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Quality Flags",
+          "type": "array"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "technique_id": {
+          "title": "Technique Id",
+          "type": "string"
+        },
+        "technique_version": {
+          "title": "Technique Version",
+          "type": "string"
+        },
+        "uncertainty": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Uncertainty"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "technique_id",
+        "technique_version",
+        "input_refs",
+        "available_at",
+        "valid_until",
+        "values",
+        "unit",
+        "uncertainty",
+        "quality_flags",
+        "reason_codes"
+      ],
+      "title": "TechniqueObservation",
+      "type": "object"
+    },
+    "TechniqueObservationEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "technique.observed",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TechniqueObservation"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "TechniqueObservationEvent",
+      "type": "object"
+    },
     "Timeframe": {
       "enum": [
         "M5",
@@ -3103,6 +3906,10 @@
       "prediction.generated": "#/$defs/PredictionGeneratedEvent",
       "risk.decision": "#/$defs/RiskDecisionEvent",
       "risk.updated": "#/$defs/RiskUpdatedEvent",
+      "strategy.candidate": "#/$defs/StrategyManifestEvent",
+      "strategy.eligibility.updated": "#/$defs/EligibilityRecordEvent",
+      "strategy.proposed": "#/$defs/StrategyProposalEvent",
+      "technique.observed": "#/$defs/TechniqueObservationEvent",
       "trade.intent": "#/$defs/TradeIntentEvent"
     },
     "propertyName": "event_type"
@@ -3161,6 +3968,18 @@
     },
     {
       "$ref": "#/$defs/HealthUpdatedEvent"
+    },
+    {
+      "$ref": "#/$defs/TechniqueObservationEvent"
+    },
+    {
+      "$ref": "#/$defs/StrategyProposalEvent"
+    },
+    {
+      "$ref": "#/$defs/StrategyManifestEvent"
+    },
+    {
+      "$ref": "#/$defs/EligibilityRecordEvent"
     }
   ]
 }

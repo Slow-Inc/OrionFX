@@ -54,7 +54,11 @@ def _catalog_from_master_plan() -> set[str]:
     """Derive the event set from master plan §8.2 instead of listing it here."""
     text = (REPO / "docs/plans/master_planV1.1.md").read_text(encoding="utf-8")
     section = text.split("### 8.2 Event catalog and ownership", 1)[1].split("###", 1)[0]
-    return set(re.findall(r"^\| `([a-z_]+\.[a-z_]+)` \|", section, flags=re.MULTILINE))
+    events = set(re.findall(r"^\| `([a-z_]+\.[a-z_]+)` \|", section, flags=re.MULTILINE))
+    # V1.1 §15.5 adds the strategy/technique events on one "Proposed events:" line.
+    assert "Proposed events:" in text, "§15.5 proposed-events line not found"
+    proposed = text.split("Proposed events:", 1)[1].splitlines()[0]
+    return events | set(re.findall(r"`([a-z_]+(?:\.[a-z_]+)+)` \(", proposed))
 
 
 def test_catalog_covers_every_master_plan_event() -> None:

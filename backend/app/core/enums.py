@@ -142,3 +142,33 @@ class ModelStatus(StrEnum):
     CHAMPION = "CHAMPION"
     RETIRED = "RETIRED"
     REJECTED = "REJECTED"
+
+
+class CatalogClass(StrEnum):
+    """§16.2: Required, Conditional, research-only (Shadow/Demo), Excluded."""
+
+    R = "R"
+    C = "C"
+    D = "D"
+    X = "X"
+
+
+class CoverageState(StrEnum):
+    """§16.4 implementation coverage of a catalog row (not operational eligibility)."""
+
+    PLANNED = "planned"
+    BLOCKED = "blocked"
+    IMPLEMENTED = "implemented"
+    TESTED = "tested"
+    CERTIFIED = "certified"
+    SUSPENDED = "suspended"
+    EXCLUDED = "excluded"
+
+
+class Eligibility(StrEnum):
+    """§16.4 operational eligibility, per context and version."""
+
+    DISABLED = "disabled"
+    SHADOW_ONLY = "shadow_only"
+    DEMO_ELIGIBLE = "demo_eligible"
+    LIVE_ELIGIBLE = "live_eligible"

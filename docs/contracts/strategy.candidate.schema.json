@@ -1,0 +1,151 @@
+{
+  "$defs": {
+    "Mode": {
+      "description": "Account operating mode \u2014 isolated from control and cycle lifecycle (\u00a79.1).",
+      "enum": [
+        "SHADOW",
+        "DEMO",
+        "LIVE"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "ParameterBound": {
+      "additionalProperties": false,
+      "properties": {
+        "high": {
+          "title": "High",
+          "type": "string"
+        },
+        "low": {
+          "title": "Low",
+          "type": "string"
+        }
+      },
+      "required": [
+        "low",
+        "high"
+      ],
+      "title": "ParameterBound",
+      "type": "object"
+    },
+    "Timeframe": {
+      "enum": [
+        "M5",
+        "M15",
+        "H1"
+      ],
+      "title": "Timeframe",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A versioned, hashed strategy artifact. Never executable by itself.",
+  "properties": {
+    "artifact_hash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Artifact Hash",
+      "type": "string"
+    },
+    "catalog_ids": {
+      "items": {
+        "pattern": "^CAT-[A-Z]\\d{2}-\\d{2}$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Catalog Ids",
+      "type": "array"
+    },
+    "dependencies": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "family": {
+      "title": "Family",
+      "type": "string"
+    },
+    "max_latency_ms": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Latency Ms"
+    },
+    "parameters": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ParameterBound"
+      },
+      "title": "Parameters",
+      "type": "object"
+    },
+    "risk_tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Risk Tags",
+      "type": "array"
+    },
+    "strategy_id": {
+      "minLength": 1,
+      "title": "Strategy Id",
+      "type": "string"
+    },
+    "supported_modes": {
+      "items": {
+        "$ref": "#/$defs/Mode"
+      },
+      "minItems": 1,
+      "title": "Supported Modes",
+      "type": "array"
+    },
+    "technique_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Technique Refs",
+      "type": "array"
+    },
+    "timeframes": {
+      "items": {
+        "$ref": "#/$defs/Timeframe"
+      },
+      "minItems": 1,
+      "title": "Timeframes",
+      "type": "array"
+    },
+    "version": {
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    },
+    "warmup_bars": {
+      "minimum": 0,
+      "title": "Warmup Bars",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "strategy_id",
+    "version",
+    "artifact_hash",
+    "family",
+    "catalog_ids",
+    "technique_refs",
+    "timeframes",
+    "warmup_bars",
+    "parameters",
+    "risk_tags",
+    "supported_modes"
+  ],
+  "title": "StrategyManifest",
+  "type": "object"
+}
