@@ -59,6 +59,27 @@ class Journal:
         rows = self.read_raw_since(seq, limit=limit, event_types=event_types)
         return [StoredEvent(s, parse_event(body)) for s, body in rows]
 
+    def recent(self, event_types: Sequence[str], *, limit: int = 50) -> list[StoredEvent]:
+        """Newest first."""
+        marks = ",".join("?" * len(event_types))
+        rows = self._conn.execute(
+            f"SELECT seq, body FROM events WHERE event_type IN ({marks}) ORDER BY seq DESC LIMIT ?",
+            [*event_types, limit],
+        ).fetchall()
+        return [StoredEvent(int(r["seq"]), parse_event(r["body"])) for r in rows]
+
+    def find(self, event_type: str, payload_field: str, value: str) -> StoredEvent | None:
+        """Latest event of `event_type` whose payload `payload_field` equals `value`."""
+        if not payload_field.isidentifier():
+            raise ValueError("payload_field must be a plain field name")
+        row = self._conn.execute(
+            "SELECT seq, body FROM events WHERE event_type = ?"
+            f" AND json_extract(body, '$.payload.{payload_field}') = ?"
+            " ORDER BY seq DESC LIMIT 1",
+            (event_type, value),
+        ).fetchone()
+        return StoredEvent(int(row["seq"]), parse_event(row["body"])) if row else None
+
     def latest_seq(self) -> int:
         row = self._conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
         return int(row[0])

@@ -4,11 +4,14 @@ version = "0.1.0"
 description = "Personal XAUUSD AI auto-trading bot on MT5 (Demo/Shadow only until qualified)"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi>=0.115",
     "pydantic>=2.9",
+    "uvicorn>=0.32",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28",
     "mypy>=1.13",
     "pytest>=8.3",
     "ruff>=0.8",

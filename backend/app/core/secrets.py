@@ -35,7 +35,7 @@ def redact(value: Any, secrets: Iterable[str] = ()) -> Any:
 
     def walk(v: Any, key: str | None = None) -> Any:
         if key is not None and SECRET_KEY.search(key):
-            return MASK  # whatever its shape: str, list, dict, model
+            return None if v is None else MASK  # whatever its shape; "unset" stays visible
         if isinstance(v, BaseModel):
             v = v.model_dump(mode="json")
         if isinstance(v, dict):
