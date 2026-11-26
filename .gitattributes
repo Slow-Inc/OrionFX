@@ -1,0 +1,5 @@
+# Hook and guard scripts run under bash/sh — CRLF breaks them. Keep LF on every checkout.
+.claude/hooks/** text eol=lf
+.githooks/** text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf

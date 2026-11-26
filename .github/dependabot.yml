@@ -1,0 +1,9 @@
+# Dependabot version updates. Only GitHub Actions exists today; add `pip`
+# (backend, pyproject.toml) and `bun`/`npm` (frontend) entries when P1
+# Foundation lands those manifests.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
