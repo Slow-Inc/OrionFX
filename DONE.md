@@ -6,6 +6,18 @@
 
 ---
 
+## M06 slice C — cycle book, Profit Target, basket trailing, close workflow (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/15-m06-cycle`)
+
+**Goal:** a Cycle that closes on its Profit Target or trailing floor, and only claims CLOSED when the broker agrees (PRD-06 #12, slice #15; PFT-01..05, AT-01..04, CAT-R01-04/05).
+
+**Shipped:** `backend/app/profit/{cycle,close}.py`, `migrations/0004_cycles.sql`, trailing bounds in `RiskPolicy`, `OwnershipRegistry.positions_of_cycle`, shared `dec_or_none`/`text_or_none` in `app.storage.db`.
+
+**Validation:** `uv run pytest` → 205 passed; ruff + mypy clean. Mutation probes (floor monotonic, reconcile-first, CLOSING latch, broker-state check, vanished position keeps the pass going, pending-order cancel, sticky order blocks CLOSED) each turned the matching test red. Review fixes: non-positive target refused (code + CHECK); activation capped at 0.9 x target so trailing cannot be switched off; a vanished position no longer stops the pass; bot pending orders cancelled and required gone before CLOSED; Deal commission/swap sign documented (adapter normalises MT5); one query per cycle's positions/deals. Skipped: grouping trailing fields into a sub-model (no behaviour change; revisit with M05 proposals).
+
+**Next:** slice D (#16) engine wiring, control, restart reconcile, AT-01..12.
+
+---
+
 ## M06 slice B — drawdown, protected policy, pre-trade checks, risk veto (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/14-m06-risk`)
 
 **Goal:** the AI-independent decision on every trade proposal, and the account drawdown lock (PRD-06 #12, slice #14; V1.1 UST-03/06/08, CAT-X02-*).

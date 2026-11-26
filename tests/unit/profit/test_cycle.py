@@ -11,9 +11,16 @@ import pytest
 
 from app.core.enums import CloseReason, CycleState, Side
 from app.core.states import IllegalTransition
-from app.execution.broker import CloseRequest, OpenRequest, SendResult, SendStatus
+from app.execution.broker import (
+    BOT_MAGIC,
+    CloseRequest,
+    OpenRequest,
+    SendResult,
+    SendStatus,
+)
 from app.execution.executor import Executor
 from app.execution.fake_broker import FakeBroker, Outcome, Partial
+from app.execution.ownership import OwnershipRegistry
 from app.profit.close import CloseWorkflow
 from app.profit.cycle import CycleBook, TrailingParams, cycle_net
 from app.risk.policy import DEFAULT_POLICY
@@ -258,4 +265,104 @@ def test_cycle_not_closed_while_broker_still_shows_positions(
     book.evaluate(cid, net=D("10"), trailing=NO_TRAIL, policy=DEFAULT_POLICY)
     report = CloseWorkflow(conn, liar, ex, book).run(cid)
     assert not report.closed and report.unresolved
+    assert book.snapshot(cid).state is CycleState.CLOSING
+
+
+# --- review findings -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("target", ["0", "-5"])
+def test_open_cycle_rejects_non_positive_target(
+    conn: sqlite3.Connection, broker: FakeBroker, target: str
+) -> None:
+    book = _book(conn, broker)
+    with pytest.raises(ValueError, match="Profit Target"):
+        book.open_cycle(target_usd=D(target), config_version=1)
+    assert book.open_cycle_id() is None
+
+
+def test_activation_cannot_switch_trailing_off(
+    conn: sqlite3.Connection, broker: FakeBroker
+) -> None:
+    book = _book(conn, broker)
+    cid = book.open_cycle(target_usd=D("10"), config_version=1)
+    huge = TrailingParams(activation_usd=D("1000000000"), distance_usd=D("1"))
+    assert huge.clamped(D("10"), DEFAULT_POLICY).activation_usd < D("10")
+    upd = book.evaluate(cid, net=D("9.99"), trailing=huge, policy=DEFAULT_POLICY)
+    assert upd.trailing_active
+
+
+class VanishingBroker(FakeBroker):
+    """Closing the first position also drops a second one, as an Emergency SL fill would."""
+
+    vanish: str | None = None
+
+    def send_close(self, req: CloseRequest) -> SendResult:
+        result = super().send_close(req)
+        if self.vanish is not None:
+            self._positions.pop(self.vanish, None)
+            self.vanish = None
+        return result
+
+
+def test_a_vanished_position_does_not_stop_the_close_pass(
+    conn: sqlite3.Connection, clock: Clock
+) -> None:
+    b = VanishingBroker(balance=D("1000"), now=T0)
+    b.set_quote("XAUUSD", bid=D("2000.00"), ask=D("2000.00"))
+    book = _book(conn, b)
+    cid = book.open_cycle(target_usd=D("10"), config_version=1)
+    ex = Executor(conn, b, clock=clock)
+    for n in (1, 2, 3):
+        ex.open(
+            OpenRequest(
+                request_id=f"open-{n}",
+                symbol="XAUUSD",
+                side=Side.BUY,
+                volume=D("0.01"),
+                cycle_id=cid,
+            )
+        )
+    _, second, _ = [p.position_id for p in b.positions()]
+    b.vanish = second
+    book.evaluate(cid, net=D("10"), trailing=NO_TRAIL, policy=DEFAULT_POLICY)
+    CloseWorkflow(conn, b, ex, book).run(cid)
+    assert b.positions() == []  # the third position was still closed in the same pass
+
+
+def test_close_cancels_bot_pending_orders_before_closing(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    book = _book(conn, broker)
+    cid = book.open_cycle(target_usd=D("10"), config_version=1)
+    ex = _open_two(conn, broker, clock, cid)
+    order = broker.add_pending("XAUUSD", Side.BUY, D("0.01"), D("1990"), magic=BOT_MAGIC)
+    OwnershipRegistry(conn).link_order(broker.account(), order.order_id, request_id="open-1")
+    manual = broker.add_pending("XAUUSD", Side.BUY, D("0.01"), D("1990"))
+    book.evaluate(cid, net=D("10"), trailing=NO_TRAIL, policy=DEFAULT_POLICY)
+    report = CloseWorkflow(conn, broker, ex, book).run(cid)
+    assert report.closed
+    assert [o.order_id for o in broker.pending_orders()] == [manual.order_id]
+
+
+class StickyOrderBroker(FakeBroker):
+    """Acknowledges a cancel but the order stays working: broker state decides."""
+
+    def cancel_order(self, order_id: str, request_id: str) -> SendResult:
+        return SendResult(SendStatus.ACCEPTED)
+
+
+def test_cycle_not_closed_while_a_bot_order_is_still_working(
+    conn: sqlite3.Connection, clock: Clock
+) -> None:
+    b = StickyOrderBroker(balance=D("1000"), now=T0)
+    b.set_quote("XAUUSD", bid=D("2000.00"), ask=D("2000.00"))
+    book = _book(conn, b)
+    cid = book.open_cycle(target_usd=D("10"), config_version=1)
+    ex = _open_two(conn, b, clock, cid)
+    order = b.add_pending("XAUUSD", Side.BUY, D("0.01"), D("1990"), magic=BOT_MAGIC)
+    OwnershipRegistry(conn).link_order(b.account(), order.order_id, request_id="open-1")
+    book.evaluate(cid, net=D("10"), trailing=NO_TRAIL, policy=DEFAULT_POLICY)
+    report = CloseWorkflow(conn, b, ex, book).run(cid)
+    assert not report.closed
     assert book.snapshot(cid).state is CycleState.CLOSING

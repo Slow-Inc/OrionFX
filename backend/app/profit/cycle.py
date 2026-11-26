@@ -24,6 +24,8 @@ from app.core.states import IllegalTransition, next_cycle_state
 from app.core.time import Clock, utc_now
 from app.execution.broker import AccountInfo
 from app.risk.policy import RiskPolicy
+from app.storage.db import dec_or_none as _dec
+from app.storage.db import text_or_none as _txt
 from app.storage.db import transaction
 
 
@@ -38,10 +40,11 @@ class TrailingParams:
 
     def clamped(self, target: Decimal, policy: RiskPolicy) -> "TrailingParams":
         lo_act = target * policy.trailing_min_activation_fraction
+        hi_act = target * policy.trailing_max_activation_fraction
         lo_dist = target * policy.trailing_min_distance_fraction
         hi_dist = target * policy.trailing_max_distance_fraction
         return TrailingParams(
-            activation_usd=max(self.activation_usd, lo_act),
+            activation_usd=min(max(self.activation_usd, lo_act), hi_act),
             distance_usd=min(max(self.distance_usd, lo_dist), hi_dist),
         )
 
@@ -51,7 +54,7 @@ def default_trailing(target: Decimal, policy: RiskPolicy) -> TrailingParams:
     return TrailingParams(
         activation_usd=target * policy.trailing_default_activation_fraction,
         distance_usd=target * policy.trailing_default_distance_fraction,
-    ).clamped(target, policy)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,8 +71,15 @@ class CycleSnapshot:
     target_triggered: bool
     final_net_usd: Decimal | None
 
+    @property
+    def target_achieved(self) -> bool | None:
+        return None if self.final_net_usd is None else self.final_net_usd >= self.target_usd
+
+    @property
+    def cycle_win(self) -> bool | None:
+        return None if self.final_net_usd is None else self.final_net_usd > 0
+
     def as_event(self, unresolved: list[str] | None = None) -> CycleUpdated:
-        achieved = None if self.final_net_usd is None else self.final_net_usd >= self.target_usd
         return CycleUpdated(
             state=self.state,
             target_usd=self.target_usd,
@@ -80,7 +90,7 @@ class CycleSnapshot:
             final_net_usd=self.final_net_usd,
             close_reason=self.close_reason,
             target_triggered=self.target_triggered,
-            target_achieved=achieved,
+            target_achieved=self.target_achieved,
             unresolved=unresolved or [],
         )
 
@@ -89,14 +99,6 @@ class CycleSnapshot:
 class CycleStats:
     cycle_win: bool | None
     target_achieved: bool | None
-
-
-def _dec(v: str | None) -> Decimal | None:
-    return None if v is None else Decimal(v)
-
-
-def _txt(v: Decimal | None) -> str | None:
-    return None if v is None else str(v)
 
 
 class CycleBook:
@@ -138,13 +140,11 @@ class CycleBook:
 
     def stats(self, cycle_id: str) -> CycleStats:
         s = self.snapshot(cycle_id)
-        if s.final_net_usd is None:
-            return CycleStats(None, None)
-        return CycleStats(s.final_net_usd > 0, s.final_net_usd >= s.target_usd)
+        return CycleStats(s.cycle_win, s.target_achieved)
 
     # --- writes ------------------------------------------------------------------------
 
-    def _save(self, s: CycleSnapshot, *, closed: bool = False) -> None:
+    def _save(self, s: CycleSnapshot) -> None:
         self._conn.execute(
             "UPDATE cycles SET state = ?, last_net = ?, peak_net = ?, trailing_active = ?,"
             " trailing_floor = ?, close_reason = ?, target_triggered = ?, final_net = ?,"
@@ -158,13 +158,15 @@ class CycleBook:
                 s.close_reason,
                 int(s.target_triggered),
                 _txt(s.final_net_usd),
-                self._clock().isoformat() if closed else None,
+                self._clock().isoformat() if s.state is CycleState.CLOSED else None,
                 s.cycle_id,
             ),
         )
 
     def open_cycle(self, *, target_usd: Decimal, config_version: int) -> str:
         """IDLE -> ACTIVE. Refused while another cycle on this account is not CLOSED."""
+        if target_usd <= 0:
+            raise ValueError("Profit Target must be positive")
         with transaction(self._conn):
             if self.open_cycle_id() is not None:
                 raise IllegalTransition("a cycle is still open on this account")
@@ -240,5 +242,5 @@ class CycleBook:
             s = replace(
                 s, state=next_cycle_state(s.state, CycleState.CLOSED), final_net_usd=final_net
             )
-            self._save(s, closed=True)
+            self._save(s)
         return s.as_event()

@@ -4,7 +4,7 @@ CREATE TABLE cycles (
     login            TEXT NOT NULL,
     server           TEXT NOT NULL,
     state            TEXT NOT NULL,
-    target_usd       TEXT NOT NULL,
+    target_usd       TEXT NOT NULL CHECK (CAST(target_usd AS REAL) > 0),
     config_version   INTEGER NOT NULL,
     last_net         TEXT,
     peak_net         TEXT,

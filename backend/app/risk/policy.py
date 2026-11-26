@@ -39,6 +39,8 @@ class RiskPolicy(ContractModel):
     """Strategy ids allowed only in the listed modes (by name; behaviour is checked too)."""
     trailing_min_activation_fraction: Dec
     """Basket trailing may not activate below this fraction of the Profit Target."""
+    trailing_max_activation_fraction: Dec
+    """Nor at or above the target (< 1): activation there would switch trailing off."""
     trailing_min_distance_fraction: Dec
     trailing_max_distance_fraction: Dec
     trailing_default_activation_fraction: Dec
@@ -67,6 +69,7 @@ DEFAULT_POLICY = RiskPolicy(
     martingale_modes=frozenset({Mode.SHADOW, Mode.DEMO}),
     mode_restricted_strategies={"martingale": frozenset({Mode.SHADOW, Mode.DEMO})},
     trailing_min_activation_fraction=Decimal("0.5"),
+    trailing_max_activation_fraction=Decimal("0.9"),
     trailing_min_distance_fraction=Decimal("0.05"),
     trailing_max_distance_fraction=Decimal("0.5"),
     trailing_default_activation_fraction=Decimal("0.6"),
