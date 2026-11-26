@@ -37,6 +37,12 @@ class RiskPolicy(ContractModel):
     """Loss-chasing size-ups (behaviour): Shadow/Demo only (RSK-06, CAT-X02-04)."""
     mode_restricted_strategies: dict[str, frozenset[Mode]]
     """Strategy ids allowed only in the listed modes (by name; behaviour is checked too)."""
+    trailing_min_activation_fraction: Dec
+    """Basket trailing may not activate below this fraction of the Profit Target."""
+    trailing_min_distance_fraction: Dec
+    trailing_max_distance_fraction: Dec
+    trailing_default_activation_fraction: Dec
+    trailing_default_distance_fraction: Dec
 
     def caps_for(self, profile: RiskProfile) -> ProfileCaps:
         return self.profiles[profile]
@@ -60,4 +66,9 @@ DEFAULT_POLICY = RiskPolicy(
     approval_ttl_seconds=5,
     martingale_modes=frozenset({Mode.SHADOW, Mode.DEMO}),
     mode_restricted_strategies={"martingale": frozenset({Mode.SHADOW, Mode.DEMO})},
+    trailing_min_activation_fraction=Decimal("0.5"),
+    trailing_min_distance_fraction=Decimal("0.05"),
+    trailing_max_distance_fraction=Decimal("0.5"),
+    trailing_default_activation_fraction=Decimal("0.6"),
+    trailing_default_distance_fraction=Decimal("0.2"),
 )
