@@ -1144,6 +1144,7 @@
           "title": "Expires At"
         },
         "policy_version": {
+          "minLength": 1,
           "title": "Policy Version",
           "type": "string"
         },
@@ -3086,7 +3087,7 @@
     },
     "StrategyManifest": {
       "additionalProperties": false,
-      "description": "A versioned, hashed strategy or technique artifact (TechniqueManifest uses the\nsame shape with `technique_refs` empty). Never executable by itself.",
+      "description": "A versioned, hashed strategy artifact. Never executable by itself.",
       "properties": {
         "artifact_hash": {
           "pattern": "^sha256:[0-9a-f]{64}$",

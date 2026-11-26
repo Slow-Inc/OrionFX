@@ -336,7 +336,7 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "M05 proposes; M06 owns actual risk/profit/execution; no forced recovery",
-    "coverage_state": "implemented",
+    "coverage_state": "planned",
     "implementation_refs": [
       "backend/app/profit/cycle.py",
       "backend/app/engine/engine.py"
@@ -346,7 +346,7 @@
       "tests/unit/profit/test_cycle.py::test_trailing_params_are_clamped_to_protected_bounds",
       "tests/integration/test_engine.py::test_trailing_floor_closes_the_cycle"
     ],
-    "note": "Basket trailing with clamped parameters is tested; the adaptive (M05-proposed) parameter input is not built yet, so not 'tested' as Adaptive."
+    "note": "M06 half built and tested (clamped basket trailing, AT-03); the adaptive M05 parameter proposal is not built, so the row is not delivered."
   },
   {
     "catalog_id": "CAT-R01-05",

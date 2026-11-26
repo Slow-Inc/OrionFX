@@ -330,8 +330,9 @@ class HealthUpdated(ContractModel):
 
 # --- V1.1 strategy & technique contracts (§15.5) [PROPOSED schema] ----------------------
 
-CATALOG_ID = r"^CAT-[A-Z]\d{2}-\d{2}$"
-HASH = r"^sha256:[0-9a-f]{64}$"
+CatalogId = Annotated[str, Field(pattern=r"^CAT-[A-Z]\d{2}-\d{2}$")]
+Sha256Ref = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+"""Prefixed hash for V1.1 artifacts (ModelCandidate predates it and stores bare hex)."""
 
 
 class ParameterBound(ContractModel):
@@ -346,14 +347,13 @@ class ParameterBound(ContractModel):
 
 
 class StrategyManifest(ContractModel):
-    """A versioned, hashed strategy or technique artifact (TechniqueManifest uses the
-    same shape with `technique_refs` empty). Never executable by itself."""
+    """A versioned, hashed strategy artifact. Never executable by itself."""
 
     strategy_id: str = Field(min_length=1)
     version: str = Field(min_length=1)
-    artifact_hash: str = Field(pattern=HASH)
+    artifact_hash: Sha256Ref
     family: str
-    catalog_ids: list[Annotated[str, Field(pattern=CATALOG_ID)]] = Field(min_length=1)
+    catalog_ids: list[CatalogId] = Field(min_length=1)
     technique_refs: list[str]
     timeframes: list[Timeframe] = Field(min_length=1)
     warmup_bars: int = Field(ge=0)
@@ -362,9 +362,6 @@ class StrategyManifest(ContractModel):
     supported_modes: list[Mode] = Field(min_length=1)
     dependencies: list[str] = Field(default_factory=list)
     max_latency_ms: int | None = Field(default=None, gt=0)
-
-
-TechniqueManifest = StrategyManifest
 
 
 class TechniqueObservation(ContractModel):
@@ -405,9 +402,17 @@ class StrategyProposal(ContractModel):
     rationale: str
     constraints: list[str]
 
+    @model_validator(mode="after")
+    def _entries_are_directed_and_sized(self) -> Self:
+        if self.action in (IntentAction.OPEN, IntentAction.ADD) and (
+            self.direction is Direction.NEUTRAL or self.requested_lot is None
+        ):
+            raise ValueError(f"{self.action} needs an UP/DOWN direction and a requested lot")
+        return self
+
 
 class EligibilityRecord(ContractModel):
-    subject_hash: str = Field(pattern=HASH)
+    subject_hash: Sha256Ref
     subject_kind: Literal["strategy", "technique", "composition", "model"]
     subject_ref: str
     user_enabled: bool
@@ -415,14 +420,26 @@ class EligibilityRecord(ContractModel):
     approved_modes: list[Mode]
     context: dict[str, str]
     evidence_refs: list[str]
-    policy_version: str
+    policy_version: str = Field(min_length=1)
     expires_at: UtcDatetime | None
     revoked_at: UtcDatetime | None
 
     @model_validator(mode="after")
-    def _live_needs_evidence(self) -> Self:
-        live = self.eligibility is Eligibility.LIVE_ELIGIBLE or Mode.LIVE in self.approved_modes
-        if live and not self.evidence_refs:
+    def _consistent(self) -> Self:
+        modes = set(self.approved_modes)
+        if (self.revoked_at is not None or not self.user_enabled) and (
+            self.eligibility is not Eligibility.DISABLED
+        ):
+            raise ValueError("a revoked or owner-disabled subject is DISABLED")
+        allowed = {
+            Eligibility.DISABLED: set(),
+            Eligibility.SHADOW_ONLY: {Mode.SHADOW},
+            Eligibility.DEMO_ELIGIBLE: {Mode.SHADOW, Mode.DEMO},
+            Eligibility.LIVE_ELIGIBLE: {Mode.SHADOW, Mode.DEMO, Mode.LIVE},
+        }[self.eligibility]
+        if not modes <= allowed:
+            raise ValueError(f"{self.eligibility} does not allow {sorted(modes - allowed)}")
+        if self.eligibility is Eligibility.LIVE_ELIGIBLE and not self.evidence_refs:
             raise ValueError("live eligibility needs evidence refs")
         return self
 

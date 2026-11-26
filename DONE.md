@@ -6,6 +6,18 @@
 
 ---
 
+## X01 V1.1 — strategy/technique contracts + CAT coverage matrix (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/21-x01-catalog`)
+
+**Goal:** the §15.5 shared contracts and one machine-readable disposition for all 201 catalog rows (#21; AT-37, §16.4).
+
+**Shipped:** `StrategyManifest`, `TechniqueObservation`, `StrategyProposal`, `EligibilityRecord` (+ `CatalogId`, `Sha256Ref`) and events `technique.observed`, `strategy.proposed`, `strategy.candidate`, `strategy.eligibility.updated`; `backend/app/core/catalog.py` (`CoverageEntry`, `parse_plan_rows`, `coverage_summary`); `scripts/gen_catalog.py`; `docs/catalog/coverage.json`.
+
+**Coverage at merge:** 201 rows — 160 planned, 28 blocked (licensed news/LLM keys, order-flow/DOM, real volume, related-instrument feeds, training), 11 excluded (X02 exclusions carry enforcement test ids), 1 tested (CAT-R01-05 Partial Close, fake broker only), 0 certified. CAT-R01-04 stays planned: its M06 half is tested, the adaptive M05 input is not built.
+
+**Validation:** `uv run pytest` → 266 passed. 8 mutation probes on the matrix (drop a row, X planned, certified claim, tested without tests, fake test id, blocked without reason, owner drift, D row live) each turned a test red. Review fixes: row rules live in the model validator; dependency column compared; evidence refs must be real repo files and line-start test defs; eligibility records self-consistent (revoked/disabled ⇒ DISABLED, modes fit eligibility); proposals for entries need direction and lot; summary per phase/family/state + excluded. Noted, not changed: `ModelCandidate.artifact_sha256` keeps bare hex (predates `Sha256Ref`).
+
+---
+
 ## M06 slice D — engine loop, control commands, restart reconcile (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/16-m06-engine`)
 
 **Goal:** the M06 Risk & Execution loop that ties the broker port, risk veto, drawdown tracker and cycle book together (PRD-06 #12, slice #16).

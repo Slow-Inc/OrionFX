@@ -12,11 +12,13 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.catalog import (
-    CatalogClass,
-    CoverageState,
-    Eligibility,
+    DELIVERED,
+    FACTS,
+    PLAN_PATH,
+    CoverageEntry,
     coverage_summary,
     load_coverage,
+    parse_plan_rows,
 )
 from app.core.contracts import (
     EligibilityRecord,
@@ -25,86 +27,100 @@ from app.core.contracts import (
     StrategyProposal,
     TechniqueObservation,
 )
-from app.core.enums import Mode
+from app.core.enums import Eligibility, Mode
 
 REPO = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
-ROW = re.compile(
-    r"^\| (CAT-[A-Z]\d{2}-\d{2}) \| (.+?) \| (\S+) \| (\S+) \| ([RCDX]) \| (.*) \|$", re.MULTILINE
-)
+PLAN = parse_plan_rows(PLAN_PATH.read_text(encoding="utf-8"))
 
 
-def _plan_rows() -> dict[str, tuple[str, str, str, str]]:
-    text = (REPO / "docs/plans/master_planV1.1.md").read_text(encoding="utf-8")
-    rows = {m[1]: (m[2].strip(), m[3], m[4], m[5]) for m in ROW.finditer(text)}
-    assert len(rows) == len(ROW.findall(text)), "duplicate CAT id in the master plan"
-    return rows
+@pytest.fixture(scope="module")
+def matrix() -> list[CoverageEntry]:
+    return load_coverage()  # validation runs every per-row rule (CoverageEntry._consistent)
 
 
 # --- AT-37: one disposition per catalog row ---------------------------------------------
 
 
-def test_matrix_has_exactly_the_master_plan_rows() -> None:
-    plan = _plan_rows()
-    matrix = load_coverage()
-    assert len(plan) == 201
-    assert [e.catalog_id for e in matrix] == sorted(plan, key=list(plan).index)
-    for e in matrix:
-        capability, owner, phase, cls = plan[e.catalog_id]
-        assert (e.capability, e.owner, e.phase, e.catalog_class) == (capability, owner, phase, cls)
+def test_plan_has_201_unique_rows() -> None:
+    ids = [r["catalog_id"] for r in PLAN]
+    assert len(ids) == 201 and len(set(ids)) == 201
 
 
-def test_excluded_rows_are_excluded_and_nothing_else_is() -> None:
-    for e in load_coverage():
-        is_x = e.catalog_class is CatalogClass.X
-        assert (e.coverage_state is CoverageState.EXCLUDED) == is_x, e.catalog_id
-
-
-def test_nothing_is_certified_and_live_is_never_claimed() -> None:
-    for e in load_coverage():
-        assert e.coverage_state is not CoverageState.CERTIFIED, e.catalog_id
-        assert e.eligibility is not Eligibility.LIVE_ELIGIBLE, e.catalog_id
-
-
-def test_research_only_rows_never_allow_live() -> None:
-    for e in load_coverage():
-        if e.catalog_class is CatalogClass.D:
-            assert Mode.LIVE not in e.allowed_modes, e.catalog_id
+def test_matrix_mirrors_the_master_plan_rows(matrix: list[CoverageEntry]) -> None:
+    assert [{k: str(getattr(e, k)) for k in FACTS} for e in matrix] == PLAN
 
 
 def _test_exists(ref: str) -> bool:
     path, _, name = ref.partition("::")
     file = REPO / path
-    return file.is_file() and f"def {name}(" in file.read_text(encoding="utf-8")
+    if not (path.startswith("tests/") and file.is_file()):
+        return False
+    pattern = rf"^def {re.escape(name)}\("
+    return re.search(pattern, file.read_text(encoding="utf-8"), re.MULTILINE) is not None
 
 
-def test_implemented_and_tested_rows_carry_checkable_evidence() -> None:
-    for e in load_coverage():
-        if e.coverage_state in (CoverageState.IMPLEMENTED, CoverageState.TESTED):
-            assert e.implementation_refs, e.catalog_id
-            for ref in e.implementation_refs:
-                assert (REPO / ref).exists(), (e.catalog_id, ref)
-        if e.coverage_state is CoverageState.TESTED:
-            assert e.test_ids, e.catalog_id
+def _source_file(ref: str) -> bool:
+    file = (REPO / ref).resolve()
+    return ref.startswith(("backend/", "scripts/")) and file.is_file() and REPO in file.parents
+
+
+def test_evidence_refs_exist_in_the_repo(matrix: list[CoverageEntry]) -> None:
+    for e in matrix:
+        for ref in e.implementation_refs:
+            assert _source_file(ref), (e.catalog_id, ref)
         for ref in e.test_ids:
             assert _test_exists(ref), (e.catalog_id, ref)
 
 
-def test_blocked_rows_name_blocker_owner_and_review_trigger() -> None:
-    for e in load_coverage():
-        if e.coverage_state is CoverageState.BLOCKED:
-            assert e.blocker_reason and e.resolution_owner and e.review_trigger, e.catalog_id
-
-
-def test_summary_never_counts_blocked_or_excluded_as_delivered() -> None:
-    s = coverage_summary(load_coverage())
-    assert s["total"] == 201
-    assert sum(s["by_class"].values()) == 201
-    assert sum(s["by_state"].values()) == 201
-    assert s["delivered"] == s["by_state"].get("implemented", 0) + s["by_state"].get(
-        "tested", 0
-    ) + s["by_state"].get("certified", 0)
+def test_summary_never_counts_blocked_or_excluded_as_delivered(
+    matrix: list[CoverageEntry],
+) -> None:
+    s = coverage_summary(matrix)
+    assert s["total"] == sum(s["by_class"].values()) == sum(s["by_state"].values()) == 201
+    assert s["delivered"] == sum(s["by_state"].get(st.value, 0) for st in DELIVERED)
     assert s["delivered"] < 201  # no 100% coverage claim (§16.4)
+    assert s["excluded"] == s["by_state"]["excluded"] == s["by_class"]["X"]
+    assert sum(sum(v.values()) for v in s["by_phase_state"].values()) == 201
+    assert sum(sum(v.values()) for v in s["by_family_state"].values()) == 201
+    assert s["by_family_state"]["R01"]["tested"] == 1  # Partial Close
+
+
+def test_evidence_check_rejects_fake_references() -> None:
+    assert not _test_exists("tests/unit/risk/test_veto.py::test_nope")
+    assert not _test_exists("backend/app/core/catalog.py::parse_plan_rows")
+    assert not _source_file("backend")
+    assert not _source_file("")
+
+
+def _row(**over: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "catalog_id": "CAT-S01-01",
+        "capability": "Trend Following",
+        "owner": "M05",
+        "phase": "MVP",
+        "catalog_class": "R",
+        "dependency": "x",
+        "coverage_state": "planned",
+    }
+    base.update(over)
+    return base
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"coverage_state": "excluded"},  # an R row cannot be excluded
+        {"catalog_class": "X"},  # an X row must be excluded
+        {"coverage_state": "certified", "implementation_refs": ["a"], "test_ids": ["b"]},
+        {"coverage_state": "implemented"},  # no implementation refs
+        {"coverage_state": "tested", "implementation_refs": ["a"]},  # no test ids
+        {"coverage_state": "blocked", "blocker_reason": "no feed"},  # no owner/trigger
+    ],
+)
+def test_entry_rules_reject_dishonest_rows(over: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        CoverageEntry.model_validate(_row(**over))
 
 
 # --- contracts (§15.5) ---------------------------------------------------------------------
@@ -172,7 +188,12 @@ def test_proposal_is_not_a_broker_order() -> None:
         rationale="ema cross",
         constraints=[],
     )
-    assert not hasattr(proposal, "order_id")
+    with pytest.raises(ValidationError):
+        StrategyProposal.model_validate(proposal.model_dump() | {"order_id": "123"})
+    with pytest.raises(ValidationError):  # an entry needs a direction and a size
+        StrategyProposal.model_validate(proposal.model_dump() | {"direction": "NEUTRAL"})
+    with pytest.raises(ValidationError):
+        StrategyProposal.model_validate(proposal.model_dump() | {"requested_lot": None})
 
 
 def test_live_eligibility_needs_evidence_and_policy() -> None:
@@ -190,3 +211,41 @@ def test_live_eligibility_needs_evidence_and_policy() -> None:
             expires_at=None,
             revoked_at=None,
         )
+
+
+def _eligibility(**over: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "subject_hash": "sha256:" + "1" * 64,
+        "subject_kind": "strategy",
+        "subject_ref": "trend_following@1.0.0",
+        "user_enabled": True,
+        "eligibility": "demo_eligible",
+        "approved_modes": ["SHADOW", "DEMO"],
+        "context": {},
+        "evidence_refs": ["x02:run-1"],
+        "policy_version": "p",
+        "expires_at": None,
+        "revoked_at": None,
+    }
+    base.update(over)
+    return base
+
+
+def test_consistent_eligibility_record_is_accepted() -> None:
+    EligibilityRecord.model_validate(_eligibility())
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"revoked_at": "2026-01-01T00:00:00Z"},  # revoked but still eligible
+        {"user_enabled": False},  # disabled by the owner but still eligible
+        {"eligibility": "disabled"},  # disabled with approved modes
+        {"eligibility": "shadow_only"},  # shadow only but DEMO approved
+        {"approved_modes": ["LIVE"]},  # demo eligible but LIVE approved
+        {"policy_version": ""},
+    ],
+)
+def test_contradictory_eligibility_records_are_rejected(over: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        EligibilityRecord.model_validate(_eligibility(**over))
