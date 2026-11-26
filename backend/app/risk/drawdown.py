@@ -7,6 +7,9 @@ the epoch ceiling (the owner's max DD) or the lifetime ceiling latches a lock
 that survives restarts and never clears because equity recovered. Approved
 recovery starts a new epoch; the lifetime peak never resets, and a lifetime
 breach cannot be approved away.
+
+Read-modify-write happens inside one write transaction, so two writers cannot
+erase each other's breach. The row is rewritten only when the state changed.
 """
 
 import sqlite3
@@ -15,16 +18,28 @@ from decimal import Decimal
 
 from app.core.contracts import RiskUpdated
 from app.core.time import Clock, utc_now
+from app.execution.broker import AccountInfo
 from app.risk.policy import RiskPolicy
+from app.storage.audit import audit
 from app.storage.db import transaction
 
 HUNDRED = Decimal(100)
+EPOCH_BREACH = "EPOCH_DD_BREACH"
+LIFETIME_BREACH = "LIFETIME_DD_BREACH"
 
 
 def dd_percent(peak: Decimal, equity: Decimal) -> Decimal:
     if peak <= 0:
         return HUNDRED
     return min(HUNDRED, max(Decimal(0), (peak - equity) / peak * HUNDRED))
+
+
+def _dec(text: str | None) -> Decimal | None:
+    return None if text is None else Decimal(text)
+
+
+def _txt(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,49 +54,50 @@ class DrawdownState:
 
 class DrawdownTracker:
     def __init__(
-        self, conn: sqlite3.Connection, *, account_key: str, clock: Clock = utc_now
+        self, conn: sqlite3.Connection, *, account: AccountInfo, clock: Clock = utc_now
     ) -> None:
         self._conn = conn
-        self._key = account_key
+        self._login = account.login
+        self._server = account.server
         self._clock = clock
 
     def state(self) -> DrawdownState:
         row = self._conn.execute(
             "SELECT epoch_id, epoch_peak, lifetime_peak, locked, lock_reason, lifetime_breached"
-            " FROM risk_state WHERE account_key = ?",
-            (self._key,),
+            " FROM risk_state WHERE login = ? AND server = ?",
+            (self._login, self._server),
         ).fetchone()
         if row is None:
             return DrawdownState()
         return DrawdownState(
-            epoch_id=int(row[0]),
-            epoch_peak=None if row[1] is None else Decimal(row[1]),
-            lifetime_peak=None if row[2] is None else Decimal(row[2]),
-            locked=bool(row[3]),
-            lock_reason=row[4],
-            lifetime_breached=bool(row[5]),
+            epoch_id=int(row["epoch_id"]),
+            epoch_peak=_dec(row["epoch_peak"]),
+            lifetime_peak=_dec(row["lifetime_peak"]),
+            locked=bool(row["locked"]),
+            lock_reason=row["lock_reason"],
+            lifetime_breached=bool(row["lifetime_breached"]),
         )
 
     def _save(self, s: DrawdownState) -> None:
-        with transaction(self._conn):
-            self._conn.execute(
-                "INSERT INTO risk_state (account_key, epoch_id, epoch_peak, lifetime_peak, locked,"
-                " lock_reason, lifetime_breached, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-                " ON CONFLICT(account_key) DO UPDATE SET epoch_id = excluded.epoch_id,"
-                " epoch_peak = excluded.epoch_peak, lifetime_peak = excluded.lifetime_peak,"
-                " locked = excluded.locked, lock_reason = excluded.lock_reason,"
-                " lifetime_breached = excluded.lifetime_breached, updated_at = excluded.updated_at",
-                (
-                    self._key,
-                    s.epoch_id,
-                    None if s.epoch_peak is None else str(s.epoch_peak),
-                    None if s.lifetime_peak is None else str(s.lifetime_peak),
-                    int(s.locked),
-                    s.lock_reason,
-                    int(s.lifetime_breached),
-                    self._clock().isoformat(),
-                ),
-            )
+        self._conn.execute(
+            "INSERT INTO risk_state (login, server, epoch_id, epoch_peak, lifetime_peak, locked,"
+            " lock_reason, lifetime_breached, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(login, server) DO UPDATE SET epoch_id = excluded.epoch_id,"
+            " epoch_peak = excluded.epoch_peak, lifetime_peak = excluded.lifetime_peak,"
+            " locked = excluded.locked, lock_reason = excluded.lock_reason,"
+            " lifetime_breached = excluded.lifetime_breached, updated_at = excluded.updated_at",
+            (
+                self._login,
+                self._server,
+                s.epoch_id,
+                _txt(s.epoch_peak),
+                _txt(s.lifetime_peak),
+                int(s.locked),
+                s.lock_reason,
+                int(s.lifetime_breached),
+                self._clock().isoformat(),
+            ),
+        )
 
     def observe(
         self,
@@ -91,49 +107,64 @@ class DrawdownTracker:
         policy: RiskPolicy,
         cash_flow: Decimal = Decimal(0),
     ) -> RiskUpdated:
-        s = self.state()
-        epoch_peak = equity if s.epoch_peak is None else s.epoch_peak + cash_flow
-        lifetime_peak = equity if s.lifetime_peak is None else s.lifetime_peak + cash_flow
-        epoch_peak, lifetime_peak = max(epoch_peak, equity), max(lifetime_peak, equity)
+        with transaction(self._conn):
+            old = self.state()
+            epoch_peak = equity if old.epoch_peak is None else old.epoch_peak + cash_flow
+            lifetime_peak = equity if old.lifetime_peak is None else old.lifetime_peak + cash_flow
+            epoch_peak, lifetime_peak = max(epoch_peak, equity), max(lifetime_peak, equity)
 
-        epoch_dd = dd_percent(epoch_peak, equity)
-        lifetime_dd = dd_percent(lifetime_peak, equity)
-        lifetime_ceiling = policy.lifetime_ceiling(owner_max_dd)
+            epoch_dd = dd_percent(epoch_peak, equity)
+            lifetime_dd = dd_percent(lifetime_peak, equity)
+            lifetime_ceiling = policy.lifetime_ceiling(owner_max_dd)
 
-        reasons: list[str] = []
-        if epoch_dd >= owner_max_dd:
-            reasons.append("EPOCH_DD_BREACH")
-        if lifetime_dd >= lifetime_ceiling:
-            reasons.append("LIFETIME_DD_BREACH")
+            breaches = []
+            if epoch_dd >= owner_max_dd:
+                breaches.append(EPOCH_BREACH)
+            if lifetime_dd >= lifetime_ceiling:
+                breaches.append(LIFETIME_BREACH)
 
-        s = replace(
-            s,
-            epoch_peak=epoch_peak,
-            lifetime_peak=lifetime_peak,
-            locked=s.locked or bool(reasons),
-            lock_reason=s.lock_reason or (reasons[0] if reasons else None),
-            lifetime_breached=s.lifetime_breached or "LIFETIME_DD_BREACH" in reasons,
-        )
-        self._save(s)
-        if s.locked and not reasons and s.lock_reason:
-            reasons.append(s.lock_reason)  # still locked from an earlier breach
+            new = replace(
+                old,
+                epoch_peak=epoch_peak,
+                lifetime_peak=lifetime_peak,
+                locked=old.locked or bool(breaches),
+                lock_reason=old.lock_reason or (breaches[0] if breaches else None),
+                lifetime_breached=old.lifetime_breached or LIFETIME_BREACH in breaches,
+            )
+            if new != old:
+                self._save(new)
+
+        reasons = list(breaches)
+        if new.locked and new.lock_reason and new.lock_reason not in reasons:
+            reasons.append(new.lock_reason)  # still locked from an earlier breach
+        if new.lifetime_breached and LIFETIME_BREACH not in reasons:
+            reasons.append(LIFETIME_BREACH)  # never approvable: always say so
         return RiskUpdated(
             epoch_dd_percent=epoch_dd,
             lifetime_dd_percent=lifetime_dd,
             epoch_ceiling_percent=owner_max_dd,
             lifetime_ceiling_percent=lifetime_ceiling,
-            risk_locked=s.locked,
+            risk_locked=new.locked,
             reason_codes=reasons,
             policy_version=policy.policy_version,
         )
 
-    def approve_recovery(self, equity: Decimal) -> bool:
+    def approve_recovery(self, equity: Decimal, *, actor: str) -> bool:
         """New epoch after an epoch breach (RSK-07). Refused without a lock or after a
         lifetime breach; the caller (M06 engine) checks the remaining gates."""
-        s = self.state()
-        if not s.locked or s.lifetime_breached:
-            return False
-        self._save(
-            replace(s, epoch_id=s.epoch_id + 1, epoch_peak=equity, locked=False, lock_reason=None)
-        )
+        with transaction(self._conn):
+            s = self.state()
+            if not s.locked or s.lifetime_breached:
+                return False
+            self._save(
+                replace(
+                    s, epoch_id=s.epoch_id + 1, epoch_peak=equity, locked=False, lock_reason=None
+                )
+            )
+            audit(
+                self._conn,
+                actor=actor,
+                action="risk.approve_recovery",
+                detail=f"epoch {s.epoch_id + 1} from equity {equity}",
+            )
         return True

@@ -34,7 +34,9 @@ class RiskPolicy(ContractModel):
     """Free margin left after the trade, as a percent of equity."""
     approval_ttl_seconds: int = Field(gt=0)
     martingale_modes: frozenset[Mode]
-    """Martingale and loss-chasing size-ups: Shadow/Demo only (RSK-06, CAT-X02-04)."""
+    """Loss-chasing size-ups (behaviour): Shadow/Demo only (RSK-06, CAT-X02-04)."""
+    mode_restricted_strategies: dict[str, frozenset[Mode]]
+    """Strategy ids allowed only in the listed modes (by name; behaviour is checked too)."""
 
     def caps_for(self, profile: RiskProfile) -> ProfileCaps:
         return self.profiles[profile]
@@ -57,4 +59,5 @@ DEFAULT_POLICY = RiskPolicy(
     min_free_margin_percent=Decimal(50),
     approval_ttl_seconds=5,
     martingale_modes=frozenset({Mode.SHADOW, Mode.DEMO}),
+    mode_restricted_strategies={"martingale": frozenset({Mode.SHADOW, Mode.DEMO})},
 )

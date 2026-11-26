@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app.execution.broker import AccountInfo, MarginMode
 from app.risk.drawdown import DrawdownTracker, dd_percent
 from app.risk.policy import DEFAULT_POLICY
 from app.storage.db import connect, migrate
@@ -23,8 +24,21 @@ def conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     c.close()
 
 
+ACCOUNT = AccountInfo(
+    login="demo-1",
+    server="FakeBroker-Demo",
+    currency="USD",
+    balance=D(1000),
+    equity=D(1000),
+    margin=D(0),
+    free_margin=D(1000),
+    margin_mode=MarginMode.HEDGING,
+    connected=True,
+)
+
+
 def _tracker(conn: sqlite3.Connection) -> DrawdownTracker:
-    return DrawdownTracker(conn, account_key="demo-1@FakeBroker-Demo")
+    return DrawdownTracker(conn, account=ACCOUNT)
 
 
 def test_master_plan_example_peak_120_equity_105_is_12_5_percent() -> None:
@@ -72,7 +86,7 @@ def test_approve_recovery_starts_new_epoch_but_keeps_lifetime(conn: sqlite3.Conn
     t = _tracker(conn)
     t.observe(D("1000"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
     t.observe(D("790"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
-    assert t.approve_recovery(D("790"))
+    assert t.approve_recovery(D("790"), actor="owner")
     s = t.state()
     assert not s.locked and s.epoch_id == 2 and s.epoch_peak == D("790")
     assert s.lifetime_peak == D("1000")
@@ -86,14 +100,14 @@ def test_lifetime_breach_cannot_be_approved_away(conn: sqlite3.Connection) -> No
     # lifetime ceiling = min(20 * 1.5, 50) = 30%
     upd = t.observe(D("690"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
     assert "LIFETIME_DD_BREACH" in upd.reason_codes
-    assert not t.approve_recovery(D("690"))
+    assert not t.approve_recovery(D("690"), actor="owner")
     assert t.state().locked
 
 
 def test_approve_without_lock_is_refused(conn: sqlite3.Connection) -> None:
     t = _tracker(conn)
     t.observe(D("1000"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
-    assert not t.approve_recovery(D("1000"))
+    assert not t.approve_recovery(D("1000"), actor="owner")
 
 
 def test_deposit_and_withdrawal_are_not_trading_pnl(conn: sqlite3.Connection) -> None:
@@ -111,3 +125,21 @@ def test_policy_version_reported(conn: sqlite3.Connection) -> None:
     upd = _tracker(conn).observe(D("1000"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
     assert upd.policy_version == DEFAULT_POLICY.policy_version
     assert "uncertified" in upd.policy_version
+
+
+def test_lifetime_breach_keeps_being_reported(conn: sqlite3.Connection) -> None:
+    t = _tracker(conn)
+    t.observe(D("1000"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
+    t.observe(D("790"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)  # epoch breach first
+    t.observe(D("690"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)  # then lifetime
+    upd = t.observe(D("700"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
+    assert "LIFETIME_DD_BREACH" in upd.reason_codes
+
+
+def test_approve_recovery_is_audited(conn: sqlite3.Connection) -> None:
+    t = _tracker(conn)
+    t.observe(D("1000"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
+    t.observe(D("790"), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
+    t.approve_recovery(D("790"), actor="owner")
+    actions = [r[0] for r in conn.execute("SELECT action FROM audit_log")]
+    assert "risk.approve_recovery" in actions

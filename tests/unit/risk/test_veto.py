@@ -78,7 +78,6 @@ def _ctx(**over: object) -> RiskContext:
         execution_unresolved=False,
         config=CONFIG,
         policy=DEFAULT_POLICY,
-        risk_locked=False,
         cycle_net_usd=None,
         eligibility=ConfigEligibility(CONFIG, DEFAULT_POLICY),
     )
@@ -125,7 +124,7 @@ def test_clean_open_is_allowed_with_short_expiry() -> None:
         ({"mode": "SHADOW"}, {}, "MODE_MISMATCH"),
         ({"mode": "LIVE"}, {"mode": Mode.LIVE}, "LIVE_NOT_ALLOWED"),
         ({}, {"control": ControlStatus(ControlState.PAUSED)}, "CONTROL_STATE_NO_ENTRY"),
-        ({}, {"risk_locked": True}, "RISK_LOCKED"),
+        ({}, {"control": ControlStatus(ControlState.RUNNING, risk_locked=True)}, "RISK_LOCKED"),
         ({}, {"execution_unresolved": True}, "EXECUTION_UNRESOLVED"),
         ({}, {"account": replace(ACCOUNT, connected=False)}, "ACCOUNT_DISCONNECTED"),
         ({"symbol": "EURUSD"}, {}, "SYMBOL_NOT_CONFIGURED"),
@@ -226,7 +225,8 @@ def test_loss_chasing_size_up_allowed_in_demo_within_caps() -> None:
 
 
 def test_all_reasons_reported_not_just_the_first() -> None:
-    codes = _deny(_intent(), _ctx(risk_locked=True, quote=None, ownership_ambiguous=True))
+    locked = ControlStatus(ControlState.RUNNING, risk_locked=True)
+    codes = _deny(_intent(), _ctx(control=locked, quote=None, ownership_ambiguous=True))
     assert {"RISK_LOCKED", "QUOTE_MISSING", "OWNERSHIP_AMBIGUOUS"} <= set(codes)
 
 
@@ -235,8 +235,7 @@ def test_all_reasons_reported_not_just_the_first() -> None:
 
 def test_close_all_allowed_while_locked_paused_and_stale() -> None:
     ctx = _ctx(
-        risk_locked=True,
-        control=ControlStatus(ControlState.PAUSED),
+        control=ControlStatus(ControlState.PAUSED, risk_locked=True),
         quote=None,
         bot_positions=[_pos("0.01"), _pos("0.02")],
     )
@@ -247,3 +246,49 @@ def test_close_all_allowed_while_locked_paused_and_stale() -> None:
 def test_close_with_nothing_to_close_is_denied() -> None:
     codes = _deny(_intent(action="CLOSE_ALL", side=None, requested_lot=None), _ctx())
     assert codes == ["NOTHING_TO_CLOSE"]
+
+
+def test_loss_chasing_via_open_action_is_also_caught() -> None:
+    live = _ctx(
+        mode=Mode.LIVE,
+        live_allowed=True,
+        bot_positions=[_pos("0.01", profit="-5")],
+        cycle_net_usd=D("-5"),
+    )
+    codes = _deny(
+        _intent(mode="LIVE", action="OPEN", requested_lot="0.02", strategy_id="pullback"), live
+    )
+    assert "MARTINGALE_BEHAVIOR" in codes
+
+
+def test_adding_with_unknown_cycle_net_fails_closed() -> None:
+    ctx = _ctx(bot_positions=[_pos("0.01")], cycle_net_usd=None)
+    assert "CYCLE_STATE_UNKNOWN" in _deny(_intent(action="ADD", requested_lot="0.01"), ctx)
+
+
+def test_exits_survive_live_revocation_and_mode_mismatch() -> None:
+    ctx = _ctx(mode=Mode.LIVE, live_allowed=False, bot_positions=[_pos("0.02")])
+    d = evaluate(_intent(action="CLOSE_ALL", side=None, requested_lot=None, mode="DEMO"), ctx)
+    assert d.verdict is Verdict.ALLOW and d.approved_lot == D("0.02")
+
+
+def test_quote_for_another_symbol_or_from_the_future_is_not_fresh() -> None:
+    assert "QUOTE_MISSING" in _deny(_intent(), _ctx(quote=Quote("EURUSD", D(1), D(1), NOW)))
+    future = Quote("XAUUSD", D(2000), D("2000.2"), NOW + timedelta(minutes=5))
+    assert "QUOTE_STALE" in _deny(_intent(), _ctx(quote=future))
+
+
+def test_zero_lot_step_denies_instead_of_crashing() -> None:
+    assert "SPEC_INVALID" in _deny(_intent(), _ctx(spec=replace(SPEC, volume_step=D(0))))
+
+
+def test_partial_close_must_respect_lot_rules() -> None:
+    ctx = _ctx(bot_positions=[_pos("0.05")])
+    codes = _deny(_intent(action="CLOSE", side=None, requested_lot="0.045"), ctx)
+    assert "LOT_NOT_ON_STEP" in codes and "REMAINDER_LOT_BELOW_MIN" in codes
+    ok = evaluate(_intent(action="CLOSE", side=None, requested_lot="0.02"), ctx)
+    assert ok.verdict is Verdict.ALLOW and ok.approved_lot == D("0.02")
+
+
+def test_spec_for_another_symbol_is_missing() -> None:
+    assert "SPEC_MISSING" in _deny(_intent(), _ctx(spec=replace(SPEC, symbol="EURUSD")))

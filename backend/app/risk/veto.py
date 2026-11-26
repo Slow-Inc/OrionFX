@@ -2,9 +2,11 @@
 AT-32, AT-42; CAT-X02-01..04).
 
 A pure function from (intent, context) to a `risk.decision`. Every failed check
-is reported (not just the first). Entries fail closed on any missing or stale
-input. Exits (CLOSE/CLOSE_ALL) are never blocked by entry checks, so a locked,
-paused or blind bot can always reduce risk.
+is reported (not just the first). Entries fail closed on any missing, stale,
+mismatched or malformed input. Exits (CLOSE/CLOSE_ALL) are never blocked by
+entry checks — not by locks, pauses, stale data, Live revocation, a mislabelled
+mode or an old intent — so the bot can always reduce risk; a partial close is
+still checked against the broker's lot rules.
 """
 
 from dataclasses import dataclass
@@ -20,7 +22,7 @@ from app.execution.broker import AccountInfo, Position, Quote, SymbolSpec
 from app.risk.policy import RiskPolicy
 
 EXITS = (IntentAction.CLOSE, IntentAction.CLOSE_ALL)
-MARTINGALE_IDS = frozenset({"martingale"})
+CLOCK_SKEW = timedelta(seconds=2)
 
 
 class Eligibility(Protocol):
@@ -29,8 +31,8 @@ class Eligibility(Protocol):
 
 @dataclass(frozen=True)
 class ConfigEligibility:
-    """MVP eligibility: the owner enabled it, and Martingale stays in its modes.
-    Registry-backed eligibility records (UST-08, #21) replace this when they exist."""
+    """MVP eligibility: the owner enabled it, and mode-restricted strategies stay in
+    their modes. Registry-backed eligibility records (UST-08, #21) replace this."""
 
     config: UserConfig
     policy: RiskPolicy
@@ -38,11 +40,15 @@ class ConfigEligibility:
     def allowed(self, strategy_id: str, mode: Mode) -> bool:
         if strategy_id not in self.config.trading.strategies_enabled:
             return False
-        return strategy_id not in MARTINGALE_IDS or mode in self.policy.martingale_modes
+        restricted = self.policy.mode_restricted_strategies.get(strategy_id)
+        return restricted is None or mode in restricted
 
 
 @dataclass(frozen=True)
 class RiskContext:
+    """`control.risk_locked` is the single lock flag the veto reads; the engine loads
+    it from the drawdown tracker's persisted state."""
+
     now: datetime
     mode: Mode
     live_allowed: bool
@@ -55,7 +61,6 @@ class RiskContext:
     execution_unresolved: bool
     config: UserConfig
     policy: RiskPolicy
-    risk_locked: bool
     cycle_net_usd: Decimal | None
     eligibility: Eligibility
 
@@ -82,13 +87,16 @@ def _allow(intent: TradeIntent, ctx: RiskContext, lot: Decimal) -> RiskDecision:
     )
 
 
-def _mode_reasons(intent: TradeIntent, ctx: RiskContext) -> list[str]:
-    reasons = []
-    if intent.mode is not ctx.mode:
-        reasons.append("MODE_MISMATCH")
-    if ctx.mode is Mode.LIVE and not ctx.live_allowed:
-        reasons.append("LIVE_NOT_ALLOWED")
-    return reasons
+def _held(ctx: RiskContext, symbol: str) -> list[Position]:
+    return [p for p in ctx.bot_positions if p.symbol == symbol]
+
+
+def _spec_reasons(spec: SymbolSpec | None, symbol: str) -> list[str]:
+    if spec is None or spec.symbol != symbol:
+        return ["SPEC_MISSING"]
+    if min(spec.volume_min, spec.volume_step, spec.margin_per_lot, spec.contract_size) <= 0:
+        return ["SPEC_INVALID"]  # never do arithmetic on a malformed spec
+    return []
 
 
 def _lot_reasons(lot: Decimal, spec: SymbolSpec) -> list[str]:
@@ -103,15 +111,20 @@ def _lot_reasons(lot: Decimal, spec: SymbolSpec) -> list[str]:
 
 
 def _evaluate_exit(intent: TradeIntent, ctx: RiskContext) -> RiskDecision:
-    reasons = _mode_reasons(intent, ctx)
-    held = sum((p.volume for p in ctx.bot_positions if p.symbol == intent.symbol), Decimal(0))
+    held = sum((p.volume for p in _held(ctx, intent.symbol)), Decimal(0))
     if held == 0:
-        reasons.append("NOTHING_TO_CLOSE")
-    if reasons:
-        return _deny(intent, ctx, reasons)
-    lot = (
-        held if intent.action is IntentAction.CLOSE_ALL else min(intent.requested_lot or held, held)
-    )
+        return _deny(intent, ctx, ["NOTHING_TO_CLOSE"])
+    if intent.action is IntentAction.CLOSE_ALL or not intent.requested_lot:
+        return _allow(intent, ctx, held)
+    lot = min(intent.requested_lot, held)
+    if lot < held:  # a partial close must be a lot the broker accepts, leaving one too
+        reasons = _spec_reasons(ctx.spec, intent.symbol)
+        if not reasons and ctx.spec is not None:
+            reasons = _lot_reasons(lot, ctx.spec) + [
+                f"REMAINDER_{r}" for r in _lot_reasons(held - lot, ctx.spec)
+            ]
+        if reasons:
+            return _deny(intent, ctx, reasons)
     return _allow(intent, ctx, lot)
 
 
@@ -119,15 +132,19 @@ def evaluate(intent: TradeIntent, ctx: RiskContext) -> RiskDecision:
     if intent.action in EXITS:
         return _evaluate_exit(intent, ctx)
 
-    reasons = _mode_reasons(intent, ctx)
+    reasons: list[str] = []
+    if intent.mode is not ctx.mode:
+        reasons.append("MODE_MISMATCH")
+    if ctx.mode is Mode.LIVE and not ctx.live_allowed:
+        reasons.append("LIVE_NOT_ALLOWED")
     if intent.valid_until <= ctx.now:
         reasons.append("INTENT_EXPIRED")
     if missing_for_start(ctx.config):
         reasons.append("CONFIG_INCOMPLETE")
+    if ctx.control.risk_locked:
+        reasons.append("RISK_LOCKED")
     if not allows_new_exposure(ctx.control):
         reasons.append("CONTROL_STATE_NO_ENTRY")
-    if ctx.risk_locked:
-        reasons.append("RISK_LOCKED")
     if ctx.execution_unresolved:
         reasons.append("EXECUTION_UNRESOLVED")
     if not ctx.account.connected:
@@ -142,9 +159,9 @@ def evaluate(intent: TradeIntent, ctx: RiskContext) -> RiskDecision:
     # The contract guarantees OPEN/ADD carry side and lot.
     lot = intent.requested_lot or Decimal(0)
 
-    if ctx.spec is None:
-        reasons.append("SPEC_MISSING")
-    else:
+    spec_problems = _spec_reasons(ctx.spec, intent.symbol)
+    reasons += spec_problems
+    if not spec_problems and ctx.spec is not None:
         if not ctx.spec.trade_allowed:
             reasons.append("MARKET_CLOSED")
         reasons += _lot_reasons(lot, ctx.spec)
@@ -153,15 +170,17 @@ def evaluate(intent: TradeIntent, ctx: RiskContext) -> RiskDecision:
         if ctx.account.free_margin - required_margin < floor:
             reasons.append("MARGIN_INSUFFICIENT")
 
-    if ctx.quote is None:
+    quote = ctx.quote
+    if quote is None or quote.symbol != intent.symbol:
         reasons.append("QUOTE_MISSING")
     else:
-        if ctx.now - ctx.quote.time > timedelta(seconds=ctx.policy.max_quote_age_seconds):
-            reasons.append("QUOTE_STALE")
-        if ctx.quote.ask - ctx.quote.bid > ctx.policy.max_spread:
+        age = ctx.now - quote.time
+        if age > timedelta(seconds=ctx.policy.max_quote_age_seconds) or age < -CLOCK_SKEW:
+            reasons.append("QUOTE_STALE")  # too old, or from the future (clock skew)
+        if quote.ask - quote.bid > ctx.policy.max_spread:
             reasons.append("SPREAD_TOO_WIDE")
 
-    held = [p for p in ctx.bot_positions if p.symbol == intent.symbol]
+    held = _held(ctx, intent.symbol)
     if intent.action is IntentAction.OPEN and not held:
         initial = ctx.config.trading.initial_lot
         if initial is not None and lot != initial:
@@ -173,17 +192,17 @@ def evaluate(intent: TradeIntent, ctx: RiskContext) -> RiskDecision:
     if len(held) + 1 > caps.max_positions:
         reasons.append("POSITION_CAP")  # CAT-X02-01: no unlimited grid
 
-    # Behaviour, not the strategy's name: a bigger lot added while the cycle loses is
-    # Martingale-style loss chasing, Shadow/Demo only (RSK-06, CAT-X02-02/04, AT-42).
-    losing = ctx.cycle_net_usd is not None and ctx.cycle_net_usd < 0
-    largest = max((p.volume for p in held), default=Decimal(0))
-    if (
-        intent.action is IntentAction.ADD
-        and losing
-        and lot > largest
-        and ctx.mode not in ctx.policy.martingale_modes
-    ):
-        reasons.append("MARTINGALE_BEHAVIOR")
+    # Behaviour, not the strategy's name or the action label: a bigger lot added on
+    # top of a losing cycle is Martingale-style loss chasing, Shadow/Demo only
+    # (RSK-06, CAT-X02-02/04, AT-42). Unknown cycle P&L fails closed.
+    if held:
+        largest = max(p.volume for p in held)
+        if ctx.cycle_net_usd is None:
+            reasons.append("CYCLE_STATE_UNKNOWN")
+        elif (
+            ctx.cycle_net_usd < 0 and lot > largest and ctx.mode not in ctx.policy.martingale_modes
+        ):
+            reasons.append("MARTINGALE_BEHAVIOR")
 
     if reasons:
         return _deny(intent, ctx, reasons)

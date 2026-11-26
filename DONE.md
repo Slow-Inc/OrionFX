@@ -6,6 +6,18 @@
 
 ---
 
+## M06 slice B — drawdown, protected policy, pre-trade checks, risk veto (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/14-m06-risk`)
+
+**Goal:** the AI-independent decision on every trade proposal, and the account drawdown lock (PRD-06 #12, slice #14; V1.1 UST-03/06/08, CAT-X02-*).
+
+**Shipped:** `backend/app/risk/{policy,drawdown,veto}.py`, `migrations/0003_risk.sql`. Policy values are PROPOSED and uncertified (`risk-0.1-uncertified`).
+
+**Validation:** `uv run pytest` green; ruff + mypy clean. Mutation probes (Martingale behaviour, exits bypass, lot-below-min, lifetime approval, lock latch, cash flow) each turned the matching test red. Review fixes: exits never gated by Live revocation/mode; size-up check covers OPEN too and fails closed on unknown cycle P&L; read-modify-write of DD state in one transaction; malformed/mismatched spec and quote denied; future-dated quote is stale; partial close validated (incl. remainder); lifetime breach always reported; recovery approval audited; single lock flag; account identity (login, server); mode-restricted strategies in policy.
+
+**Next:** slice C (#15) cycle book, target, trailing, close workflow.
+
+---
+
 ## M06 slice A — broker port, fake broker, ownership, execution ledger (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/13-m06-broker-ledger`)
 
 **Goal:** the single, durable path to the broker (PRD-06 #12, slice #13).
