@@ -1,0 +1,3147 @@
+{
+  "$defs": {
+    "AccountSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "balance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Balance"
+        },
+        "connected": {
+          "title": "Connected",
+          "type": "boolean"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "equity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Equity"
+        },
+        "free_margin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Free Margin"
+        },
+        "margin": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Margin"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "quote_status": {
+          "$ref": "#/$defs/DataQuality"
+        }
+      },
+      "required": [
+        "currency",
+        "balance",
+        "equity",
+        "margin",
+        "free_margin",
+        "connected",
+        "quote_status",
+        "observed_at"
+      ],
+      "title": "AccountSnapshot",
+      "type": "object"
+    },
+    "AccountSnapshotEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "account.snapshot",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/AccountSnapshot"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "AccountSnapshotEvent",
+      "type": "object"
+    },
+    "CandleClosed": {
+      "additionalProperties": false,
+      "properties": {
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "close": {
+          "gt": 0,
+          "title": "Close",
+          "type": "string"
+        },
+        "close_time": {
+          "format": "date-time",
+          "title": "Close Time",
+          "type": "string"
+        },
+        "high": {
+          "gt": 0,
+          "title": "High",
+          "type": "string"
+        },
+        "low": {
+          "gt": 0,
+          "title": "Low",
+          "type": "string"
+        },
+        "open": {
+          "gt": 0,
+          "title": "Open",
+          "type": "string"
+        },
+        "open_time": {
+          "format": "date-time",
+          "title": "Open Time",
+          "type": "string"
+        },
+        "spread": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spread"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "timeframe": {
+          "$ref": "#/$defs/Timeframe"
+        },
+        "volume": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Volume"
+        }
+      },
+      "required": [
+        "symbol",
+        "timeframe",
+        "open_time",
+        "close_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "available_at"
+      ],
+      "title": "CandleClosed",
+      "type": "object"
+    },
+    "CandleClosedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "candle.closed",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/CandleClosed"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "CandleClosedEvent",
+      "type": "object"
+    },
+    "CloseReason": {
+      "enum": [
+        "TARGET_TRIGGERED",
+        "TRAILING_FLOOR",
+        "EMERGENCY_STOP",
+        "RISK_LIMIT",
+        "FINISH_CYCLE",
+        "MANUAL_RECONCILED"
+      ],
+      "title": "CloseReason",
+      "type": "string"
+    },
+    "CommandStatus": {
+      "enum": [
+        "ACCEPTED",
+        "REJECTED",
+        "COMPLETED",
+        "UNRESOLVED"
+      ],
+      "title": "CommandStatus",
+      "type": "string"
+    },
+    "Confidence": {
+      "additionalProperties": false,
+      "description": "A 0-1 score is never shipped without what it means (master plan \u00a74.6).\n\n`semantics` names the target and method, e.g. \"calibrated P(close up) over 3 H1 bars\"\nor \"uncalibrated LLM score\". An LLM score is not a calibrated probability.",
+      "properties": {
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "semantics": {
+          "minLength": 1,
+          "title": "Semantics",
+          "type": "string"
+        },
+        "value": {
+          "ge": 0,
+          "le": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "semantics"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "ControlCommand": {
+      "description": "The five control commands (\u00a74.5).",
+      "enum": [
+        "START",
+        "PAUSE",
+        "FINISH_CYCLE",
+        "EMERGENCY_STOP",
+        "APPROVE_RECOVERY"
+      ],
+      "title": "ControlCommand",
+      "type": "string"
+    },
+    "ControlCompleted": {
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "title": "Command Id",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "resulting_state": {
+          "$ref": "#/$defs/ControlState"
+        },
+        "risk_locked": {
+          "title": "Risk Locked",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/CommandStatus"
+        },
+        "unresolved": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved",
+          "type": "array"
+        }
+      },
+      "required": [
+        "command_id",
+        "status",
+        "resulting_state",
+        "risk_locked"
+      ],
+      "title": "ControlCompleted",
+      "type": "object"
+    },
+    "ControlCompletedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "control.completed",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ControlCompleted"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "ControlCompletedEvent",
+      "type": "object"
+    },
+    "ControlRequested": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "title": "Actor",
+          "type": "string"
+        },
+        "command": {
+          "$ref": "#/$defs/ControlCommand"
+        },
+        "command_id": {
+          "title": "Command Id",
+          "type": "string"
+        },
+        "expected_state_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected State Version"
+        }
+      },
+      "required": [
+        "command_id",
+        "command",
+        "actor"
+      ],
+      "title": "ControlRequested",
+      "type": "object"
+    },
+    "ControlRequestedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "control.requested",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ControlRequested"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "ControlRequestedEvent",
+      "type": "object"
+    },
+    "ControlState": {
+      "enum": [
+        "STOPPED",
+        "STARTING",
+        "RECONCILING",
+        "RUNNING",
+        "PAUSED",
+        "FINISHING",
+        "CLOSING",
+        "RISK_LOCKED",
+        "SAFE_MODE"
+      ],
+      "title": "ControlState",
+      "type": "string"
+    },
+    "CycleState": {
+      "enum": [
+        "IDLE",
+        "ACTIVE",
+        "CLOSING",
+        "CLOSED"
+      ],
+      "title": "CycleState",
+      "type": "string"
+    },
+    "CycleUpdated": {
+      "additionalProperties": false,
+      "properties": {
+        "close_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CloseReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "final_net_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Net Usd"
+        },
+        "net_estimate_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Net Estimate Usd"
+        },
+        "peak_net_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Peak Net Usd"
+        },
+        "state": {
+          "$ref": "#/$defs/CycleState"
+        },
+        "target_achieved": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Achieved"
+        },
+        "target_triggered": {
+          "default": false,
+          "title": "Target Triggered",
+          "type": "boolean"
+        },
+        "target_usd": {
+          "title": "Target Usd",
+          "type": "string"
+        },
+        "trailing_active": {
+          "title": "Trailing Active",
+          "type": "boolean"
+        },
+        "trailing_floor_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Trailing Floor Usd"
+        },
+        "unresolved": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved",
+          "type": "array"
+        }
+      },
+      "required": [
+        "state",
+        "target_usd",
+        "net_estimate_usd",
+        "peak_net_usd",
+        "trailing_floor_usd",
+        "trailing_active"
+      ],
+      "title": "CycleUpdated",
+      "type": "object"
+    },
+    "CycleUpdatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "cycle.updated",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/CycleUpdated"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "CycleUpdatedEvent",
+      "type": "object"
+    },
+    "DataQuality": {
+      "enum": [
+        "OK",
+        "STALE",
+        "DEGRADED",
+        "MISSING"
+      ],
+      "title": "DataQuality",
+      "type": "string"
+    },
+    "DecisionAction": {
+      "enum": [
+        "ENTER",
+        "ADD",
+        "EXIT",
+        "WAIT"
+      ],
+      "title": "DecisionAction",
+      "type": "string"
+    },
+    "DecisionCreated": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/DecisionAction"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "expected_value_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Value Usd"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "side": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Side"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strategy_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Strategy Id"
+        }
+      },
+      "required": [
+        "decision_id",
+        "action",
+        "strategy_id",
+        "side",
+        "expected_value_usd",
+        "confidence",
+        "reason_codes",
+        "evidence_refs",
+        "policy_version"
+      ],
+      "title": "DecisionCreated",
+      "type": "object"
+    },
+    "DecisionCreatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "decision.created",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/DecisionCreated"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "DecisionCreatedEvent",
+      "type": "object"
+    },
+    "Direction": {
+      "enum": [
+        "UP",
+        "DOWN",
+        "NEUTRAL"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "ExecutionState": {
+      "enum": [
+        "PENDING",
+        "DISPATCHED",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "REJECTED",
+        "CANCELLED",
+        "UNKNOWN"
+      ],
+      "title": "ExecutionState",
+      "type": "string"
+    },
+    "ExecutionUpdated": {
+      "additionalProperties": false,
+      "properties": {
+        "broker_deal_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Broker Deal Ids",
+          "type": "array"
+        },
+        "broker_order_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Broker Order Id"
+        },
+        "broker_position_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Broker Position Id"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "fill_price": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Price"
+        },
+        "filled_lot": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filled Lot"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Intent Id"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ExecutionState"
+        }
+      },
+      "required": [
+        "request_id",
+        "intent_id",
+        "state"
+      ],
+      "title": "ExecutionUpdated",
+      "type": "object"
+    },
+    "ExecutionUpdatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "execution.updated",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ExecutionUpdated"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "ExecutionUpdatedEvent",
+      "type": "object"
+    },
+    "FeatureSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "feature_schema": {
+          "title": "Feature Schema",
+          "type": "string"
+        },
+        "quality": {
+          "$ref": "#/$defs/DataQuality"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "symbol",
+        "feature_schema",
+        "values",
+        "quality",
+        "as_of",
+        "available_at",
+        "valid_until"
+      ],
+      "title": "FeatureSnapshot",
+      "type": "object"
+    },
+    "FeatureSnapshotEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "feature.snapshot",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/FeatureSnapshot"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "FeatureSnapshotEvent",
+      "type": "object"
+    },
+    "ForecastLineage": {
+      "description": "Chart-only and news-enhanced forecasts keep separate lineage (PRE-04, AT-17).",
+      "enum": [
+        "CHART_ONLY",
+        "NEWS_ENHANCED"
+      ],
+      "title": "ForecastLineage",
+      "type": "string"
+    },
+    "HealthStatus": {
+      "enum": [
+        "OK",
+        "DEGRADED",
+        "DOWN"
+      ],
+      "title": "HealthStatus",
+      "type": "string"
+    },
+    "HealthUpdated": {
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "title": "Component",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "last_heartbeat": {
+          "format": "date-time",
+          "title": "Last Heartbeat",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/HealthStatus"
+        }
+      },
+      "required": [
+        "component",
+        "status",
+        "last_heartbeat"
+      ],
+      "title": "HealthUpdated",
+      "type": "object"
+    },
+    "HealthUpdatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "health.updated",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/HealthUpdated"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "HealthUpdatedEvent",
+      "type": "object"
+    },
+    "IntentAction": {
+      "enum": [
+        "OPEN",
+        "ADD",
+        "CLOSE",
+        "CLOSE_ALL"
+      ],
+      "title": "IntentAction",
+      "type": "string"
+    },
+    "LlmReasoning": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "news_assessment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "News Assessment Ids",
+          "type": "array"
+        },
+        "prediction_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prediction Ids",
+          "type": "array"
+        },
+        "prompt_version": {
+          "title": "Prompt Version",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "reasoning_id": {
+          "title": "Reasoning Id",
+          "type": "string"
+        },
+        "score": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reasoning_id",
+        "news_assessment_ids",
+        "prediction_ids",
+        "direction",
+        "score",
+        "rationale",
+        "prompt_version",
+        "provider",
+        "valid_until"
+      ],
+      "title": "LlmReasoning",
+      "type": "object"
+    },
+    "LlmReasoningEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "llm.reasoning",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/LlmReasoning"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "LlmReasoningEvent",
+      "type": "object"
+    },
+    "MarketSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "ask": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ask"
+        },
+        "bid": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Bid"
+        },
+        "broker_time_offset_minutes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Broker Time Offset Minutes"
+        },
+        "quality": {
+          "$ref": "#/$defs/DataQuality"
+        },
+        "spread": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Spread"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "tick_time": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tick Time"
+        }
+      },
+      "required": [
+        "symbol",
+        "bid",
+        "ask",
+        "spread",
+        "tick_time",
+        "quality"
+      ],
+      "title": "MarketSnapshot",
+      "type": "object"
+    },
+    "MarketSnapshotEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "market.snapshot",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/MarketSnapshot"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "MarketSnapshotEvent",
+      "type": "object"
+    },
+    "Mode": {
+      "description": "Account operating mode \u2014 isolated from control and cycle lifecycle (\u00a79.1).",
+      "enum": [
+        "SHADOW",
+        "DEMO",
+        "LIVE"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "ModelApproved": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_modes": {
+          "items": {
+            "$ref": "#/$defs/Mode"
+          },
+          "minItems": 1,
+          "title": "Allowed Modes",
+          "type": "array"
+        },
+        "approval_ref": {
+          "title": "Approval Ref",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "model_version": {
+          "title": "Model Version",
+          "type": "string"
+        },
+        "policy_ref": {
+          "title": "Policy Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_id",
+        "model_version",
+        "approval_ref",
+        "evidence_refs",
+        "policy_ref",
+        "allowed_modes"
+      ],
+      "title": "ModelApproved",
+      "type": "object"
+    },
+    "ModelApprovedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "model.approved",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ModelApproved"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "ModelApprovedEvent",
+      "type": "object"
+    },
+    "ModelCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Artifact Sha256",
+          "type": "string"
+        },
+        "dataset_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dataset Refs",
+          "type": "array"
+        },
+        "evaluation": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Evaluation",
+          "type": "object"
+        },
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "model_version": {
+          "title": "Model Version",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ModelStatus",
+          "default": "CANDIDATE"
+        }
+      },
+      "required": [
+        "model_id",
+        "model_version",
+        "dataset_refs",
+        "artifact_sha256",
+        "evaluation"
+      ],
+      "title": "ModelCandidate",
+      "type": "object"
+    },
+    "ModelCandidateEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "model.candidate",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ModelCandidate"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "ModelCandidateEvent",
+      "type": "object"
+    },
+    "ModelStatus": {
+      "enum": [
+        "CANDIDATE",
+        "APPROVED",
+        "CHAMPION",
+        "RETIRED",
+        "REJECTED"
+      ],
+      "title": "ModelStatus",
+      "type": "string"
+    },
+    "NewsAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "assessment_id": {
+          "title": "Assessment Id",
+          "type": "string"
+        },
+        "available_at": {
+          "format": "date-time",
+          "title": "Available At",
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "impact": {
+          "ge": 0,
+          "le": 1,
+          "title": "Impact",
+          "type": "string"
+        },
+        "news_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "News Ids",
+          "type": "array"
+        },
+        "score": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "source_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assessment_id",
+        "news_ids",
+        "source_refs",
+        "direction",
+        "impact",
+        "score",
+        "available_at",
+        "valid_until"
+      ],
+      "title": "NewsAssessment",
+      "type": "object"
+    },
+    "NewsAssessmentEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "news.assessment",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/NewsAssessment"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "NewsAssessmentEvent",
+      "type": "object"
+    },
+    "PredictionGenerated": {
+      "additionalProperties": false,
+      "properties": {
+        "data_quality": {
+          "$ref": "#/$defs/DataQuality"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "expected_range_high": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Range High"
+        },
+        "expected_range_low": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Range Low"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "horizon": {
+          "$ref": "#/$defs/Timeframe"
+        },
+        "horizon_bars": {
+          "exclusiveMinimum": 0,
+          "title": "Horizon Bars",
+          "type": "integer"
+        },
+        "input_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "lineage": {
+          "$ref": "#/$defs/ForecastLineage"
+        },
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "model_version": {
+          "title": "Model Version",
+          "type": "string"
+        },
+        "prediction_id": {
+          "title": "Prediction Id",
+          "type": "string"
+        },
+        "probability": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prediction_id",
+        "model_id",
+        "model_version",
+        "lineage",
+        "horizon",
+        "horizon_bars",
+        "direction",
+        "probability",
+        "data_quality",
+        "input_refs",
+        "generated_at",
+        "valid_until"
+      ],
+      "title": "PredictionGenerated",
+      "type": "object"
+    },
+    "PredictionGeneratedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "prediction.generated",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/PredictionGenerated"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "PredictionGeneratedEvent",
+      "type": "object"
+    },
+    "RiskDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "approved_lot": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved Lot"
+        },
+        "decided_at": {
+          "format": "date-time",
+          "title": "Decided At",
+          "type": "string"
+        },
+        "intent_id": {
+          "title": "Intent Id",
+          "type": "string"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        }
+      },
+      "required": [
+        "intent_id",
+        "verdict",
+        "policy_version",
+        "reason_codes",
+        "decided_at"
+      ],
+      "title": "RiskDecision",
+      "type": "object"
+    },
+    "RiskDecisionEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "risk.decision",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RiskDecision"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "RiskDecisionEvent",
+      "type": "object"
+    },
+    "RiskUpdated": {
+      "additionalProperties": false,
+      "properties": {
+        "epoch_ceiling_percent": {
+          "ge": 0,
+          "le": 100,
+          "title": "Epoch Ceiling Percent",
+          "type": "string"
+        },
+        "epoch_dd_percent": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "le": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Epoch Dd Percent"
+        },
+        "lifetime_ceiling_percent": {
+          "ge": 0,
+          "le": 100,
+          "title": "Lifetime Ceiling Percent",
+          "type": "string"
+        },
+        "lifetime_dd_percent": {
+          "anyOf": [
+            {
+              "ge": 0,
+              "le": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lifetime Dd Percent"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "risk_locked": {
+          "title": "Risk Locked",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "epoch_dd_percent",
+        "lifetime_dd_percent",
+        "epoch_ceiling_percent",
+        "lifetime_ceiling_percent",
+        "risk_locked",
+        "reason_codes",
+        "policy_version"
+      ],
+      "title": "RiskUpdated",
+      "type": "object"
+    },
+    "RiskUpdatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "risk.updated",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RiskUpdated"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "RiskUpdatedEvent",
+      "type": "object"
+    },
+    "Side": {
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "title": "Side",
+      "type": "string"
+    },
+    "Timeframe": {
+      "enum": [
+        "M5",
+        "M15",
+        "H1"
+      ],
+      "title": "Timeframe",
+      "type": "string"
+    },
+    "TradeIntent": {
+      "additionalProperties": false,
+      "description": "A proposal to trade \u2014 never a broker order (\u00a78.3).",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/IntentAction"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cycle Id"
+        },
+        "decision_id": {
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "expected_value_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Value Usd"
+        },
+        "intent_id": {
+          "title": "Intent Id",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "position_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Position Refs",
+          "type": "array"
+        },
+        "prediction_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prediction Ids",
+          "type": "array"
+        },
+        "requested_lot": {
+          "anyOf": [
+            {
+              "gt": 0,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Requested Lot"
+        },
+        "side": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Side"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "strategy_id": {
+          "title": "Strategy Id",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "valid_until": {
+          "format": "date-time",
+          "title": "Valid Until",
+          "type": "string"
+        }
+      },
+      "required": [
+        "intent_id",
+        "decision_id",
+        "action",
+        "side",
+        "symbol",
+        "requested_lot",
+        "strategy_id",
+        "cycle_id",
+        "mode",
+        "expected_value_usd",
+        "prediction_ids",
+        "valid_until"
+      ],
+      "title": "TradeIntent",
+      "type": "object"
+    },
+    "TradeIntentEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "trade.intent",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TradeIntent"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "TradeIntentEvent",
+      "type": "object"
+    },
+    "Verdict": {
+      "enum": [
+        "ALLOW",
+        "DENY"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "account.snapshot": "#/$defs/AccountSnapshotEvent",
+      "candle.closed": "#/$defs/CandleClosedEvent",
+      "control.completed": "#/$defs/ControlCompletedEvent",
+      "control.requested": "#/$defs/ControlRequestedEvent",
+      "cycle.updated": "#/$defs/CycleUpdatedEvent",
+      "decision.created": "#/$defs/DecisionCreatedEvent",
+      "execution.updated": "#/$defs/ExecutionUpdatedEvent",
+      "feature.snapshot": "#/$defs/FeatureSnapshotEvent",
+      "health.updated": "#/$defs/HealthUpdatedEvent",
+      "llm.reasoning": "#/$defs/LlmReasoningEvent",
+      "market.snapshot": "#/$defs/MarketSnapshotEvent",
+      "model.approved": "#/$defs/ModelApprovedEvent",
+      "model.candidate": "#/$defs/ModelCandidateEvent",
+      "news.assessment": "#/$defs/NewsAssessmentEvent",
+      "prediction.generated": "#/$defs/PredictionGeneratedEvent",
+      "risk.decision": "#/$defs/RiskDecisionEvent",
+      "risk.updated": "#/$defs/RiskUpdatedEvent",
+      "trade.intent": "#/$defs/TradeIntentEvent"
+    },
+    "propertyName": "event_type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/MarketSnapshotEvent"
+    },
+    {
+      "$ref": "#/$defs/CandleClosedEvent"
+    },
+    {
+      "$ref": "#/$defs/FeatureSnapshotEvent"
+    },
+    {
+      "$ref": "#/$defs/NewsAssessmentEvent"
+    },
+    {
+      "$ref": "#/$defs/PredictionGeneratedEvent"
+    },
+    {
+      "$ref": "#/$defs/LlmReasoningEvent"
+    },
+    {
+      "$ref": "#/$defs/DecisionCreatedEvent"
+    },
+    {
+      "$ref": "#/$defs/TradeIntentEvent"
+    },
+    {
+      "$ref": "#/$defs/RiskDecisionEvent"
+    },
+    {
+      "$ref": "#/$defs/ExecutionUpdatedEvent"
+    },
+    {
+      "$ref": "#/$defs/AccountSnapshotEvent"
+    },
+    {
+      "$ref": "#/$defs/CycleUpdatedEvent"
+    },
+    {
+      "$ref": "#/$defs/RiskUpdatedEvent"
+    },
+    {
+      "$ref": "#/$defs/ControlRequestedEvent"
+    },
+    {
+      "$ref": "#/$defs/ControlCompletedEvent"
+    },
+    {
+      "$ref": "#/$defs/ModelCandidateEvent"
+    },
+    {
+      "$ref": "#/$defs/ModelApprovedEvent"
+    },
+    {
+      "$ref": "#/$defs/HealthUpdatedEvent"
+    }
+  ]
+}

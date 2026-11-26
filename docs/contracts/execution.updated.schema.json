@@ -1,0 +1,114 @@
+{
+  "$defs": {
+    "ExecutionState": {
+      "enum": [
+        "PENDING",
+        "DISPATCHED",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "REJECTED",
+        "CANCELLED",
+        "UNKNOWN"
+      ],
+      "title": "ExecutionState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "broker_deal_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Broker Deal Ids",
+      "type": "array"
+    },
+    "broker_order_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Broker Order Id"
+    },
+    "broker_position_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Broker Position Id"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "fill_price": {
+      "anyOf": [
+        {
+          "gt": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fill Price"
+    },
+    "filled_lot": {
+      "anyOf": [
+        {
+          "ge": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Filled Lot"
+    },
+    "intent_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Intent Id"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/ExecutionState"
+    }
+  },
+  "required": [
+    "request_id",
+    "intent_id",
+    "state"
+  ],
+  "title": "ExecutionUpdated",
+  "type": "object"
+}

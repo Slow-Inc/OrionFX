@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "Confidence": {
+      "additionalProperties": false,
+      "description": "A 0-1 score is never shipped without what it means (master plan \u00a74.6).\n\n`semantics` names the target and method, e.g. \"calibrated P(close up) over 3 H1 bars\"\nor \"uncalibrated LLM score\". An LLM score is not a calibrated probability.",
+      "properties": {
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "semantics": {
+          "minLength": 1,
+          "title": "Semantics",
+          "type": "string"
+        },
+        "value": {
+          "ge": 0,
+          "le": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "semantics"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "Direction": {
+      "enum": [
+        "UP",
+        "DOWN",
+        "NEUTRAL"
+      ],
+      "title": "Direction",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "direction": {
+      "$ref": "#/$defs/Direction"
+    },
+    "news_assessment_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "News Assessment Ids",
+      "type": "array"
+    },
+    "prediction_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Prediction Ids",
+      "type": "array"
+    },
+    "prompt_version": {
+      "title": "Prompt Version",
+      "type": "string"
+    },
+    "provider": {
+      "title": "Provider",
+      "type": "string"
+    },
+    "rationale": {
+      "title": "Rationale",
+      "type": "string"
+    },
+    "reasoning_id": {
+      "title": "Reasoning Id",
+      "type": "string"
+    },
+    "score": {
+      "$ref": "#/$defs/Confidence"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    }
+  },
+  "required": [
+    "reasoning_id",
+    "news_assessment_ids",
+    "prediction_ids",
+    "direction",
+    "score",
+    "rationale",
+    "prompt_version",
+    "provider",
+    "valid_until"
+  ],
+  "title": "LlmReasoning",
+  "type": "object"
+}

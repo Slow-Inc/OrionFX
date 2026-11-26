@@ -1,0 +1,96 @@
+{
+  "$defs": {
+    "Confidence": {
+      "additionalProperties": false,
+      "description": "A 0-1 score is never shipped without what it means (master plan \u00a74.6).\n\n`semantics` names the target and method, e.g. \"calibrated P(close up) over 3 H1 bars\"\nor \"uncalibrated LLM score\". An LLM score is not a calibrated probability.",
+      "properties": {
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "semantics": {
+          "minLength": 1,
+          "title": "Semantics",
+          "type": "string"
+        },
+        "value": {
+          "ge": 0,
+          "le": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "semantics"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "Direction": {
+      "enum": [
+        "UP",
+        "DOWN",
+        "NEUTRAL"
+      ],
+      "title": "Direction",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "assessment_id": {
+      "title": "Assessment Id",
+      "type": "string"
+    },
+    "available_at": {
+      "format": "date-time",
+      "title": "Available At",
+      "type": "string"
+    },
+    "direction": {
+      "$ref": "#/$defs/Direction"
+    },
+    "impact": {
+      "ge": 0,
+      "le": 1,
+      "title": "Impact",
+      "type": "string"
+    },
+    "news_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "News Ids",
+      "type": "array"
+    },
+    "score": {
+      "$ref": "#/$defs/Confidence"
+    },
+    "source_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Refs",
+      "type": "array"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    }
+  },
+  "required": [
+    "assessment_id",
+    "news_ids",
+    "source_refs",
+    "direction",
+    "impact",
+    "score",
+    "available_at",
+    "valid_until"
+  ],
+  "title": "NewsAssessment",
+  "type": "object"
+}

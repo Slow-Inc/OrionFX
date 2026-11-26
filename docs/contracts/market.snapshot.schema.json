@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "DataQuality": {
+      "enum": [
+        "OK",
+        "STALE",
+        "DEGRADED",
+        "MISSING"
+      ],
+      "title": "DataQuality",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "ask": {
+      "anyOf": [
+        {
+          "gt": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Ask"
+    },
+    "bid": {
+      "anyOf": [
+        {
+          "gt": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Bid"
+    },
+    "broker_time_offset_minutes": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Broker Time Offset Minutes"
+    },
+    "quality": {
+      "$ref": "#/$defs/DataQuality"
+    },
+    "spread": {
+      "anyOf": [
+        {
+          "ge": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Spread"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
+    "tick_time": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Tick Time"
+    }
+  },
+  "required": [
+    "symbol",
+    "bid",
+    "ask",
+    "spread",
+    "tick_time",
+    "quality"
+  ],
+  "title": "MarketSnapshot",
+  "type": "object"
+}

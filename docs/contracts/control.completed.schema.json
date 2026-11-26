@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "CommandStatus": {
+      "enum": [
+        "ACCEPTED",
+        "REJECTED",
+        "COMPLETED",
+        "UNRESOLVED"
+      ],
+      "title": "CommandStatus",
+      "type": "string"
+    },
+    "ControlState": {
+      "enum": [
+        "STOPPED",
+        "STARTING",
+        "RECONCILING",
+        "RUNNING",
+        "PAUSED",
+        "FINISHING",
+        "CLOSING",
+        "RISK_LOCKED",
+        "SAFE_MODE"
+      ],
+      "title": "ControlState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "command_id": {
+      "title": "Command Id",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
+    "resulting_state": {
+      "$ref": "#/$defs/ControlState"
+    },
+    "risk_locked": {
+      "title": "Risk Locked",
+      "type": "boolean"
+    },
+    "status": {
+      "$ref": "#/$defs/CommandStatus"
+    },
+    "unresolved": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved",
+      "type": "array"
+    }
+  },
+  "required": [
+    "command_id",
+    "status",
+    "resulting_state",
+    "risk_locked"
+  ],
+  "title": "ControlCompleted",
+  "type": "object"
+}

@@ -1,0 +1,130 @@
+{
+  "$defs": {
+    "CloseReason": {
+      "enum": [
+        "TARGET_TRIGGERED",
+        "TRAILING_FLOOR",
+        "EMERGENCY_STOP",
+        "RISK_LIMIT",
+        "FINISH_CYCLE",
+        "MANUAL_RECONCILED"
+      ],
+      "title": "CloseReason",
+      "type": "string"
+    },
+    "CycleState": {
+      "enum": [
+        "IDLE",
+        "ACTIVE",
+        "CLOSING",
+        "CLOSED"
+      ],
+      "title": "CycleState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "close_reason": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CloseReason"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "final_net_usd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Final Net Usd"
+    },
+    "net_estimate_usd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Net Estimate Usd"
+    },
+    "peak_net_usd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Peak Net Usd"
+    },
+    "state": {
+      "$ref": "#/$defs/CycleState"
+    },
+    "target_achieved": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Achieved"
+    },
+    "target_triggered": {
+      "default": false,
+      "title": "Target Triggered",
+      "type": "boolean"
+    },
+    "target_usd": {
+      "title": "Target Usd",
+      "type": "string"
+    },
+    "trailing_active": {
+      "title": "Trailing Active",
+      "type": "boolean"
+    },
+    "trailing_floor_usd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Trailing Floor Usd"
+    },
+    "unresolved": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved",
+      "type": "array"
+    }
+  },
+  "required": [
+    "state",
+    "target_usd",
+    "net_estimate_usd",
+    "peak_net_usd",
+    "trailing_floor_usd",
+    "trailing_active"
+  ],
+  "title": "CycleUpdated",
+  "type": "object"
+}

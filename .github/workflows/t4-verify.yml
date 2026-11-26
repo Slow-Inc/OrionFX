@@ -1,29 +1,23 @@
 # T4 verify — the server-side ship gate.
 #
-# CURRENT STATE (2026-11-27): the repo has no code yet (master plan phase P0 —
-# PRDs & contracts). The `lint` / `typecheck` / `test` / `build` jobs from the
-# T4 template are deliberately NOT installed: a job that runs a script that does
-# not exist is a permanently red check, and a red check everyone merges past
-# teaches the team to ignore red. They land with P1 Foundation (tracked in
-# docs/OPEN-WORK-LEDGER.md) — backend: ruff + mypy + pytest; frontend: bun
-# lint/typecheck/test/build.
+# Jobs: `guards` (the three .githooks scripts), and the backend `lint`,
+# `typecheck`, `test` (P1 Foundation, issue #5). Frontend jobs land with M01.
+# Keep `.claude/t4.json` "verify" a literal prefix of these jobs, so the local
+# gate fails for the same reasons, sooner.
 #
-# Until then the only job is `guards`: the same three scripts as the local
-# `.githooks/pre-push`. They do NOT check identical things here:
-# `check-tree-budget` reads uncommitted files, and a fresh CI checkout has none,
-# so in CI it only proves the checkout is clean. The issue-ref and gate-ledger
-# checks are the ones that bind in CI. The step below checks out the PR branch
-# by name, because the default detached HEAD would hide `wip/*` and
-# `feat/<n>-...` branch names from the scripts.
+# `guards` notes: `check-tree-budget` reads uncommitted files, and a fresh CI
+# checkout has none, so in CI it only proves the checkout is clean. The
+# issue-ref and gate-ledger checks are the ones that bind in CI. The branch is
+# checked out by name because the default detached HEAD would hide `wip/*` and
+# `feat/<n>-...` names from the scripts.
 #
-# Slow-Inc is on the GitHub free plan, so this check cannot be made a required
-# status check on a private repo. `.claude/t4.json` "requireGreenCI": true is the
-# (weaker) fallback — it binds agent-run `gh pr merge` only, not a web merge.
+# Slow-Inc is on the GitHub free plan, so no check can be made a required
+# status check on this private repo. `.claude/t4.json` "requireGreenCI": true is
+# the (weaker) fallback — it binds agent-run `gh pr merge` only, not a web merge.
 name: T4 verify
 
-# PR-only for now: on a push to main both branch-scoped guards skip and
-# check-tree-budget is a no-op, so a push run would be a green that checks
-# nothing. Add `push: main` back with the P1 lint/typecheck/test/build jobs.
+# PR-only: every change reaches main through a PR, and the branch-scoped guards
+# have nothing to check on a push to main.
 on:
   pull_request:
     branches: [main]
@@ -58,3 +52,28 @@ jobs:
         env:
           BASE_REF: origin/${{ github.base_ref }}
           GH_TOKEN: ${{ github.token }}
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - run: uv run pytest

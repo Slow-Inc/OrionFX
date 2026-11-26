@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "HealthStatus": {
+      "enum": [
+        "OK",
+        "DEGRADED",
+        "DOWN"
+      ],
+      "title": "HealthStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "component": {
+      "title": "Component",
+      "type": "string"
+    },
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail"
+    },
+    "last_heartbeat": {
+      "format": "date-time",
+      "title": "Last Heartbeat",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/HealthStatus"
+    }
+  },
+  "required": [
+    "component",
+    "status",
+    "last_heartbeat"
+  ],
+  "title": "HealthUpdated",
+  "type": "object"
+}

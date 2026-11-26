@@ -1,0 +1,133 @@
+{
+  "$defs": {
+    "Confidence": {
+      "additionalProperties": false,
+      "description": "A 0-1 score is never shipped without what it means (master plan \u00a74.6).\n\n`semantics` names the target and method, e.g. \"calibrated P(close up) over 3 H1 bars\"\nor \"uncalibrated LLM score\". An LLM score is not a calibrated probability.",
+      "properties": {
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "semantics": {
+          "minLength": 1,
+          "title": "Semantics",
+          "type": "string"
+        },
+        "value": {
+          "ge": 0,
+          "le": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "semantics"
+      ],
+      "title": "Confidence",
+      "type": "object"
+    },
+    "DecisionAction": {
+      "enum": [
+        "ENTER",
+        "ADD",
+        "EXIT",
+        "WAIT"
+      ],
+      "title": "DecisionAction",
+      "type": "string"
+    },
+    "Side": {
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "title": "Side",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/DecisionAction"
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Confidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "expected_value_usd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Expected Value Usd"
+    },
+    "policy_version": {
+      "title": "Policy Version",
+      "type": "string"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "side": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Side"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "strategy_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Strategy Id"
+    }
+  },
+  "required": [
+    "decision_id",
+    "action",
+    "strategy_id",
+    "side",
+    "expected_value_usd",
+    "confidence",
+    "reason_codes",
+    "evidence_refs",
+    "policy_version"
+  ],
+  "title": "DecisionCreated",
+  "type": "object"
+}

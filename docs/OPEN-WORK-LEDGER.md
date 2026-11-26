@@ -18,7 +18,7 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 |---|---|---|---|
 | T4 bootstrap: hooks, guards, CI `guards` job, memory, records, governance docs | ✅ | PR merge | Merge the bootstrap PR |
 | `docs/agents/issue-tracker.md` + `docs/agents/triage-labels.md` + labels | ✅ | PR merge | Done 2026-11-27 via `/setup-matt-pocock-skills` + T4 delta |
-| CI `lint`/`typecheck`/`test`/`build` jobs + local `verify` in `.claude/t4.json` | 🔴 | P1 Foundation (no code yet) | Add jobs to `.github/workflows/t4-verify.yml` with the first `pyproject.toml` / `frontend/package.json`; set `"verify"` to the fast subset |
+| CI `lint`/`typecheck`/`test` (backend) + local `verify` | ✅ | — | #5. Frontend jobs land with M01 |
 | Upstream defects in vendored hook/guard scripts (see `CLAUDE.md` → Enforcement) | 🔴 | Report to `xenodeve/xeno-skills` | Not patched locally, to keep the scripts in sync with upstream |
 | Secret scanning + push protection | 🔴 | GitHub returned 422 "not available for this repository" (private, free plan) | No server-side secret gate exists; rely on `.gitignore` + `/security-review`. Revisit with the plan/visibility |
 | Required status checks / ruleset on `main` | 🔴 | Slow-Inc is on the free plan (rulesets not enforceable on private repos) | `requireGreenCI: true` is the stopgap; revisit if the org plan or repo visibility changes |
