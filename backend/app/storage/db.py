@@ -8,6 +8,7 @@ explicit transaction with `transaction()`.
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
+from decimal import Decimal
 from pathlib import Path
 
 from app.core.time import utc_now_iso
@@ -57,6 +58,15 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     except BaseException:
         _rollback_quietly(conn)
         raise
+
+
+def dec_or_none(text: str | None) -> Decimal | None:
+    """Money is stored as Decimal text; NULL stays None."""
+    return None if text is None else Decimal(text)
+
+
+def text_or_none(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
 
 
 def _statements(script: str) -> list[str]:

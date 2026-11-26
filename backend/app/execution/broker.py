@@ -95,7 +95,9 @@ class Deal:
     price: Decimal | None
     profit: Decimal
     commission: Decimal
+    """A cost, >= 0. MT5 reports it negative; the adapter negates it."""
     swap: Decimal
+    """Signed: positive is credited."""
     magic: int
     time: datetime
     is_balance: bool

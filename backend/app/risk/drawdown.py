@@ -21,6 +21,8 @@ from app.core.time import Clock, utc_now
 from app.execution.broker import AccountInfo
 from app.risk.policy import RiskPolicy
 from app.storage.audit import audit
+from app.storage.db import dec_or_none as _dec
+from app.storage.db import text_or_none as _txt
 from app.storage.db import transaction
 
 HUNDRED = Decimal(100)
@@ -32,14 +34,6 @@ def dd_percent(peak: Decimal, equity: Decimal) -> Decimal:
     if peak <= 0:
         return HUNDRED
     return min(HUNDRED, max(Decimal(0), (peak - equity) / peak * HUNDRED))
-
-
-def _dec(text: str | None) -> Decimal | None:
-    return None if text is None else Decimal(text)
-
-
-def _txt(value: Decimal | None) -> str | None:
-    return None if value is None else str(value)
 
 
 @dataclass(frozen=True, slots=True)

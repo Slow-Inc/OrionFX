@@ -87,6 +87,15 @@ class OwnershipRegistry:
         ).fetchone()
         return None if row is None else row[0]
 
+    def positions_of_cycle(self, account: AccountInfo, cycle_id: str) -> set[tuple[str, str]]:
+        """(position_id, symbol) pairs the bot opened for this cycle."""
+        rows = self._conn.execute(
+            "SELECT position_id, symbol FROM bot_positions"
+            " WHERE login = ? AND server = ? AND cycle_id = ?",
+            (account.login, account.server, cycle_id),
+        ).fetchall()
+        return {(r[0], r[1]) for r in rows}
+
     def ownership_ambiguous(
         self, symbol: str, positions: Iterable[Position], account: AccountInfo
     ) -> bool:
