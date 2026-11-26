@@ -39,7 +39,7 @@ class CloseWorkflow:
         self._owners = OwnershipRegistry(conn)
         self._ledger = ExecutionLedger(conn)
 
-    def _cycle_positions(self, cycle_id: str) -> list[Position]:
+    def cycle_positions(self, cycle_id: str) -> list[Position]:
         owned = self._owners.positions_of_cycle(self._broker.account(), cycle_id)
         return [
             p
@@ -52,7 +52,7 @@ class CloseWorkflow:
         account = self._broker.account()
         return [o for o in self._broker.pending_orders() if self._owners.is_bot_order(account, o)]
 
-    def _cancel_bot_orders(self) -> list[str]:
+    def cancel_bot_orders(self) -> list[str]:
         problems: list[str] = []
         for order in self._bot_orders():
             try:
@@ -63,6 +63,28 @@ class CloseWorkflow:
             if upd.state is not ExecutionState.CANCELLED:
                 problems.append(f"{order.order_id}: {upd.state} {upd.error or ''}".strip())
         return problems
+
+    def net_inputs(self, cycle_id: str) -> tuple[Decimal, Decimal, Decimal]:
+        """(realized, floating, estimated close cost) from one deal read. The close
+        commission is assumed equal to the opening one, pro rata to what is still
+        open [PROPOSED estimate; the final net always comes from real deals]."""
+        account = self._broker.account()
+        ids = {pid for pid, _ in self._owners.positions_of_cycle(account, cycle_id)}
+        open_volume = {p.position_id: p.volume for p in self.cycle_positions(cycle_id)}
+        realized = floating = est_close = Decimal(0)
+        opened: set[str] = set()
+        for d in self._broker.deals_since(None):
+            if d.is_balance or d.position_id not in ids:
+                continue
+            realized += d.profit - d.commission + d.swap
+            pid = d.position_id
+            if pid in open_volume and pid not in opened and d.volume > 0:
+                opened.add(pid)
+                est_close += d.commission * open_volume[pid] / d.volume
+        for p in self._broker.positions():
+            if p.position_id in open_volume:
+                floating += p.profit + p.swap
+        return realized, floating, est_close
 
     def realized_net(self, cycle_id: str) -> Decimal:
         ids = {pid for pid, _ in self._owners.positions_of_cycle(self._broker.account(), cycle_id)}
@@ -86,8 +108,8 @@ class CloseWorkflow:
         if unresolved:
             return CloseReport(False, unresolved)
 
-        unresolved += self._cancel_bot_orders()
-        for pos in self._cycle_positions(cycle_id):
+        unresolved += self.cancel_bot_orders()
+        for pos in self.cycle_positions(cycle_id):
             if self._ledger.has_unresolved():
                 unresolved.append(f"{pos.position_id}: waiting for reconcile")
                 break  # an unknown outcome blocks every further write until reconciled
@@ -106,7 +128,7 @@ class CloseWorkflow:
             if upd.state is not ExecutionState.FILLED:
                 unresolved.append(f"{pos.position_id}: {upd.state} {upd.error or ''}".strip())
 
-        remaining = self._cycle_positions(cycle_id)
+        remaining = self.cycle_positions(cycle_id)
         if unresolved or self._ledger.has_unresolved() or remaining or self._bot_orders():
             left = [f"{p.position_id}: still open" for p in remaining]
             return CloseReport(False, unresolved or left)

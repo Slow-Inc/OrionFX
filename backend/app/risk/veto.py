@@ -25,6 +25,11 @@ EXITS = (IntentAction.CLOSE, IntentAction.CLOSE_ALL)
 CLOCK_SKEW = timedelta(seconds=2)
 
 
+def quote_fresh(quote: Quote, now: datetime, policy: RiskPolicy) -> bool:
+    age = now - quote.time
+    return -CLOCK_SKEW <= age <= timedelta(seconds=policy.max_quote_age_seconds)
+
+
 class Eligibility(Protocol):
     def allowed(self, strategy_id: str, mode: Mode) -> bool: ...
 
@@ -174,8 +179,7 @@ def evaluate(intent: TradeIntent, ctx: RiskContext) -> RiskDecision:
     if quote is None or quote.symbol != intent.symbol:
         reasons.append("QUOTE_MISSING")
     else:
-        age = ctx.now - quote.time
-        if age > timedelta(seconds=ctx.policy.max_quote_age_seconds) or age < -CLOCK_SKEW:
+        if not quote_fresh(quote, ctx.now, ctx.policy):
             reasons.append("QUOTE_STALE")  # too old, or from the future (clock skew)
         if quote.ask - quote.bid > ctx.policy.max_spread:
             reasons.append("SPREAD_TOO_WIDE")
