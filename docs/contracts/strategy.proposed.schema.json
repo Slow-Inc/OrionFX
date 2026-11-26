@@ -1,0 +1,149 @@
+{
+  "$defs": {
+    "Direction": {
+      "enum": [
+        "UP",
+        "DOWN",
+        "NEUTRAL"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "IntentAction": {
+      "enum": [
+        "OPEN",
+        "ADD",
+        "CLOSE",
+        "CLOSE_ALL"
+      ],
+      "title": "IntentAction",
+      "type": "string"
+    },
+    "Timeframe": {
+      "enum": [
+        "M5",
+        "M15",
+        "H1"
+      ],
+      "title": "Timeframe",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "What M05 proposes; M06 decides. Never a broker order (\u00a74.6).",
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/IntentAction"
+    },
+    "composition_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Composition Id"
+    },
+    "constraints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "cost_estimate_usd": {
+      "anyOf": [
+        {
+          "ge": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Cost Estimate Usd"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "direction": {
+      "$ref": "#/$defs/Direction"
+    },
+    "expected_value_usd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Expected Value Usd"
+    },
+    "horizon": {
+      "$ref": "#/$defs/Timeframe"
+    },
+    "proposal_id": {
+      "title": "Proposal Id",
+      "type": "string"
+    },
+    "rationale": {
+      "title": "Rationale",
+      "type": "string"
+    },
+    "requested_lot": {
+      "anyOf": [
+        {
+          "gt": 0,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Requested Lot"
+    },
+    "strategy_id": {
+      "title": "Strategy Id",
+      "type": "string"
+    },
+    "strategy_version": {
+      "title": "Strategy Version",
+      "type": "string"
+    },
+    "technique_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Technique Refs",
+      "type": "array"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    }
+  },
+  "required": [
+    "proposal_id",
+    "strategy_id",
+    "strategy_version",
+    "technique_refs",
+    "composition_id",
+    "decision_id",
+    "direction",
+    "action",
+    "horizon",
+    "expected_value_usd",
+    "cost_estimate_usd",
+    "requested_lot",
+    "valid_until",
+    "rationale",
+    "constraints"
+  ],
+  "title": "StrategyProposal",
+  "type": "object"
+}

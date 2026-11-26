@@ -1,0 +1,1943 @@
+[
+  {
+    "catalog_id": "CAT-S01-01",
+    "capability": "Trend Following",
+    "owner": "M05",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick, forecast, validated costs",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S01-02",
+    "capability": "Scalping",
+    "owner": "M05",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick, forecast, validated costs",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S01-03",
+    "capability": "Pullback Trading",
+    "owner": "M05",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick, forecast, validated costs",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S01-04",
+    "capability": "Breakout Trading",
+    "owner": "M05",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick, forecast, validated costs",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S01-05",
+    "capability": "Range Trading",
+    "owner": "M05",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick, forecast, validated costs",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S01-06",
+    "capability": "Hybrid Strategy",
+    "owner": "M05",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick, forecast, validated costs",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S01-07",
+    "capability": "Machine Learning Trading",
+    "owner": "M05",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick, forecast, validated costs",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-01",
+    "capability": "Momentum Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-02",
+    "capability": "Trend Acceleration",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-03",
+    "capability": "Mean Reversion",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-04",
+    "capability": "Counter Trend",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-05",
+    "capability": "Reversal Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-06",
+    "capability": "Retest Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-07",
+    "capability": "False Breakout",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-08",
+    "capability": "Intraday Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-09",
+    "capability": "Swing Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-10",
+    "capability": "Session Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-11",
+    "capability": "Liquidity Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-12",
+    "capability": "SMC Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-13",
+    "capability": "ICT Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-14",
+    "capability": "Price Action Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-15",
+    "capability": "Statistical Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-16",
+    "capability": "Quantitative Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-17",
+    "capability": "Deep Learning Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-18",
+    "capability": "Trend Continuation",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-19",
+    "capability": "Volatility Expansion",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S02-20",
+    "capability": "Regime Switching",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "OHLC/tick; formal rules and horizon; model availability where relevant",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-S03-01",
+    "capability": "News Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "M03 licensed point-in-time news/calendar, timestamps, event spread/slippage tests",
+    "coverage_state": "blocked",
+    "blocker_reason": "No licensed point-in-time news/calendar feed configured (M03 provider/API keys absent)",
+    "resolution_owner": "M03",
+    "review_trigger": "A licensed news/calendar source and API key are configured"
+  },
+  {
+    "catalog_id": "CAT-S03-02",
+    "capability": "Fundamental Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "M03 licensed point-in-time news/calendar, timestamps, event spread/slippage tests",
+    "coverage_state": "blocked",
+    "blocker_reason": "No licensed point-in-time news/calendar feed configured (M03 provider/API keys absent)",
+    "resolution_owner": "M03",
+    "review_trigger": "A licensed news/calendar source and API key are configured"
+  },
+  {
+    "catalog_id": "CAT-S03-03",
+    "capability": "Economic Event Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "M03 licensed point-in-time news/calendar, timestamps, event spread/slippage tests",
+    "coverage_state": "blocked",
+    "blocker_reason": "No licensed point-in-time news/calendar feed configured (M03 provider/API keys absent)",
+    "resolution_owner": "M03",
+    "review_trigger": "A licensed news/calendar source and API key are configured"
+  },
+  {
+    "catalog_id": "CAT-S03-04",
+    "capability": "Post-event Reaction",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "M03 licensed point-in-time news/calendar, timestamps, event spread/slippage tests",
+    "coverage_state": "blocked",
+    "blocker_reason": "No licensed point-in-time news/calendar feed configured (M03 provider/API keys absent)",
+    "resolution_owner": "M03",
+    "review_trigger": "A licensed news/calendar source and API key are configured"
+  },
+  {
+    "catalog_id": "CAT-S04-01",
+    "capability": "Order Flow Trading",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified trade-side/depth feeds, correct venue semantics, M02 capability gate",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified trade-side/depth feed for XAUUSD",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-R01-01",
+    "capability": "Adaptive Recovery",
+    "owner": "M06",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M05 proposes; M06 owns actual risk/profit/execution; no forced recovery",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R01-02",
+    "capability": "Smart Cut Loss",
+    "owner": "M06",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M05 proposes; M06 owns actual risk/profit/execution; no forced recovery",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R01-03",
+    "capability": "Adaptive Position Scaling",
+    "owner": "M06",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M05 proposes; M06 owns actual risk/profit/execution; no forced recovery",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R01-04",
+    "capability": "Adaptive Basket Trailing",
+    "owner": "M06",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M05 proposes; M06 owns actual risk/profit/execution; no forced recovery",
+    "coverage_state": "implemented",
+    "implementation_refs": [
+      "backend/app/profit/cycle.py",
+      "backend/app/engine/engine.py"
+    ],
+    "test_ids": [
+      "tests/unit/profit/test_cycle.py::test_floor_never_decreases_and_closes_at_floor",
+      "tests/unit/profit/test_cycle.py::test_trailing_params_are_clamped_to_protected_bounds",
+      "tests/integration/test_engine.py::test_trailing_floor_closes_the_cycle"
+    ],
+    "note": "Basket trailing with clamped parameters is tested; the adaptive (M05-proposed) parameter input is not built yet, so not 'tested' as Adaptive."
+  },
+  {
+    "catalog_id": "CAT-R01-05",
+    "capability": "Partial Close",
+    "owner": "M06",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M05 proposes; M06 owns actual risk/profit/execution; no forced recovery",
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/risk/veto.py",
+      "backend/app/engine/engine.py"
+    ],
+    "test_ids": [
+      "tests/unit/risk/test_veto.py::test_partial_close_must_respect_lot_rules",
+      "tests/integration/test_engine.py::test_partial_close_over_several_refs_never_exceeds_the_approved_lot"
+    ],
+    "note": "Against the fake broker only; MT5 behaviour pending #17."
+  },
+  {
+    "catalog_id": "CAT-R01-06",
+    "capability": "Dynamic Lot Recovery",
+    "owner": "M06",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M05 proposes; M06 owns actual risk/profit/execution; no forced recovery",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-01",
+    "capability": "Hedging",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-02",
+    "capability": "Controlled Grid",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-03",
+    "capability": "Dynamic Grid",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-04",
+    "capability": "Averaging Down",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-05",
+    "capability": "Averaging Up",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-06",
+    "capability": "Pyramiding",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-07",
+    "capability": "DCA",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-08",
+    "capability": "Anti-Martingale",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R02-09",
+    "capability": "Reverse Position",
+    "owner": "M05",
+    "phase": "MVP→ADV",
+    "catalog_class": "C",
+    "dependency": "M06 independent veto, bounded exposure and validation; hedge requires compatible account; no normal per-position SL",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-R03-01",
+    "capability": "Martingale",
+    "owner": "M05",
+    "phase": "ADV",
+    "catalog_class": "D",
+    "dependency": "Isolated Shadow/Demo only; risk constraints still apply; behavior-based Live prohibition",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-01",
+    "capability": "SMA",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-02",
+    "capability": "EMA",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-03",
+    "capability": "WMA",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-04",
+    "capability": "RSI",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-05",
+    "capability": "MACD",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-06",
+    "capability": "ATR",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-07",
+    "capability": "ADX",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-08",
+    "capability": "DMI",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T01-09",
+    "capability": "Bollinger Bands",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Closed OHLC; exact periods/warm-up TBD",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-01",
+    "capability": "Stochastic",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-02",
+    "capability": "Ichimoku Cloud",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-03",
+    "capability": "Supertrend",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-04",
+    "capability": "Parabolic SAR",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-05",
+    "capability": "CCI",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-06",
+    "capability": "Williams %R",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-07",
+    "capability": "ROC",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-08",
+    "capability": "Donchian Channel",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-09",
+    "capability": "Keltner Channel",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-10",
+    "capability": "Heikin Ashi",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-11",
+    "capability": "Renko",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T02-12",
+    "capability": "Custom Indicators",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Time/price transforms must preserve available_at; Renko construction and replay specified; custom adapters reviewed",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T03-01",
+    "capability": "Price Action",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M5/M15/H1; closed bars and confirmed pivots",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T03-02",
+    "capability": "Candlestick Patterns",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M5/M15/H1; closed bars and confirmed pivots",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T03-03",
+    "capability": "Support & Resistance",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M5/M15/H1; closed bars and confirmed pivots",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T03-04",
+    "capability": "Market Structure",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M5/M15/H1; closed bars and confirmed pivots",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T03-05",
+    "capability": "Swing High / Swing Low",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M5/M15/H1; closed bars and confirmed pivots",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T03-06",
+    "capability": "Market Regime",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M5/M15/H1; closed bars and confirmed pivots",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T03-07",
+    "capability": "Multi-Timeframe",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "M5/M15/H1; closed bars and confirmed pivots",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-01",
+    "capability": "Higher High / Higher Low",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-02",
+    "capability": "Lower High / Lower Low",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-03",
+    "capability": "Break of Structure (BOS)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-04",
+    "capability": "Change of Character (CHoCH)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-05",
+    "capability": "Market Structure Shift (MSS)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-06",
+    "capability": "Supply & Demand",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-07",
+    "capability": "Trendline",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-08",
+    "capability": "Price Channel",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-09",
+    "capability": "Pivot Points",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-10",
+    "capability": "Divergence",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-11",
+    "capability": "Hidden Divergence",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-12",
+    "capability": "Pin Bar",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-13",
+    "capability": "Engulfing",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T04-14",
+    "capability": "Inside / Outside Bars",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formalize operational definitions, confirmation and invalidation; no backdating",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-01",
+    "capability": "Order Block (OB)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-02",
+    "capability": "Fair Value Gap (FVG)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-03",
+    "capability": "Inverse Fair Value Gap",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-04",
+    "capability": "Breaker Block",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-05",
+    "capability": "Mitigation Block",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-06",
+    "capability": "Liquidity Sweep",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-07",
+    "capability": "Liquidity Grab",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-08",
+    "capability": "Liquidity Void",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-09",
+    "capability": "Equal High / Equal Low",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-10",
+    "capability": "Buy Side / Sell Side Liquidity",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-11",
+    "capability": "Premium / Discount Zone",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-12",
+    "capability": "Optimal Trade Entry (OTE)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-13",
+    "capability": "ICT Kill Zones",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-14",
+    "capability": "ICT Silver Bullet",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-15",
+    "capability": "Power of Three (PO3)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-16",
+    "capability": "Judas Swing",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-17",
+    "capability": "Displacement",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-18",
+    "capability": "Inducement",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T05-19",
+    "capability": "Balanced Price Range",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Price-derived hypotheses, not proof of institutional orders; session/DST rules; algorithmic fixtures",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T06-01",
+    "capability": "SMT Divergence",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Aligned point-in-time related instrument feeds, analysis only; no extra instrument execution",
+    "coverage_state": "blocked",
+    "blocker_reason": "No aligned point-in-time related-instrument feed (DXY/yields) configured",
+    "resolution_owner": "M02",
+    "review_trigger": "A related-instrument feed is configured"
+  },
+  {
+    "catalog_id": "CAT-T06-02",
+    "capability": "Cross-market Context",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Aligned point-in-time related instrument feeds, analysis only; no extra instrument execution",
+    "coverage_state": "blocked",
+    "blocker_reason": "No aligned point-in-time related-instrument feed (DXY/yields) configured",
+    "resolution_owner": "M02",
+    "review_trigger": "A related-instrument feed is configured"
+  },
+  {
+    "catalog_id": "CAT-T07-01",
+    "capability": "Fibonacci Retracement",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-02",
+    "capability": "Fibonacci Extension",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-03",
+    "capability": "Fibonacci Time Zones",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-04",
+    "capability": "Fibonacci Fan",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-05",
+    "capability": "Measured Moves",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-06",
+    "capability": "Elliott Wave",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-07",
+    "capability": "Cycle Analysis",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-08",
+    "capability": "Wyckoff Method",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-09",
+    "capability": "Gann Theory",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-10",
+    "capability": "Dow Theory",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-11",
+    "capability": "Harmonic Patterns",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-12",
+    "capability": "Gartley",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-13",
+    "capability": "Bat",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-14",
+    "capability": "Butterfly",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-15",
+    "capability": "Crab",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-16",
+    "capability": "Shark",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-17",
+    "capability": "Cypher",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T07-18",
+    "capability": "ABCD Pattern",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Formal pivot/anchor/ratio definitions; subjective methods evaluated as testable hypotheses",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-01",
+    "capability": "Head & Shoulders",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-02",
+    "capability": "Double Top / Bottom",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-03",
+    "capability": "Triple Top / Bottom",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-04",
+    "capability": "Cup & Handle",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-05",
+    "capability": "Flag / Pennant",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-06",
+    "capability": "Triangle Patterns",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-07",
+    "capability": "Rising / Falling Wedge",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-08",
+    "capability": "Rectangle Pattern",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T08-09",
+    "capability": "Diamond Pattern",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Pattern tolerances, confirmation, invalidation and no look-ahead",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T09-01",
+    "capability": "Tick Volume",
+    "owner": "M02",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Broker tick count explicitly labeled, not global traded volume",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T10-01",
+    "capability": "Volume Spike (tick basis)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Suitable tick/price history, labeled count/time basis; no invented traded volume",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T10-02",
+    "capability": "Tick Volume Profile",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Suitable tick/price history, labeled count/time basis; no invented traded volume",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T10-03",
+    "capability": "Market Profile / TPO",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Suitable tick/price history, labeled count/time basis; no invented traded volume",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T11-01",
+    "capability": "VWAP",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Explicit actual volume vs proxy or time basis, input granularity and data lineage; never label proxy as real",
+    "coverage_state": "blocked",
+    "blocker_reason": "No actual traded volume for spot XAUUSD; tick volume must not be labelled real",
+    "resolution_owner": "M02",
+    "review_trigger": "A real-volume source or an explicitly-labelled proxy design is approved"
+  },
+  {
+    "catalog_id": "CAT-T11-02",
+    "capability": "OBV",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Explicit actual volume vs proxy or time basis, input granularity and data lineage; never label proxy as real",
+    "coverage_state": "blocked",
+    "blocker_reason": "No actual traded volume for spot XAUUSD; tick volume must not be labelled real",
+    "resolution_owner": "M02",
+    "review_trigger": "A real-volume source or an explicitly-labelled proxy design is approved"
+  },
+  {
+    "catalog_id": "CAT-T11-03",
+    "capability": "MFI",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Explicit actual volume vs proxy or time basis, input granularity and data lineage; never label proxy as real",
+    "coverage_state": "blocked",
+    "blocker_reason": "No actual traded volume for spot XAUUSD; tick volume must not be labelled real",
+    "resolution_owner": "M02",
+    "review_trigger": "A real-volume source or an explicitly-labelled proxy design is approved"
+  },
+  {
+    "catalog_id": "CAT-T11-04",
+    "capability": "Real Volume Profile",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Explicit actual volume vs proxy or time basis, input granularity and data lineage; never label proxy as real",
+    "coverage_state": "blocked",
+    "blocker_reason": "No actual traded volume for spot XAUUSD; tick volume must not be labelled real",
+    "resolution_owner": "M02",
+    "review_trigger": "A real-volume source or an explicitly-labelled proxy design is approved"
+  },
+  {
+    "catalog_id": "CAT-T11-05",
+    "capability": "Point of Control (POC)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Explicit actual volume vs proxy or time basis, input granularity and data lineage; never label proxy as real",
+    "coverage_state": "blocked",
+    "blocker_reason": "No actual traded volume for spot XAUUSD; tick volume must not be labelled real",
+    "resolution_owner": "M02",
+    "review_trigger": "A real-volume source or an explicitly-labelled proxy design is approved"
+  },
+  {
+    "catalog_id": "CAT-T11-06",
+    "capability": "VAH / VAL",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Explicit actual volume vs proxy or time basis, input granularity and data lineage; never label proxy as real",
+    "coverage_state": "blocked",
+    "blocker_reason": "No actual traded volume for spot XAUUSD; tick volume must not be labelled real",
+    "resolution_owner": "M02",
+    "review_trigger": "A real-volume source or an explicitly-labelled proxy design is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-01",
+    "capability": "Footprint Chart",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-02",
+    "capability": "Volume Delta",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-03",
+    "capability": "Cumulative Volume Delta (CVD)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-04",
+    "capability": "Order Book Analysis",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-05",
+    "capability": "Depth of Market (DOM)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-06",
+    "capability": "Bid/Ask Imbalance",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-07",
+    "capability": "Absorption",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-08",
+    "capability": "Iceberg Order Detection",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T12-09",
+    "capability": "Time & Sales",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Verified venue-specific data with required granularity; iceberg inference not guaranteed; broker DOM is not global book",
+    "coverage_state": "blocked",
+    "blocker_reason": "No verified venue-specific order-flow/DOM data",
+    "resolution_owner": "M02",
+    "review_trigger": "A verified venue-specific feed is approved"
+  },
+  {
+    "catalog_id": "CAT-T13-01",
+    "capability": "Realized Volatility",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Point-in-time series and validated estimators",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T13-02",
+    "capability": "Volatility Regime",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Point-in-time series and validated estimators",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T13-03",
+    "capability": "Regression",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Point-in-time series and validated estimators",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T13-04",
+    "capability": "Z-score",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Point-in-time series and validated estimators",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T13-05",
+    "capability": "Change-point Detection",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Point-in-time series and validated estimators",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-T14-01",
+    "capability": "Correlation",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Aligned series; no authority to trade related assets",
+    "coverage_state": "blocked",
+    "blocker_reason": "No aligned point-in-time related-instrument feed (DXY/yields) configured",
+    "resolution_owner": "M02",
+    "review_trigger": "A related-instrument feed is configured"
+  },
+  {
+    "catalog_id": "CAT-T14-02",
+    "capability": "Relative Strength (cross-market)",
+    "owner": "M02",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Aligned series; no authority to trade related assets",
+    "coverage_state": "blocked",
+    "blocker_reason": "No aligned point-in-time related-instrument feed (DXY/yields) configured",
+    "resolution_owner": "M02",
+    "review_trigger": "A related-instrument feed is configured"
+  },
+  {
+    "catalog_id": "CAT-A01-01",
+    "capability": "XGBoost",
+    "owner": "M04",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Chronological training and calibration; market risk only",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A01-02",
+    "capability": "LightGBM",
+    "owner": "M04",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Chronological training and calibration; market risk only",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A01-03",
+    "capability": "Adaptive Ensemble",
+    "owner": "M04",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Chronological training and calibration; market risk only",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A01-04",
+    "capability": "Market Regime Detection",
+    "owner": "M04",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Chronological training and calibration; market risk only",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A01-05",
+    "capability": "AI Price Prediction",
+    "owner": "M04",
+    "phase": "MVP",
+    "catalog_class": "R",
+    "dependency": "Chronological training and calibration; market risk only",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A02-01",
+    "capability": "LLM News Analysis",
+    "owner": "M03",
+    "phase": "MVP",
+    "catalog_class": "C",
+    "dependency": "Provider and news availability; provenance and safe degraded mode; original MVP requirement remains mandatory",
+    "coverage_state": "blocked",
+    "blocker_reason": "No LLM/news provider API key in this environment; degraded mode only",
+    "resolution_owner": "M03",
+    "review_trigger": "Owner configures an LLM provider key and a news source"
+  },
+  {
+    "catalog_id": "CAT-A02-02",
+    "capability": "Sentiment Analysis",
+    "owner": "M03",
+    "phase": "MVP",
+    "catalog_class": "C",
+    "dependency": "Provider and news availability; provenance and safe degraded mode; original MVP requirement remains mandatory",
+    "coverage_state": "blocked",
+    "blocker_reason": "No LLM/news provider API key in this environment; degraded mode only",
+    "resolution_owner": "M03",
+    "review_trigger": "Owner configures an LLM provider key and a news source"
+  },
+  {
+    "catalog_id": "CAT-A03-01",
+    "capability": "LSTM",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-02",
+    "capability": "GRU",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-03",
+    "capability": "Transformer",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-04",
+    "capability": "Meta-Learning",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-05",
+    "capability": "Random Forest",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-06",
+    "capability": "Support Vector Machine",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-07",
+    "capability": "Hidden Markov Model",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-08",
+    "capability": "ARIMA",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-09",
+    "capability": "GARCH",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A03-10",
+    "capability": "Kalman Filter",
+    "owner": "M04",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Validated datasets, model registry, comparative evaluation; no forced model deployment",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A04-01",
+    "capability": "Pattern Recognition",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A04-02",
+    "capability": "Dynamic Time Warping",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A04-03",
+    "capability": "Vector Similarity",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A04-04",
+    "capability": "Genetic Algorithm",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A04-05",
+    "capability": "Bayesian Optimization",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A04-06",
+    "capability": "Monte Carlo Simulation",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A04-07",
+    "capability": "AI Strategy Discovery",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "R",
+    "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
+    "coverage_state": "planned"
+  },
+  {
+    "catalog_id": "CAT-A05-01",
+    "capability": "Reinforcement Learning",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Simulation, reward/risk specification, bounded adaptation and independent certification; no unrestricted online learning",
+    "coverage_state": "blocked",
+    "blocker_reason": "Needs model training/simulation, out of scope for this run (no training)",
+    "resolution_owner": "M07",
+    "review_trigger": "Training is in scope and a simulator is certified"
+  },
+  {
+    "catalog_id": "CAT-A05-02",
+    "capability": "AI Self-Optimization",
+    "owner": "M07",
+    "phase": "ADV",
+    "catalog_class": "C",
+    "dependency": "Simulation, reward/risk specification, bounded adaptation and independent certification; no unrestricted online learning",
+    "coverage_state": "blocked",
+    "blocker_reason": "Needs model training/simulation, out of scope for this run (no training)",
+    "resolution_owner": "M07",
+    "review_trigger": "Training is in scope and a simulator is certified"
+  },
+  {
+    "catalog_id": "CAT-X01-01",
+    "capability": "True High-Frequency Trading (HFT)",
+    "owner": "X01",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Outside XAUUSD-only MT5 execution/latency scope; separate owner approval needed for any scope change",
+    "coverage_state": "excluded"
+  },
+  {
+    "catalog_id": "CAT-X01-02",
+    "capability": "Cross-market Arbitrage",
+    "owner": "X01",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Outside XAUUSD-only MT5 execution/latency scope; separate owner approval needed for any scope change",
+    "coverage_state": "excluded"
+  },
+  {
+    "catalog_id": "CAT-X01-03",
+    "capability": "Statistical Pairs Trading หลายสินทรัพย์",
+    "owner": "X01",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Outside XAUUSD-only MT5 execution/latency scope; separate owner approval needed for any scope change",
+    "coverage_state": "excluded"
+  },
+  {
+    "catalog_id": "CAT-X01-04",
+    "capability": "Options Trading",
+    "owner": "X01",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Outside XAUUSD-only MT5 execution/latency scope; separate owner approval needed for any scope change",
+    "coverage_state": "excluded"
+  },
+  {
+    "catalog_id": "CAT-X01-05",
+    "capability": "Portfolio Trading หลายสินทรัพย์",
+    "owner": "X01",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Outside XAUUSD-only MT5 execution/latency scope; separate owner approval needed for any scope change",
+    "coverage_state": "excluded"
+  },
+  {
+    "catalog_id": "CAT-X02-01",
+    "capability": "Unlimited Grid",
+    "owner": "M06",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Prohibited by existing risk rules; cannot enable through plugin/config/renaming",
+    "coverage_state": "excluded",
+    "implementation_refs": [
+      "backend/app/risk/veto.py"
+    ],
+    "test_ids": [
+      "tests/unit/risk/test_veto.py::test_profile_exposure_and_position_caps"
+    ],
+    "note": "Exclusion enforced by the Risk Veto."
+  },
+  {
+    "catalog_id": "CAT-X02-02",
+    "capability": "Unlimited Martingale",
+    "owner": "M06",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Prohibited by existing risk rules; cannot enable through plugin/config/renaming",
+    "coverage_state": "excluded",
+    "implementation_refs": [
+      "backend/app/risk/veto.py"
+    ],
+    "test_ids": [
+      "tests/unit/risk/test_veto.py::test_loss_chasing_size_up_denied_in_live_even_when_renamed"
+    ],
+    "note": "Exclusion enforced by the Risk Veto."
+  },
+  {
+    "catalog_id": "CAT-X02-03",
+    "capability": "Recovery โดยไม่จำกัด DD",
+    "owner": "M06",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Prohibited by existing risk rules; cannot enable through plugin/config/renaming",
+    "coverage_state": "excluded",
+    "implementation_refs": [
+      "backend/app/risk/veto.py"
+    ],
+    "test_ids": [
+      "tests/unit/risk/test_drawdown.py::test_breach_by_manual_loss_latches_lock"
+    ],
+    "note": "Exclusion enforced by the Risk Veto."
+  },
+  {
+    "catalog_id": "CAT-X02-04",
+    "capability": "Live Martingale",
+    "owner": "M06",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "Prohibited by existing risk rules; cannot enable through plugin/config/renaming",
+    "coverage_state": "excluded",
+    "implementation_refs": [
+      "backend/app/risk/veto.py"
+    ],
+    "test_ids": [
+      "tests/unit/risk/test_veto.py::test_martingale_by_name_denied_in_live",
+      "tests/unit/risk/test_veto.py::test_loss_chasing_via_open_action_is_also_caught"
+    ],
+    "note": "Exclusion enforced by the Risk Veto."
+  },
+  {
+    "catalog_id": "CAT-X03-01",
+    "capability": "Global XAUUSD Order Book แบบรวมทุกตลาด",
+    "owner": "M02",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "No verified consolidated feed in plan; venue-specific or futures proxy is not equivalent",
+    "coverage_state": "excluded"
+  },
+  {
+    "catalog_id": "CAT-X04-01",
+    "capability": "AI แก้ไขโค้ดและนำไปเทรดเงินจริงเองทันที",
+    "owner": "M08",
+    "phase": "N/A",
+    "catalog_class": "X",
+    "dependency": "No unreviewed self-deployment or bypass of mode certification",
+    "coverage_state": "excluded"
+  }
+]

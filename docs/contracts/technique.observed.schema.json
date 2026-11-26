@@ -1,0 +1,87 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "available_at": {
+      "format": "date-time",
+      "title": "Available At",
+      "type": "string"
+    },
+    "input_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Input Refs",
+      "type": "array"
+    },
+    "quality_flags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Quality Flags",
+      "type": "array"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "technique_id": {
+      "title": "Technique Id",
+      "type": "string"
+    },
+    "technique_version": {
+      "title": "Technique Version",
+      "type": "string"
+    },
+    "uncertainty": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Uncertainty"
+    },
+    "unit": {
+      "title": "Unit",
+      "type": "string"
+    },
+    "valid_until": {
+      "format": "date-time",
+      "title": "Valid Until",
+      "type": "string"
+    },
+    "values": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Values",
+      "type": "object"
+    }
+  },
+  "required": [
+    "technique_id",
+    "technique_version",
+    "input_refs",
+    "available_at",
+    "valid_until",
+    "values",
+    "unit",
+    "uncertainty",
+    "quality_flags",
+    "reason_codes"
+  ],
+  "title": "TechniqueObservation",
+  "type": "object"
+}

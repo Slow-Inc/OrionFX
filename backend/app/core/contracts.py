@@ -4,7 +4,7 @@
 derives the expected set from the master plan table and compares.
 """
 
-from typing import Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -17,6 +17,7 @@ from app.core.enums import (
     DataQuality,
     DecisionAction,
     Direction,
+    Eligibility,
     ExecutionState,
     ForecastLineage,
     HealthStatus,
@@ -327,6 +328,105 @@ class HealthUpdated(ContractModel):
     detail: str | None = None
 
 
+# --- V1.1 strategy & technique contracts (§15.5) [PROPOSED schema] ----------------------
+
+CATALOG_ID = r"^CAT-[A-Z]\d{2}-\d{2}$"
+HASH = r"^sha256:[0-9a-f]{64}$"
+
+
+class ParameterBound(ContractModel):
+    low: Dec
+    high: Dec
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        if self.low > self.high:
+            raise ValueError("parameter bound low > high")
+        return self
+
+
+class StrategyManifest(ContractModel):
+    """A versioned, hashed strategy or technique artifact (TechniqueManifest uses the
+    same shape with `technique_refs` empty). Never executable by itself."""
+
+    strategy_id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    artifact_hash: str = Field(pattern=HASH)
+    family: str
+    catalog_ids: list[Annotated[str, Field(pattern=CATALOG_ID)]] = Field(min_length=1)
+    technique_refs: list[str]
+    timeframes: list[Timeframe] = Field(min_length=1)
+    warmup_bars: int = Field(ge=0)
+    parameters: dict[str, ParameterBound]
+    risk_tags: list[str]
+    supported_modes: list[Mode] = Field(min_length=1)
+    dependencies: list[str] = Field(default_factory=list)
+    max_latency_ms: int | None = Field(default=None, gt=0)
+
+
+TechniqueManifest = StrategyManifest
+
+
+class TechniqueObservation(ContractModel):
+    technique_id: str
+    technique_version: str
+    input_refs: list[str]
+    available_at: UtcDatetime
+    valid_until: UtcDatetime
+    values: dict[str, Dec | None]
+    unit: str
+    uncertainty: Dec | None
+    quality_flags: list[str]
+    reason_codes: list[str]
+
+    @model_validator(mode="after")
+    def _expires_after_available(self) -> Self:
+        if self.valid_until <= self.available_at:
+            raise ValueError("valid_until must be after available_at")
+        return self
+
+
+class StrategyProposal(ContractModel):
+    """What M05 proposes; M06 decides. Never a broker order (§4.6)."""
+
+    proposal_id: str
+    strategy_id: str
+    strategy_version: str
+    technique_refs: list[str]
+    composition_id: str | None
+    decision_id: str
+    direction: Direction
+    action: IntentAction
+    horizon: Timeframe
+    expected_value_usd: Money | None
+    cost_estimate_usd: NonNegative | None
+    requested_lot: Lot | None
+    valid_until: UtcDatetime
+    rationale: str
+    constraints: list[str]
+
+
+class EligibilityRecord(ContractModel):
+    subject_hash: str = Field(pattern=HASH)
+    subject_kind: Literal["strategy", "technique", "composition", "model"]
+    subject_ref: str
+    user_enabled: bool
+    eligibility: Eligibility
+    approved_modes: list[Mode]
+    context: dict[str, str]
+    evidence_refs: list[str]
+    policy_version: str
+    expires_at: UtcDatetime | None
+    revoked_at: UtcDatetime | None
+
+    @model_validator(mode="after")
+    def _live_needs_evidence(self) -> Self:
+        live = self.eligibility is Eligibility.LIVE_ELIGIBLE or Mode.LIVE in self.approved_modes
+        if live and not self.evidence_refs:
+            raise ValueError("live eligibility needs evidence refs")
+        return self
+
+
 EVENT_PAYLOADS: dict[str, type[ContractModel]] = {
     "market.snapshot": MarketSnapshot,
     "candle.closed": CandleClosed,
@@ -346,4 +446,8 @@ EVENT_PAYLOADS: dict[str, type[ContractModel]] = {
     "model.candidate": ModelCandidate,
     "model.approved": ModelApproved,
     "health.updated": HealthUpdated,
+    "technique.observed": TechniqueObservation,
+    "strategy.proposed": StrategyProposal,
+    "strategy.candidate": StrategyManifest,
+    "strategy.eligibility.updated": EligibilityRecord,
 }
