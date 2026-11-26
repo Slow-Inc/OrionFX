@@ -39,7 +39,7 @@ class CloseWorkflow:
         self._owners = OwnershipRegistry(conn)
         self._ledger = ExecutionLedger(conn)
 
-    def _cycle_positions(self, cycle_id: str) -> list[Position]:
+    def cycle_positions(self, cycle_id: str) -> list[Position]:
         owned = self._owners.positions_of_cycle(self._broker.account(), cycle_id)
         return [
             p
@@ -52,7 +52,7 @@ class CloseWorkflow:
         account = self._broker.account()
         return [o for o in self._broker.pending_orders() if self._owners.is_bot_order(account, o)]
 
-    def _cancel_bot_orders(self) -> list[str]:
+    def cancel_bot_orders(self) -> list[str]:
         problems: list[str] = []
         for order in self._bot_orders():
             try:
@@ -86,8 +86,8 @@ class CloseWorkflow:
         if unresolved:
             return CloseReport(False, unresolved)
 
-        unresolved += self._cancel_bot_orders()
-        for pos in self._cycle_positions(cycle_id):
+        unresolved += self.cancel_bot_orders()
+        for pos in self.cycle_positions(cycle_id):
             if self._ledger.has_unresolved():
                 unresolved.append(f"{pos.position_id}: waiting for reconcile")
                 break  # an unknown outcome blocks every further write until reconciled
@@ -106,7 +106,7 @@ class CloseWorkflow:
             if upd.state is not ExecutionState.FILLED:
                 unresolved.append(f"{pos.position_id}: {upd.state} {upd.error or ''}".strip())
 
-        remaining = self._cycle_positions(cycle_id)
+        remaining = self.cycle_positions(cycle_id)
         if unresolved or self._ledger.has_unresolved() or remaining or self._bot_orders():
             left = [f"{p.position_id}: still open" for p in remaining]
             return CloseReport(False, unresolved or left)
