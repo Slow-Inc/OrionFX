@@ -23,6 +23,8 @@ Dec = Annotated[Decimal, BeforeValidator(_reject_float)]
 """Signed decimal (money in USD or labelled account currency, P&L, EV)."""
 
 Money = Dec
+PositiveMoney = Annotated[Dec, Field(gt=0)]
+"""E.g. the Profit Target: a positive USD amount (PFT-01)."""
 Lot = Annotated[Dec, Field(gt=0)]
 Price = Annotated[Dec, Field(gt=0)]
 NonNegative = Annotated[Dec, Field(ge=0)]

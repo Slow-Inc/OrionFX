@@ -88,3 +88,24 @@ def test_cycle_lifecycle() -> None:
 def test_illegal_cycle_transitions(current: CycleState, target: CycleState) -> None:
     with pytest.raises(IllegalTransition):
         next_cycle_state(current, target)
+
+
+def test_entering_risk_locked_sets_the_lock() -> None:
+    s = ControlStatus(ControlState.RUNNING).to(ControlState.RISK_LOCKED)
+    assert s.risk_locked is True
+
+
+def test_locked_bot_cannot_return_to_running_without_unlock() -> None:
+    s = (
+        ControlStatus(ControlState.RUNNING)
+        .to(ControlState.RISK_LOCKED)
+        .to(ControlState.RECONCILING)
+    )
+    with pytest.raises(IllegalTransition, match="risk lock"):
+        s.to(ControlState.RUNNING)
+    assert s.unlock().to(ControlState.RUNNING).state is ControlState.RUNNING
+
+
+@pytest.mark.parametrize("state", [ControlState.STARTING, ControlState.RECONCILING])
+def test_emergency_close_reachable_during_startup(state: ControlState) -> None:
+    assert ControlStatus(state).to(ControlState.CLOSING).state is ControlState.CLOSING

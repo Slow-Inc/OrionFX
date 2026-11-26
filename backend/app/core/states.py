@@ -13,8 +13,8 @@ _C = ControlState
 
 CONTROL_TRANSITIONS: dict[ControlState, frozenset[ControlState]] = {
     _C.STOPPED: frozenset({_C.STARTING}),
-    _C.STARTING: frozenset({_C.RECONCILING, _C.SAFE_MODE}),
-    _C.RECONCILING: frozenset({_C.RUNNING, _C.STOPPED, _C.SAFE_MODE, _C.RISK_LOCKED}),
+    _C.STARTING: frozenset({_C.RECONCILING, _C.CLOSING, _C.RISK_LOCKED, _C.SAFE_MODE}),
+    _C.RECONCILING: frozenset({_C.RUNNING, _C.STOPPED, _C.CLOSING, _C.SAFE_MODE, _C.RISK_LOCKED}),
     _C.RUNNING: frozenset({_C.PAUSED, _C.FINISHING, _C.CLOSING, _C.RISK_LOCKED, _C.SAFE_MODE}),
     _C.PAUSED: frozenset({_C.RUNNING, _C.FINISHING, _C.CLOSING, _C.RISK_LOCKED, _C.SAFE_MODE}),
     _C.FINISHING: frozenset({_C.STOPPED, _C.CLOSING, _C.RISK_LOCKED, _C.SAFE_MODE}),
@@ -59,7 +59,11 @@ class ControlStatus:
     risk_locked: bool = False
 
     def to(self, target: ControlState) -> "ControlStatus":
-        return replace(self, state=_check(CONTROL_TRANSITIONS, self.state, target, "control"))
+        state = _check(CONTROL_TRANSITIONS, self.state, target, "control")
+        if state is ControlState.RUNNING and self.risk_locked:
+            raise IllegalTransition("risk lock is set: RUNNING needs approved recovery (unlock)")
+        # Entering RISK_LOCKED always sets the persisted lock (§9.1).
+        return replace(self, state=state, risk_locked=self.risk_locked or state is _C.RISK_LOCKED)
 
     def lock(self) -> "ControlStatus":
         return replace(self, risk_locked=True)

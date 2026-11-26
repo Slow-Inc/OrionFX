@@ -17,13 +17,13 @@ from app.core.ids import new_id
 from app.core.time import utc_now
 from app.core.types import UtcDatetime
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION: Literal["1.0"] = "1.0"
 
 
 class EventEnvelope(ContractModel):
     """Fields shared by every event; concrete subclasses add `event_type` and `payload`."""
 
-    schema_version: str = SCHEMA_VERSION
+    schema_version: Literal["1.0"] = SCHEMA_VERSION
     event_id: str
     event_type: str
     occurred_at: UtcDatetime
@@ -44,11 +44,7 @@ class EventEnvelope(ContractModel):
         if payload_mode is not None and payload_mode != self.mode:
             raise ValueError(f"payload mode {payload_mode} != envelope mode {self.mode}")
         payload_cycle = getattr(self.payload, "cycle_id", None)
-        if (
-            payload_cycle is not None
-            and self.cycle_id is not None
-            and payload_cycle != self.cycle_id
-        ):
+        if payload_cycle is not None and payload_cycle != self.cycle_id:
             raise ValueError("payload cycle_id differs from envelope cycle_id")
         return self
 
@@ -84,6 +80,13 @@ def parse_event(data: dict[str, Any] | str | bytes) -> EventEnvelope:
     return EVENT_ADAPTER.validate_json(data)
 
 
+def _payload_cycle(payload: ContractModel | dict[str, Any]) -> str | None:
+    value = (
+        payload.get("cycle_id") if isinstance(payload, dict) else getattr(payload, "cycle_id", None)
+    )
+    return value if isinstance(value, str) else None
+
+
 def make_event(
     event_type: str,
     *,
@@ -91,7 +94,7 @@ def make_event(
     payload: ContractModel | dict[str, Any],
     account_id: str,
     bot_id: str,
-    mode: Mode = Mode.DEMO,
+    mode: Mode,
     correlation_id: str | None = None,
     causation_id: str | None = None,
     cycle_id: str | None = None,
@@ -108,7 +111,7 @@ def make_event(
             "causation_id": causation_id,
             "account_id": account_id,
             "bot_id": bot_id,
-            "cycle_id": cycle_id,
+            "cycle_id": cycle_id or _payload_cycle(payload),
             "mode": mode,
             "payload": payload,
         }

@@ -27,8 +27,8 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 
 | Item | Status | Gate | Next action |
 |---|---|---|---|
-| 8 module PRDs (M01–M08) + PRD-X01 integration + PRD-X02 validation | 🔴 | — | `docs/plans/master_planV1.md` §2, §12 — file one issue per PRD |
-| Shared schemas: event envelope, money/time conventions, cycle/risk states, broker adapter interface | 🔴 | X01 + M06/M08 | `docs/plans/master_planV1.md` §8, §10 "Parallel implementation dependencies" |
+| 8 module PRDs (M01–M08) + PRD-X01 integration + PRD-X02 validation | 🟢 | — | Tracking issue #4; one sub-issue per PRD, filed as each starts. X01 ✅ #5 |
+| Shared schemas: event envelope, money/time conventions, cycle/risk states | ✅ | — | #5 (PRD-X01). Broker adapter interface lands with M06 |
 | Open decisions & safety TBDs | 🔴 | Owner decisions | `docs/plans/master_planV1.md` §13 |
 
 ---

@@ -143,6 +143,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -318,6 +319,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -515,6 +517,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -639,6 +642,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -702,6 +706,17 @@
           ],
           "default": null
         },
+        "cycle_net_estimated_usd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cycle Net Estimated Usd"
+        },
         "final_net_usd": {
           "anyOf": [
             {
@@ -713,17 +728,6 @@
           ],
           "default": null,
           "title": "Final Net Usd"
-        },
-        "net_estimate_usd": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Net Estimate Usd"
         },
         "peak_net_usd": {
           "anyOf": [
@@ -757,6 +761,7 @@
           "type": "boolean"
         },
         "target_usd": {
+          "gt": 0,
           "title": "Target Usd",
           "type": "string"
         },
@@ -786,7 +791,7 @@
       "required": [
         "state",
         "target_usd",
-        "net_estimate_usd",
+        "cycle_net_estimated_usd",
         "peak_net_usd",
         "trailing_floor_usd",
         "trailing_active"
@@ -859,6 +864,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -1053,6 +1059,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -1263,6 +1270,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -1408,6 +1416,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -1551,6 +1560,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -1709,6 +1719,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -1880,6 +1891,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -2026,6 +2038,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -2167,6 +2180,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -2324,6 +2338,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -2509,6 +2524,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -2661,6 +2677,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -2819,6 +2836,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"
@@ -3032,6 +3050,7 @@
           "type": "string"
         },
         "schema_version": {
+          "const": "1.0",
           "default": "1.0",
           "title": "Schema Version",
           "type": "string"

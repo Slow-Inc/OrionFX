@@ -4,7 +4,9 @@
 derives the expected set from the master plan table and compares.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.enums import (
     CloseReason,
@@ -25,7 +27,17 @@ from app.core.enums import (
     Timeframe,
     Verdict,
 )
-from app.core.types import Dec, Lot, Money, NonNegative, Percent, Price, Probability, UtcDatetime
+from app.core.types import (
+    Dec,
+    Lot,
+    Money,
+    NonNegative,
+    Percent,
+    PositiveMoney,
+    Price,
+    Probability,
+    UtcDatetime,
+)
 
 
 class ContractModel(BaseModel):
@@ -56,6 +68,12 @@ class MarketSnapshot(ContractModel):
     broker_time_offset_minutes: int | None = None
     quality: DataQuality
 
+    @model_validator(mode="after")
+    def _ask_not_below_bid(self) -> Self:
+        if self.bid is not None and self.ask is not None and self.ask < self.bid:
+            raise ValueError("ask below bid")
+        return self
+
 
 class CandleClosed(ContractModel):
     symbol: str
@@ -70,6 +88,14 @@ class CandleClosed(ContractModel):
     spread: NonNegative | None = None
     available_at: UtcDatetime
 
+    @model_validator(mode="after")
+    def _consistent_bar(self) -> Self:
+        if not (self.low <= min(self.open, self.close) and max(self.open, self.close) <= self.high):
+            raise ValueError("OHLC out of range: need low <= open, close <= high")
+        if not (self.open_time < self.close_time <= self.available_at):
+            raise ValueError("need open_time < close_time <= available_at (no look-ahead)")
+        return self
+
 
 class FeatureSnapshot(ContractModel):
     symbol: str
@@ -79,6 +105,12 @@ class FeatureSnapshot(ContractModel):
     as_of: UtcDatetime
     available_at: UtcDatetime
     valid_until: UtcDatetime
+
+    @model_validator(mode="after")
+    def _ordered_times(self) -> Self:
+        if not (self.as_of <= self.available_at <= self.valid_until):
+            raise ValueError("need as_of <= available_at <= valid_until")
+        return self
 
 
 # --- M03 news & LLM --------------------------------------------------------
@@ -126,6 +158,13 @@ class PredictionGenerated(ContractModel):
     generated_at: UtcDatetime
     valid_until: UtcDatetime
 
+    @model_validator(mode="after")
+    def _ordered_range(self) -> Self:
+        lo, hi = self.expected_range_low, self.expected_range_high
+        if lo is not None and hi is not None and lo > hi:
+            raise ValueError("expected_range_low above expected_range_high")
+        return self
+
 
 # --- M05 decision ----------------------------------------------------------
 
@@ -159,6 +198,13 @@ class TradeIntent(ContractModel):
     position_refs: list[str] = Field(default_factory=list)
     valid_until: UtcDatetime
 
+    @model_validator(mode="after")
+    def _sized_when_adding_exposure(self) -> Self:
+        adds = self.action in (IntentAction.OPEN, IntentAction.ADD)
+        if adds and (self.side is None or self.requested_lot is None):
+            raise ValueError(f"{self.action} needs side and requested_lot")
+        return self
+
 
 # --- M06 risk & execution --------------------------------------------------
 
@@ -171,6 +217,17 @@ class RiskDecision(ContractModel):
     reason_codes: list[str]
     decided_at: UtcDatetime
     valid_until: UtcDatetime | None = None
+
+    @model_validator(mode="after")
+    def _bounded_approval(self) -> Self:
+        """An approval is never open-ended (§8.3); a denial approves nothing."""
+        if self.verdict is Verdict.ALLOW and (
+            self.approved_lot is None or self.valid_until is None
+        ):
+            raise ValueError("ALLOW needs approved_lot and valid_until")
+        if self.verdict is Verdict.DENY and self.approved_lot is not None:
+            raise ValueError("DENY must not carry approved_lot")
+        return self
 
 
 class ExecutionUpdated(ContractModel):
@@ -198,8 +255,8 @@ class AccountSnapshot(ContractModel):
 
 class CycleUpdated(ContractModel):
     state: CycleState
-    target_usd: Money
-    net_estimate_usd: Money | None
+    target_usd: PositiveMoney
+    cycle_net_estimated_usd: Money | None
     peak_net_usd: Money | None
     trailing_floor_usd: Money | None
     trailing_active: bool

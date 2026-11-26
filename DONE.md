@@ -6,6 +6,18 @@
 
 ---
 
+## X01 shared contracts + P1 Python foundation (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, branch `feat/5-x01-contracts`)
+
+**Goal:** one typed vocabulary every module builds against (PRD-X01, issue #5).
+
+**Shipped:** `pyproject.toml` + `uv.lock` (Python 3.13, pydantic, ruff, mypy strict, pytest); `backend/app/core/` — value types (Decimal, no float), enums, control/cycle state machines with the risk lock as a separate dimension, 18 event payloads + discriminated envelope, `Confidence`; `docs/contracts/*.schema.json` (generated); CI `lint`/`typecheck`/`test`; `verify` armed.
+
+**Validation:** `uv run pytest` → 49 passed; ruff + mypy clean. Review findings fixed: entering RISK_LOCKED now sets the lock and RUNNING is refused while locked (was: lock lost → trading resumed without approval); bounded ALLOW; sized OPEN/ADD; candle look-ahead and range checks; schema_version pinned; mode required.
+
+**Next:** PRD-08 system core.
+
+---
+
 ## T4 operating-layer bootstrap (2026-11-27, t4-project-bootstrap, branch `chore/1-t4-bootstrap`)
 
 **Goal:** give OrionFX the T4 agent-primary operating layer at the Active tier before any PRD or code work starts, so later sessions keep context and meet the same gates.
