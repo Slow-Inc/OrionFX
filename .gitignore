@@ -1,0 +1,54 @@
+# Secrets — never commit (master plan §0.2, §5.2)
+.env
+.env.*
+!.env.example
+config.yaml
+!config.example.yaml
+*.key
+*.pem
+
+# Runtime artifacts (master plan §7.1) — schemas/manifests/fixtures only
+data/**
+!data/**/README.md
+!data/**/*.schema.json
+models/**
+!models/**/README.md
+!models/**/metadata/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+
+# MT5 compiled output
+*.ex5
+
+# Local DB / logs
+*.sqlite
+*.sqlite3
+*.db
+logs/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Claude local-only settings
+.claude/settings.local.json
