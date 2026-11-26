@@ -2,15 +2,20 @@
 
 Not a market simulator: fills happen at the current quote (+ configurable
 slippage). Scripted outcomes reproduce the failure modes M06 must survive:
-`reject`, `partial:<fraction>`, `timeout_filled` (the order went through but the
-reply was lost), `timeout_lost` (nothing happened, reply lost).
+REJECT, PARTIAL(fraction), TIMEOUT_FILLED (it happened, the reply was lost),
+TIMEOUT_LOST (nothing happened, the reply was lost).
+
+Accounting follows MT5: commission is charged to balance on each deal (open and
+close); a netting account holds at most one position per symbol, and an
+opposite order reduces, closes or flips it.
 """
 
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
+from enum import StrEnum
 
 from app.core.enums import Side
 from app.execution.broker import (
@@ -31,6 +36,21 @@ from app.execution.broker import (
 CENT = Decimal("0.01")
 
 
+class Outcome(StrEnum):
+    FILL = "FILL"
+    REJECT = "REJECT"
+    TIMEOUT_FILLED = "TIMEOUT_FILLED"
+    TIMEOUT_LOST = "TIMEOUT_LOST"
+
+
+@dataclass(frozen=True, slots=True)
+class Partial:
+    fraction: Decimal
+
+
+Scripted = Outcome | Partial
+
+
 @dataclass
 class _Pos:
     position_id: str
@@ -39,7 +59,10 @@ class _Pos:
     volume: Decimal
     open_price: Decimal
     magic: int
-    commission: Decimal
+
+
+def _opposite(side: Side) -> Side:
+    return Side.SELL if side is Side.BUY else Side.BUY
 
 
 class FakeBroker:
@@ -76,12 +99,15 @@ class FakeBroker:
         self._positions: dict[str, _Pos] = {}
         self._pending: dict[str, PendingOrder] = {}
         self._deals: list[Deal] = []
-        self._script: deque[str] = deque()
+        self._script: deque[Scripted] = deque()
         self._seq = 0
 
     # --- test controls ---------------------------------------------------------------
 
-    def script(self, *outcomes: str) -> None:
+    def script(self, *outcomes: Scripted) -> None:
+        for o in outcomes:
+            if not isinstance(o, Outcome | Partial):
+                raise TypeError(f"unknown scripted outcome {o!r}")
         self._script.extend(outcomes)
 
     def set_quote(self, symbol: str, *, bid: Decimal, ask: Decimal) -> None:
@@ -92,13 +118,13 @@ class FakeBroker:
     ) -> Position:
         q = self._require_quote(symbol)
         pid = self._next("pos")
-        self._positions[pid] = _Pos(
-            pid, symbol, side, volume, self._fill_price(q, side), magic, Decimal(0)
-        )
+        self._positions[pid] = _Pos(pid, symbol, side, volume, self._fill_price(q, side), magic)
         return self._view(self._positions[pid])
 
-    def add_pending(self, symbol: str, side: Side, volume: Decimal, price: Decimal) -> PendingOrder:
-        order = PendingOrder(self._next("ord"), symbol, side, volume, price, BOT_MAGIC)
+    def add_pending(
+        self, symbol: str, side: Side, volume: Decimal, price: Decimal, *, magic: int = 0
+    ) -> PendingOrder:
+        order = PendingOrder(self._next("ord"), symbol, side, volume, price, magic)
         self._pending[order.order_id] = order
         return order
 
@@ -112,7 +138,7 @@ class FakeBroker:
 
     def account(self) -> AccountInfo:
         positions = self.positions()
-        floating = sum((p.profit - p.commission + p.swap for p in positions), Decimal(0))
+        floating = sum((p.profit + p.swap for p in positions), Decimal(0))
         equity = self.balance + floating
         margin = sum(
             (p.volume * self.specs[p.symbol].margin_per_lot for p in positions), Decimal(0)
@@ -142,8 +168,12 @@ class FakeBroker:
     def pending_orders(self) -> list[PendingOrder]:
         return list(self._pending.values())
 
-    def deals_since(self, after_deal: int) -> list[Deal]:
-        return self._deals[after_deal:]
+    def deals_since(self, after_deal_id: str | None) -> list[Deal]:
+        """Deals after the given deal id (None = all). The cursor is a broker deal id."""
+        if after_deal_id is None:
+            return list(self._deals)
+        ids = [d.deal_id for d in self._deals]
+        return self._deals[ids.index(after_deal_id) + 1 :] if after_deal_id in ids else []
 
     def find_by_request(self, request_id: str) -> list[Deal]:
         return [d for d in self._deals if d.request_id == request_id]
@@ -151,17 +181,14 @@ class FakeBroker:
     def send_open(self, req: OpenRequest) -> SendResult:
         if self.on_send:
             self.on_send(req.request_id)
+        q = self._require_quote(req.symbol)
         outcome, early = self._begin()
         if early:
             return early
-        volume = self._scaled(req.volume, outcome)
-        q = self._require_quote(req.symbol)
+        volume = self._scaled(req.volume, outcome, req.symbol)
         price = self._fill_price(q, req.side)
-        commission = (volume * self.commission_per_lot).quantize(CENT)
-        pid = self._merge_or_open(req.symbol, req.side, volume, price, commission)
-        deal = self._deal(
-            req.request_id, pid, req.symbol, req.side, volume, price, Decimal(0), commission
-        )
+        pid, realized = self._apply(req.symbol, req.side, volume, price)
+        deal = self._trade_deal(req.request_id, pid, req.symbol, req.side, volume, price, realized)
         return self._finish(
             outcome, SendResult(SendStatus.ACCEPTED, pid, (deal.deal_id,), volume, price)
         )
@@ -172,28 +199,16 @@ class FakeBroker:
         pos = self._positions.get(req.position_id)
         if pos is None:
             return SendResult(SendStatus.REJECTED, error="position not found")
+        q = self._require_quote(pos.symbol)
         outcome, early = self._begin()
         if early:
             return early
-        volume = min(self._scaled(req.volume, outcome), pos.volume)
-        q = self._require_quote(pos.symbol)
-        closing_side = Side.SELL if pos.side is Side.BUY else Side.BUY
-        price = self._fill_price(q, closing_side)
-        profit = self._profit(pos.side, pos.open_price, price, volume, pos.symbol)
-        commission = (volume * self.commission_per_lot).quantize(CENT)
-        self.balance += profit - commission
-        pos.volume -= volume
-        if pos.volume == 0:
-            del self._positions[pos.position_id]
-        deal = self._deal(
-            req.request_id,
-            pos.position_id,
-            pos.symbol,
-            closing_side,
-            volume,
-            price,
-            profit,
-            commission,
+        volume = min(self._scaled(req.volume, outcome, pos.symbol), pos.volume)
+        side = _opposite(pos.side)
+        price = self._fill_price(q, side)
+        realized = self._reduce(pos, volume, price)
+        deal = self._trade_deal(
+            req.request_id, pos.position_id, pos.symbol, side, volume, price, realized
         )
         return self._finish(
             outcome,
@@ -201,34 +216,39 @@ class FakeBroker:
         )
 
     def cancel_order(self, order_id: str, request_id: str) -> SendResult:
+        if self.on_send:
+            self.on_send(request_id)
+        outcome, early = self._begin()
+        if early:
+            return early
         if self._pending.pop(order_id, None) is None:
             return SendResult(SendStatus.REJECTED, error="order not found")
-        return SendResult(SendStatus.ACCEPTED)
+        return self._finish(outcome, SendResult(SendStatus.ACCEPTED))
 
     # --- internals -------------------------------------------------------------------------
 
-    def _begin(self) -> tuple[str, SendResult | None]:
-        outcome = self._script.popleft() if self._script else "fill"
+    def _begin(self) -> tuple[Scripted, SendResult | None]:
+        outcome = self._script.popleft() if self._script else Outcome.FILL
         if not self.connected:
             return outcome, SendResult(SendStatus.UNKNOWN, error="disconnected")
         if not self.market_open:
             return outcome, SendResult(SendStatus.REJECTED, error="market closed")
-        if outcome == "reject":
+        if outcome is Outcome.REJECT:
             return outcome, SendResult(SendStatus.REJECTED, error="rejected by broker")
-        if outcome == "timeout_lost":
+        if outcome is Outcome.TIMEOUT_LOST:
             return outcome, SendResult(SendStatus.UNKNOWN, error="timeout")
         return outcome, None
 
     @staticmethod
-    def _finish(outcome: str, result: SendResult) -> SendResult:
-        if outcome == "timeout_filled":  # it happened, but the reply never arrived
+    def _finish(outcome: Scripted, result: SendResult) -> SendResult:
+        if outcome is Outcome.TIMEOUT_FILLED:
             return SendResult(SendStatus.UNKNOWN, error="timeout")
         return result
 
-    @staticmethod
-    def _scaled(volume: Decimal, outcome: str) -> Decimal:
-        if outcome.startswith("partial:"):
-            return (volume * Decimal(outcome.split(":", 1)[1])).quantize(Decimal("0.01"))
+    def _scaled(self, volume: Decimal, outcome: Scripted, symbol: str) -> Decimal:
+        if isinstance(outcome, Partial):
+            step = self.specs[symbol].volume_step
+            return (volume * outcome.fraction).quantize(step, rounding=ROUND_DOWN)
         return volume
 
     def _require_quote(self, symbol: str) -> Quote:
@@ -246,20 +266,36 @@ class FakeBroker:
         move = price - open_price if side is Side.BUY else open_price - price
         return (move * volume * self.specs[symbol].contract_size).quantize(CENT)
 
-    def _merge_or_open(
-        self, symbol: str, side: Side, volume: Decimal, price: Decimal, commission: Decimal
-    ) -> str:
+    def _reduce(self, pos: _Pos, volume: Decimal, price: Decimal) -> Decimal:
+        realized = self._profit(pos.side, pos.open_price, price, volume, pos.symbol)
+        pos.volume -= volume
+        if pos.volume == 0:
+            del self._positions[pos.position_id]
+        return realized
+
+    def _apply(
+        self, symbol: str, side: Side, volume: Decimal, price: Decimal
+    ) -> tuple[str, Decimal]:
+        """Open (hedging) or net against the symbol's single position (netting).
+        Returns (position id, realized P&L of any reduced volume)."""
         if self.margin_mode is MarginMode.NETTING:
-            for pos in self._positions.values():
-                if pos.symbol == symbol and pos.side is side:
+            pos = next((p for p in self._positions.values() if p.symbol == symbol), None)
+            if pos is not None:
+                if pos.side is side:
                     total = pos.volume + volume
                     pos.open_price = (pos.open_price * pos.volume + price * volume) / total
                     pos.volume = total
-                    pos.commission += commission
-                    return pos.position_id
+                    return pos.position_id, Decimal(0)
+                reduce = min(volume, pos.volume)
+                pid = pos.position_id
+                realized = self._reduce(pos, reduce, price)
+                left = volume - reduce
+                if left > 0:  # flip: the same netting position id continues on the other side
+                    self._positions[pid] = _Pos(pid, symbol, side, left, price, BOT_MAGIC)
+                return pid, realized
         pid = self._next("pos")
-        self._positions[pid] = _Pos(pid, symbol, side, volume, price, BOT_MAGIC, commission)
-        return pid
+        self._positions[pid] = _Pos(pid, symbol, side, volume, price, BOT_MAGIC)
+        return pid, Decimal(0)
 
     def _view(self, p: _Pos) -> Position:
         q = self._require_quote(p.symbol)
@@ -272,23 +308,22 @@ class FakeBroker:
             open_price=p.open_price,
             magic=p.magic,
             profit=self._profit(p.side, p.open_price, mark, p.volume, p.symbol),
-            commission=p.commission,
+            commission=Decimal(0),
             swap=Decimal(0),
         )
 
-    def _deal(
+    def _trade_deal(
         self,
-        request_id: str | None,
-        position_id: str | None,
-        symbol: str | None,
-        side: Side | None,
+        request_id: str,
+        position_id: str,
+        symbol: str,
+        side: Side,
         volume: Decimal,
-        price: Decimal | None,
-        profit: Decimal,
-        commission: Decimal,
-        *,
-        is_balance: bool = False,
+        price: Decimal,
+        realized: Decimal,
     ) -> Deal:
+        commission = (volume * self.commission_per_lot).quantize(CENT)
+        self.balance += realized - commission
         deal = Deal(
             deal_id=self._next("deal"),
             request_id=request_id,
@@ -297,19 +332,35 @@ class FakeBroker:
             side=side,
             volume=volume,
             price=price,
-            profit=profit,
+            profit=realized,
             commission=commission,
             swap=Decimal(0),
-            magic=0 if is_balance else BOT_MAGIC,
+            magic=BOT_MAGIC,
             time=self.now,
-            is_balance=is_balance,
+            is_balance=False,
         )
         self._deals.append(deal)
         return deal
 
     def _cash(self, amount: Decimal) -> None:
         self.balance += amount
-        self._deal(None, None, None, None, Decimal(0), None, amount, Decimal(0), is_balance=True)
+        self._deals.append(
+            Deal(
+                deal_id=self._next("deal"),
+                request_id=None,
+                position_id=None,
+                symbol=None,
+                side=None,
+                volume=Decimal(0),
+                price=None,
+                profit=amount,
+                commission=Decimal(0),
+                swap=Decimal(0),
+                magic=0,
+                time=self.now,
+                is_balance=True,
+            )
+        )
 
     def _next(self, prefix: str) -> str:
         self._seq += 1

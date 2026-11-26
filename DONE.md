@@ -6,6 +6,20 @@
 
 ---
 
+## M06 slice A — broker port, fake broker, ownership, execution ledger (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/13-m06-broker-ledger`)
+
+**Goal:** the single, durable path to the broker (PRD-06 #12, slice #13).
+
+**Shipped:** `backend/app/execution/{broker,fake_broker,ownership,ledger,executor}.py`, `migrations/0002_execution.sql`, `RequestKind`.
+
+**Validation:** `uv run pytest` → 138 passed; ruff + mypy clean. Mutation probes (unknown-outcome guard, ownership link check, netting ambiguity, quiet period, cancel ownership, broker-exception handling, duplicate send) each turned the matching test red.
+
+**Review fixes:** netting open blocked when a non-bot position exists; reconcile never writes off an empty lookup before a quiet period (and never while disconnected); cancel requires a bot-placed order; broker exceptions record UNKNOWN; MT5-like commission and netting in the fake broker; deal-id cursor; VWAP fill price; ownership keyed by login/server/symbol.
+
+**Not done:** the real MT5 adapter + MQL5 EA (#17, blocked: no MT5).
+
+---
+
 ## M08 slice B — owner API, auth, control commands, live feed (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/9-m08-api`)
 
 **Goal:** the authenticated local API and live feed the dashboard uses (PRD-08 #7, slice #9).
