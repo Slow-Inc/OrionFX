@@ -172,6 +172,8 @@ export interface TradingConfig {
 export interface LlmConfig {
   provider: string | null;
   model: string | null;
+  base_url: string | null;
+  reasoning_effort: string | null;
   api_key_ref: string | null;
   news_handling: "adaptive" | "off";
 }

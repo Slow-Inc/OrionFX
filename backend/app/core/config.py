@@ -29,6 +29,10 @@ class TradingConfig(ContractModel):
 class LlmConfig(ContractModel):
     provider: str | None = None
     model: str | None = None
+    base_url: str | None = Field(default=None, pattern=r"^https://[^\s]+$")
+    """OpenAI-compatible endpoint root (https only), e.g. .../inference/go/openai/v1."""
+    reasoning_effort: str | None = Field(default=None, pattern=r"^[a-z]{2,12}$")
+    """Sent as `reasoning_effort` when set; allowed values depend on the model."""
     api_key_ref: SecretRef | None = None
     news_handling: Literal["adaptive", "off"] = "adaptive"
 

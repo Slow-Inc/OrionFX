@@ -262,3 +262,14 @@ def test_assessment_is_stamped_when_the_answer_returned_and_refused_if_news_expi
     too_late = max(FED.valid_until, CPI.valid_until) + timedelta(seconds=1)
     gone = assess_news([FED, CPI], FakeProvider([_answer()]), now=NOW, clock=lambda: too_late)
     assert gone.assessment is None and gone.health.status is HealthStatus.DEGRADED
+
+
+def test_a_rate_limit_is_not_retried_at_once() -> None:
+    """Retrying straight after a 429 only hits the limit again (#100)."""
+    from app.news.provider import ProviderRateLimited
+
+    provider = FakeProvider([ProviderRateLimited("rate limited"), ProviderError("never reached")])
+    r = assess_news([_item("n1", "Fed cuts rates")], provider, now=T0 + timedelta(minutes=2))
+    assert r.assessment is None and r.health.status is HealthStatus.DEGRADED
+    assert "rate limited" in (r.health.detail or "")
+    assert len(provider.prompts) == 1

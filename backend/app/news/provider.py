@@ -20,6 +20,10 @@ class ProviderTimeout(ProviderError):
     pass
 
 
+class ProviderRateLimited(ProviderError):
+    """The provider refused for now; retrying at once would only be refused again."""
+
+
 class Provider(Protocol):
     provider_id: str
     model: str
