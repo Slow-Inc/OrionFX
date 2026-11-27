@@ -2025,7 +2025,16 @@
     "phase": "ADV",
     "catalog_class": "R",
     "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
-    "coverage_state": "planned"
+    "coverage_state": "implemented",
+    "implementation_refs": [
+      "backend/app/learning/memory.py",
+      "backend/app/learning/experience.py"
+    ],
+    "test_ids": [
+      "tests/unit/learning/test_memory.py::test_nearest_experiences_come_first_with_their_outcomes",
+      "tests/unit/learning/test_memory.py::test_retrieval_never_sees_an_outcome_unknown_at_as_of"
+    ],
+    "note": "Point-in-time feature-similarity retrieval over the experience log; similarity is not a win probability; no validated edge claimed (X02 pending)."
   },
   {
     "catalog_id": "CAT-A04-04",
@@ -2034,7 +2043,10 @@
     "phase": "ADV",
     "catalog_class": "R",
     "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
-    "coverage_state": "planned"
+    "coverage_state": "blocked",
+    "blocker_reason": "Needs model training/simulation or optimisation research runs, out of scope for this run (no training)",
+    "resolution_owner": "M07",
+    "review_trigger": "Training/simulation is in scope and X02 validation policy exists"
   },
   {
     "catalog_id": "CAT-A04-05",
@@ -2043,7 +2055,10 @@
     "phase": "ADV",
     "catalog_class": "R",
     "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
-    "coverage_state": "planned"
+    "coverage_state": "blocked",
+    "blocker_reason": "Needs model training/simulation or optimisation research runs, out of scope for this run (no training)",
+    "resolution_owner": "M07",
+    "review_trigger": "Training/simulation is in scope and X02 validation policy exists"
   },
   {
     "catalog_id": "CAT-A04-06",
@@ -2052,7 +2067,10 @@
     "phase": "ADV",
     "catalog_class": "R",
     "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
-    "coverage_state": "planned"
+    "coverage_state": "blocked",
+    "blocker_reason": "Needs model training/simulation or optimisation research runs, out of scope for this run (no training)",
+    "resolution_owner": "M07",
+    "review_trigger": "Training/simulation is in scope and X02 validation policy exists"
   },
   {
     "catalog_id": "CAT-A04-07",
@@ -2061,7 +2079,10 @@
     "phase": "ADV",
     "catalog_class": "R",
     "dependency": "Research/evaluation isolation; similarity not win probability; cost-aware validation",
-    "coverage_state": "planned"
+    "coverage_state": "blocked",
+    "blocker_reason": "Needs model training/simulation or optimisation research runs, out of scope for this run (no training)",
+    "resolution_owner": "M07",
+    "review_trigger": "Training/simulation is in scope and X02 validation policy exists"
   },
   {
     "catalog_id": "CAT-A05-01",
