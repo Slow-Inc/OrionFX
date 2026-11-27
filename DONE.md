@@ -6,6 +6,20 @@
 
 ---
 
+## M04 slice A — predictor port, model cards, approval-gated loading, baseline (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/46-m04-predictor`)
+
+**Goal:** inference that runs only reviewed models on usable inputs and never mislabels a score (PRD-04 #45, slice #46; PRE-02/04, AT-16, AT-17). No training.
+
+**Shipped:** `backend/app/prediction/{card,baseline,engine}.py` (`ModelCard`, `Predictor`, `BASELINE`, `load_model` via M08 `ArtifactLoader`, `load_baseline`, `LoadedPredictor`, `predict`, `Refused`); M02 `snapshot_problem`/`USABLE_QUALITY` (used by M03 and M04). Catalog: CAT-A01-01/02/04/05 blocked (no trained model).
+
+**Validation:** `uv run pytest` → all pass (25 prediction tests, written first). 13 mutation probes caught.
+
+**Review fixes:** model bytes verified by `ArtifactLoader` (the card's own hash is no longer trusted; the verified hash is stamped from the registry); only a `LoadedPredictor` can predict; score = the model's score for the predicted direction, ties refused; news-enhanced refused until news features exist, news passed to a chart-only model refused; NaN/float/exception refused; horizon from `snapshot.as_of`; shared snapshot rule.
+
+**Not done:** trained XGBoost/LightGBM artifacts and adapters (#48). Ensemble is slice B (#47).
+
+---
+
 ## M03 slice C — LLM reasoning stage and shared bounded LLM call (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/40-m03-reasoning`)
 
 **Goal:** an evidence-linked `llm.reasoning` combining news, forecasts and the chart summary, with the same safe failure behaviour as assessment (PRD-03 #37, slice #40; LLM-04).

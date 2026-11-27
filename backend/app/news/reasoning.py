@@ -29,11 +29,11 @@ from app.core.contracts import (
     NewsAssessment,
     PredictionGenerated,
 )
-from app.core.enums import DataQuality, Direction, HealthStatus
+from app.core.enums import Direction, HealthStatus
 from app.core.ids import new_id
 from app.core.time import live
 from app.core.types import Probability
-from app.market_data.features import FEATURE_SCHEMA, SUMMARY_KEYS
+from app.market_data.features import SUMMARY_KEYS, USABLE_QUALITY, snapshot_problem
 from app.news.llm_call import NO_PROVIDER, TIMEOUT_S, ask, health, load_json
 from app.news.provider import Provider
 
@@ -41,7 +41,7 @@ __all__ = ["REASONING_PROMPT_VERSION", "ReasoningResult", "reason"]
 
 REASONING_PROMPT_VERSION = "m03.reason.v1"
 SEMANTICS = "uncalibrated LLM confidence in the combined XAUUSD direction"
-USABLE = (DataQuality.OK, DataQuality.DEGRADED)
+USABLE = USABLE_QUALITY
 ANSWER_FORMAT = (
     '{"direction": "UP"|"DOWN"|"NEUTRAL", "confidence": 0..1,\n'
     ' "cited_assessment_ids": [...], "cited_prediction_ids": [...],\n'
@@ -64,14 +64,7 @@ class ReasoningResult:
 
 
 def _usable_snapshot(snapshot: FeatureSnapshot | None, now: datetime) -> FeatureSnapshot | None:
-    if (
-        snapshot is None
-        or snapshot.feature_schema != FEATURE_SCHEMA
-        or snapshot.quality not in USABLE
-        or not live(snapshot.available_at, snapshot.valid_until, now)
-    ):
-        return None
-    return snapshot
+    return None if snapshot is None or snapshot_problem(snapshot, now) else snapshot
 
 
 def _prompt(
