@@ -27,6 +27,7 @@ from app.core.contracts import ContractModel, DecisionCreated, FeatureSnapshot
 from app.core.enums import CycleState, DecisionAction, Direction, Mode, Timeframe
 from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.core.types import Dec, UtcDatetime
+from app.learning.moves import bars_closing_at
 from app.market_data.features import feature_key
 from app.market_data.store import CandleStore
 from app.storage.db import transaction
@@ -231,11 +232,10 @@ class ExperienceLog:
     def _market_move(self, exp: Experience, now: datetime) -> Label | None:
         if exp.horizon_end > now:
             return None
-        step = TIMEFRAME_DURATION[exp.horizon]
-        start = self._candles.bar_at(exp.symbol, exp.horizon, exp.as_of - step, as_of=now)
-        end = self._candles.bar_at(exp.symbol, exp.horizon, exp.horizon_end - step, as_of=now)
-        if start is None or end is None:
+        pair = bars_closing_at(self._candles, exp.symbol, exp.as_of, exp.horizon_end, now=now)
+        if pair is None:
             return None  # a gap or missing data: no label, never a stretched one
+        start, end = pair
         move = end.close - start.close
         return Label(decision_id=exp.decision_id, kind=LabelKind.MARKET_MOVE, value=move,
                      direction=_direction(move), available_at=end.available_at,

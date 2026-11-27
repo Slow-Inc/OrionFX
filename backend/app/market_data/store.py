@@ -84,6 +84,15 @@ class CandleStore:
         ).fetchall()
         return [CandleClosed.model_validate_json(r[0]) for r in reversed(rows)]
 
+    def latest_open(self, symbol: str, *, as_of: datetime) -> datetime | None:
+        """The open time of the newest bar of any timeframe available at `as_of`."""
+        row = self.conn.execute(
+            "SELECT MAX(open_time) FROM candles WHERE dataset_version = ? AND symbol = ?"
+            " AND available_at <= ?",
+            (self.dataset_version, symbol, _ts(as_of)),
+        ).fetchone()
+        return None if row is None or row[0] is None else datetime.fromisoformat(row[0])
+
     def bar_at(
         self, symbol: str, timeframe: Timeframe, open_time: datetime, *, as_of: datetime
     ) -> CandleClosed | None:

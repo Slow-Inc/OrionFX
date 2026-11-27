@@ -30,6 +30,7 @@ from app.core.contracts import ContractModel, FeatureSnapshot, PredictionGenerat
 from app.core.enums import Mode, Timeframe
 from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.core.types import Dec, UtcDatetime
+from app.learning.moves import bars_closing_at, moved_past
 from app.market_data.store import CandleStore
 from app.storage.db import transaction
 
@@ -148,24 +149,53 @@ class BarLog:
                 " AND s.dataset_version = ? AND s.as_of <= ? AND NOT EXISTS"
                 " (SELECT 1 FROM learning_outcomes o WHERE o.symbol = s.symbol"
                 " AND o.as_of = s.as_of AND o.horizon = ? AND o.horizon_bars = ?"
-                " AND o.dataset_version = s.dataset_version) ORDER BY s.as_of",
-                (symbol, version, _ts(now - h.length), h.timeframe.value, h.bars),
+                " AND o.dataset_version = s.dataset_version) AND NOT EXISTS"
+                " (SELECT 1 FROM learning_unlabellable u WHERE u.symbol = s.symbol"
+                " AND u.as_of = s.as_of AND u.horizon = ? AND u.horizon_bars = ?"
+                " AND u.dataset_version = s.dataset_version) ORDER BY s.as_of",
+                (symbol, version, _ts(now - h.length), h.timeframe.value, h.bars,
+                 h.timeframe.value, h.bars),
             ).fetchall()  # fmt: skip
             for (as_of_text,) in rows:
-                outcome = self._outcome(candles, symbol, h, datetime.fromisoformat(as_of_text),
-                                        now)  # fmt: skip
-                if outcome is not None and self._store(outcome):
-                    new.append(outcome)
+                as_of = datetime.fromisoformat(as_of_text)
+                outcome = self._outcome(candles, symbol, h, as_of, now)
+                if outcome is not None:
+                    if self._store(outcome):
+                        new.append(outcome)
+                elif moved_past(candles, symbol, as_of + h.length, now=now):
+                    self._mark_unlabellable(symbol, h, as_of, version, "MISSING_BAR")
         return new
+
+    def _mark_unlabellable(
+        self, symbol: str, h: Horizon, as_of: datetime, version: str, reason: str
+    ) -> None:
+        """The data has moved past a missing start or end bar: this row will never be
+        labelled, so stop asking."""
+        with transaction(self._conn):
+            self._conn.execute(
+                "INSERT INTO learning_unlabellable (symbol, as_of, horizon, horizon_bars,"
+                " dataset_version, reason, marked_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT DO NOTHING",
+                (symbol, _ts(as_of), h.timeframe.value, h.bars, version, reason,
+                 _ts(self._clock())),
+            )  # fmt: skip
+
+    def unlabellable(self, symbol: str, h: Horizon) -> list[datetime]:
+        """Recorded bars marked as never labellable for this horizon, oldest first."""
+        rows = self._conn.execute(
+            "SELECT as_of FROM learning_unlabellable WHERE symbol = ? AND horizon = ?"
+            " AND horizon_bars = ? ORDER BY as_of",
+            (symbol, h.timeframe.value, h.bars),
+        ).fetchall()
+        return [datetime.fromisoformat(r[0]) for r in rows]
 
     def _outcome(
         self, candles: CandleStore, symbol: str, h: Horizon, as_of: datetime, now: datetime
     ) -> BarOutcome | None:
-        step = TIMEFRAME_DURATION[h.timeframe]
-        start = candles.bar_at(symbol, h.timeframe, as_of - step, as_of=now)
-        end = candles.bar_at(symbol, h.timeframe, as_of + h.length - step, as_of=now)
-        if start is None or end is None:
+        pair = bars_closing_at(candles, symbol, as_of, as_of + h.length, now=now)
+        if pair is None:
             return None  # a missing start or end bar: no label, never a stretched one
+        start, end = pair
         return BarOutcome(
             symbol=symbol, as_of=as_of, horizon=h.timeframe, horizon_bars=h.bars,
             dataset_version=candles.dataset_version, move=end.close - start.close,
