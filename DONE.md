@@ -6,6 +6,29 @@
 
 ---
 
+## M07 news veto outcome report (2026-11-28, /tdd + review subagent (code-review + scrutinize lens), security-review n-a, branch `feat/116-veto-report`)
+
+**Goal:** measure whether the news veto (#115) saves losses or misses gains, so `NEWS_VETO_IMPACT` can be tuned on Shadow/Demo data (#116, PRD #114).
+
+**Shipped:** `app.learning.veto_report.veto_report(log, start, end, as_of)`. It counts NEWS_VETO experiences made in `[start, end)` and by `as_of`, then classes each one by its MARKET_MOVE label known at `as_of`:
+- **saved:** the market moved against the refused side;
+- **missed:** the market moved with the refused side;
+- **flat:** no move;
+- **unknown:** no label known yet.
+
+It also reports the mean move signed in the refused side's favour (None when no veto has a label). The function is read-only and needs no new storage.
+
+**Review fixes:**
+- Vetoes made after the report time were counted.
+- Only MARKET_MOVE labels are used now.
+- Documented limits: overlapping horizons can count one move several times, and the moves are before costs.
+
+**Validation:**
+- Backend verify green; 4 report tests.
+- Mutation probes: all caught.
+
+---
+
 ## M05 news veto: strong opposing news turns an entry into WAIT (2026-11-28, /tdd + review subagent (code-review + scrutinize lens), security-review n-a, branch `feat/115-news-veto`)
 
 **Goal:** let live, high-impact news block an entry that the chart and the forecast would take against it. This is the owner's decision on the #97 finding that, under current voting, news could never stop a wrong entry (#115, PRD #114).

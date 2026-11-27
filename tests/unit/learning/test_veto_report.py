@@ -86,3 +86,15 @@ def test_no_vetoes_gives_an_empty_report_not_zero_skill(
     log = ExperienceLog(conn, candles, clock=lambda: T0)
     r = veto_report(log, start=T0, end=T0 + timedelta(days=1), as_of=T0 + timedelta(days=1))
     assert r.vetoes == 0 and r.mean_move_for_refused_side is None
+
+
+def test_vetoes_after_the_report_time_or_at_the_window_end_are_not_counted(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    log = ExperienceLog(conn, candles, clock=lambda: T0)
+    _veto(log, "in", Direction.UP, hours=0)
+    _veto(log, "later", Direction.UP, hours=2)  # after the report's as_of
+    _veto(log, "at-end", Direction.UP, hours=3)  # the window end is exclusive
+    window = {"start": T0, "end": T0 + timedelta(hours=3)}
+    assert veto_report(log, **window, as_of=T0 + timedelta(hours=1)).vetoes == 1  # type: ignore[arg-type]
+    assert veto_report(log, **window, as_of=T0 + timedelta(hours=5)).vetoes == 2  # type: ignore[arg-type]
