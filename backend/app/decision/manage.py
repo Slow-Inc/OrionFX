@@ -16,7 +16,17 @@
     M05 is the only layer refusing a same-lot Live recovery add: M06's veto refuses
     only a size-up on a losing cycle (MARTINGALE_BEHAVIOR). Whether M06 should also
     refuse same-lot adds is an open question (docs/OPEN-WORK-LEDGER.md);
-  - an unknown Cycle Net fails closed, and a pending ADD blocks another (DUPLICATE).
+  - an unknown Cycle Net fails closed, and a pending ADD blocks another (DUPLICATE);
+  - the #115 news veto applies (NEWS_VETO_ADD; owner decision MAJ-05.1, #121). It
+    never blocks an exit. As in `decide`, it is checked before CONFLICT_EVIDENCE and
+    the EV gates, so it also records ADDs that would not have happened anyway; a
+    veto report's "missed" count is an upper bound for that reason;
+  - the chart is every proposal, unlike an entry: a Hybrid majority does not drop its
+    outvoted members here, so a split chart stays no vote and an exit never weakens.
+    An ADD therefore never rides a Hybrid 2 vs 1 (conservative, #121);
+  - EV is the entry formula: it still counts the full TARGET_ATR move although the
+    cycle closes at its Profit Target, so an ADD near the target is over-valued. Capping
+    it needs the target, which `CycleView`/`Held` do not carry (open, #121).
 - Otherwise WAIT: HOLD when the chart points against the position but the evidence
   is not strong enough to exit.
 
@@ -40,6 +50,7 @@ from app.decision.fusion import (
     direction_of,
     expected_value,
     gather,
+    news_veto,
     snapshot_live,
     wait,
 )
@@ -104,6 +115,8 @@ def manage(
     losing = held.cycle_net_usd < 0
     if losing and ctx.mode is Mode.LIVE:
         return waiting(WaitReason.NO_LIVE_RECOVERY)
+    if news_veto(evidence, held_dir, ctx.now):
+        return waiting(WaitReason.NEWS_VETO_ADD)
     if against >= support:
         return waiting(WaitReason.CONFLICT_EVIDENCE)
     ev, confidence = expected_value(ctx, inp, costs)

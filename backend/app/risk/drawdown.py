@@ -1,10 +1,16 @@
 """Account DD tracker (PRD-06 #14; RSK-01..03, RSK-07; master plan §4.3).
 
 DD% = max(0, (peak - equity) / peak x 100) on the whole account equity, manual
-trades included. Deposits/withdrawals move both peaks by their amount, so cash
-flow is never read as trading P&L (AT-23) [PROPOSED rule, OD-04]. A breach of
-the epoch ceiling (the owner's max DD) or the lifetime ceiling latches a lock
-that survives restarts and never clears because equity recovered. Approved
+trades included. Deposits/withdrawals scale both peaks by the equity ratio
+after/before the cash flow, so DD% is unchanged by cash flow and never read as
+trading P&L (AT-23) [PROPOSED rule, OD-04]. Moving the peaks by the amount instead
+turned a large withdrawal at a small DD into a false lifetime breach, and let a
+deposit hide DD (#121). With equity <= 0 before the cash flow there is no ratio,
+so the peaks move by the amount as before. A full withdrawal scales the peaks to 0
+and still locks (fail-closed; equity <= 0 handling is [TBD] in master plan §4.3).
+
+A breach of the epoch ceiling (the owner's max DD) or the lifetime ceiling latches
+a lock that survives restarts and never clears because equity recovered. Approved
 recovery starts a new epoch; the lifetime peak never resets, and a lifetime
 breach cannot be approved away.
 
@@ -34,6 +40,19 @@ def dd_percent(peak: Decimal, equity: Decimal) -> Decimal:
     if peak <= 0:
         return HUNDRED
     return min(HUNDRED, max(Decimal(0), (peak - equity) / peak * HUNDRED))
+
+
+def _adjust_peak(peak: Decimal | None, equity: Decimal, cash_flow: Decimal) -> Decimal:
+    """The peak after this observation: scaled by the cash flow's equity ratio, then
+    raised to equity. Without a positive pre-flow equity it moves by the amount."""
+    if peak is None:
+        return equity
+    before = equity - cash_flow
+    if cash_flow and before > 0:
+        peak = peak * equity / before
+    else:
+        peak += cash_flow
+    return max(peak, equity)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,9 +122,8 @@ class DrawdownTracker:
     ) -> RiskUpdated:
         with transaction(self._conn):
             old = self.state()
-            epoch_peak = equity if old.epoch_peak is None else old.epoch_peak + cash_flow
-            lifetime_peak = equity if old.lifetime_peak is None else old.lifetime_peak + cash_flow
-            epoch_peak, lifetime_peak = max(epoch_peak, equity), max(lifetime_peak, equity)
+            epoch_peak = _adjust_peak(old.epoch_peak, equity, cash_flow)
+            lifetime_peak = _adjust_peak(old.lifetime_peak, equity, cash_flow)
 
             epoch_dd = dd_percent(epoch_peak, equity)
             lifetime_dd = dd_percent(lifetime_peak, equity)

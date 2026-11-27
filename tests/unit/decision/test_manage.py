@@ -231,11 +231,58 @@ def test_a_managed_decision_bets_on_the_held_side_and_an_exit_against_it() -> No
     assert add.horizon is Timeframe.H1
 
 
-def test_the_news_veto_never_touches_managing_a_held_basket() -> None:
-    """#115: the veto guards entries only. Strong news against a held BUY still counts as
-    one exit vote exactly as before, and an add is never answered with NEWS_VETO."""
+def test_the_news_veto_blocks_an_add_but_never_an_exit() -> None:
+    """#121 (MAJ-05.1, owner decision): the #115 veto also guards ADD. Forecast and chart
+    UP against strong DOWN news is 2 vs 1, which would add; the veto turns it into WAIT.
+    Strong news against a held BUY still counts as one exit vote exactly as before."""
     strong = Evidence(forecast=_forecast(), news=[_news(impact="1")])
     d = _manage(evidence=strong)
-    assert "NEWS_VETO" not in _reasons(d)
+    # its own code, so the #116 entry-veto report is not mixed with ADD vetoes
+    assert d.created.action is DecisionAction.WAIT and _reasons(d) == ["NEWS_VETO_ADD"]
+    assert d.intent is None
+    weak = _manage(evidence=Evidence(forecast=_forecast(), news=[_news(impact="0.5")]))
+    assert weak.created.action is DecisionAction.ADD  # below the threshold: no veto
     alone = _manage([], Evidence(news=[_news(impact="1")]))
     assert alone.created.action is DecisionAction.EXIT  # the news still calls the exit
+
+
+def test_an_exit_on_a_stale_snapshot_is_not_born_expired() -> None:
+    """#121: the snapshot's validity must not clamp an EXIT intent, or the loop drops it
+    from `pending` at once and re-proposes CLOSE_ALL every tick."""
+    from app.decision.fusion import INTENT_TTL
+
+    later = NOW.replace(hour=13)
+    down = Direction.DOWN
+    ev = Evidence(forecast=_forecast(direction=down, valid_until=later),
+                  news=[_news(down, valid_until=later)])  # fmt: skip
+    stale = _ctx(now=NOW.replace(minute=30))
+    d = _manage([], ev, ctx=stale)
+    assert d.created.action is DecisionAction.EXIT and d.intent is not None
+    assert d.intent.valid_until == stale.now + INTENT_TTL
+
+
+def test_open_and_add_intents_still_expire_with_the_snapshot() -> None:
+    """#121: only exits escape the snapshot's expiry; an OPEN or ADD rests on it."""
+    from tests.support.decision import LATER
+
+    from app.decision.fusion import INTENT_TTL
+
+    near_end = _ctx(now=LATER - INTENT_TTL / 3)
+    lasting = _proposal().model_copy(update={"valid_until": LATER + INTENT_TTL * 10})
+    add = _manage([lasting], ctx=near_end)
+    enter = decide(near_end, [lasting], Evidence(forecast=_forecast()), cycle=CYCLE,
+                   costs=COSTS, symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    for d, action in ((add, IntentAction.ADD), (enter, IntentAction.OPEN)):
+        assert d.intent is not None and d.intent.action is action
+        assert d.intent.valid_until == LATER < near_end.now + INTENT_TTL
+
+
+def test_the_horizon_falls_back_when_the_chosen_proposal_is_on_the_other_side() -> None:
+    """#121: the forecast picks the DOWN H1 proposal, but a held BUY leans UP, so the
+    horizon comes from the UP proposal (M15), never from the opposing chosen one."""
+    down_h1 = _proposal("trend_following", Direction.DOWN)
+    up_m15 = _proposal("breakout").model_copy(update={"horizon": Timeframe.M15})
+    ev = Evidence(forecast=_forecast(direction=Direction.DOWN), news=[_news(Direction.UP)])
+    d = _manage([down_h1, up_m15], ev)
+    assert d.created.strategy_id == "trend_following" and d.direction is Direction.UP
+    assert d.created.action is DecisionAction.WAIT and d.horizon is Timeframe.M15

@@ -2,8 +2,9 @@
 
 Steps: keep only items known at `now` and not expired; flag and exclude
 injection attempts; ask the provider for a strict JSON answer; validate it
-(schema, ranges, and every id it mentions must be one it was given); report
-conflicting stances among the cited items as NEUTRAL with capped confidence.
+(schema, ranges, every id it mentions must be one it was given, and every cited id
+needs a stance); report conflicting stances among the cited items, or an overall
+direction they do not support, as NEUTRAL with capped confidence.
 A provider failure or an invalid answer is retried once, then the result is
 degraded: no assessment and a `health.updated` saying why (never the provider's
 raw error text, which may carry request details). That is the safe WAIT path;
@@ -12,6 +13,7 @@ analysis. The answer format the prompt asks for and the model that validates it
 live together here, under one prompt version.
 """
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -64,7 +66,25 @@ def _parse(text: str, given: set[str]) -> _Answer:
     unknown = (set(answer.cited_ids) | set(answer.item_directions)) - given
     if unknown:
         raise ValueError(f"mentions {len(unknown)} item id(s) it was not given")
+    unstated = set(answer.cited_ids) - set(answer.item_directions)
+    if unstated:
+        raise ValueError(f"gives no stance for {len(unstated)} cited item id(s)")
     return answer
+
+
+def _handles(items: Sequence[NewsItem]) -> dict[str, NewsItem]:
+    """The id each item has in the prompt, one per item (#121, MAJ-05.5). The cache keys
+    items by (source, item_id), so two sources can share an item_id. The first item with
+    an id keeps it; each later one, in input order, gets `@2`, `@3`, ... `@` is outside
+    NewsItem's id charset, so a suffixed handle never equals a real id and each handle
+    names exactly one item. The source itself is never put in the prompt."""
+    seen: Counter[str] = Counter()
+    handles: dict[str, NewsItem] = {}
+    for i in items:
+        seen[i.item_id] += 1
+        n = seen[i.item_id]
+        handles[i.item_id if n == 1 else f"{i.item_id}@{n}"] = i
+    return handles
 
 
 def assess_news(
@@ -78,8 +98,11 @@ def assess_news(
     """`now` judges which items are live; `available_at` is stamped from `clock` after the
     answer returns (defaults to `now`), so an assessment is never usable before it existed."""
     known = [i for i in items if live(i.fetched_at, i.valid_until, now)]  # no look-ahead
-    excluded = tuple(i.item_id for i in known if injection_flags(f"{i.title}\n{i.body}"))
-    usable = [i for i in known if i.item_id not in excluded]
+    flagged: list[NewsItem] = []
+    usable: list[NewsItem] = []
+    for i in known:
+        (flagged if injection_flags(f"{i.title}\n{i.body}") else usable).append(i)
+    excluded = tuple(i.item_id for i in flagged)
     pid = None if provider is None else provider.provider_id
 
     def done(
@@ -99,21 +122,22 @@ def assess_news(
             return done(HealthStatus.DEGRADED, f"all {len(excluded)} items flagged as injection")
         return done(HealthStatus.OK, "no usable news")
 
-    given = {i.item_id for i in usable}
+    handles = _handles(usable)
     answer, detail = ask(
         provider,
-        build_prompt(usable, ANSWER_FORMAT),
-        lambda text: _parse(text, given),
+        build_prompt(usable, ANSWER_FORMAT, ids=list(handles)),
+        lambda text: _parse(text, set(handles)),
         timeout_s=timeout_s,
     )
     if answer is None:
         return done(HealthStatus.DEGRADED, detail)
-    cited = [i for i in usable if i.item_id in answer.cited_ids]
-    stances = {answer.item_directions.get(i.item_id) for i in cited} - {
-        None,
-        Direction.NEUTRAL,
-    }
-    conflict = len(stances) > 1
+    cited_ids = [h for h in handles if h in answer.cited_ids]
+    cited = [handles[h] for h in cited_ids]
+    stances = {answer.item_directions[h] for h in cited_ids} - {Direction.NEUTRAL}
+    # conflicting stances, or an overall direction its cited items do not support (#121)
+    conflict = len(stances) > 1 or (
+        answer.direction is not Direction.NEUTRAL and stances != {answer.direction}
+    )
     confidence = answer.confidence
     if conflict:
         confidence = min(confidence, CONFLICT_CONFIDENCE_CAP)

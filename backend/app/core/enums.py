@@ -117,6 +117,8 @@ class WaitReason(StrEnum):
     POSITION_OPEN = "POSITION_OPEN"
     COOLDOWN = "COOLDOWN"
     NEWS_VETO = "NEWS_VETO"
+    NEWS_VETO_ADD = "NEWS_VETO_ADD"
+    """The same veto refusing an ADD (#121); its own code keeps the #116 report apart."""
     CONFLICT_EVIDENCE = "CONFLICT_EVIDENCE"
     EV_UNKNOWN = "EV_UNKNOWN"
     EV_NOT_POSITIVE = "EV_NOT_POSITIVE"
@@ -135,6 +137,8 @@ class CloseReason(StrEnum):
     RISK_LIMIT = "RISK_LIMIT"
     FINISH_CYCLE = "FINISH_CYCLE"
     MANUAL_RECONCILED = "MANUAL_RECONCILED"
+    AI_EXIT = "AI_EXIT"
+    """An allowed CLOSE_ALL from M05 ended the cycle before its target (§4.2)."""
 
 
 class DataQuality(StrEnum):
