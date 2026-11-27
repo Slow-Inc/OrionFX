@@ -62,6 +62,8 @@ from app.market_data.features import USABLE_QUALITY
 D = Decimal
 CENT = D("0.01")
 TARGET_ATR = D(1)
+NEWS_VETO_IMPACT = D("0.6")
+"""Net opposing news impact at or above which an entry is refused (#115) [PROPOSED]."""
 INTENT_TTL = timedelta(seconds=30)
 SOURCE = "m05"
 EXIT_STRATEGY = "m05.exit"
@@ -158,6 +160,24 @@ def usable_proposals(proposals: list[StrategyProposal], now: datetime) -> list[S
 
 def _signed(d: Direction, x: Decimal) -> Decimal:
     return x if d is Direction.UP else -x if d is Direction.DOWN else D(0)
+
+
+def news_veto(ev: Evidence, side: Direction, now: datetime) -> bool:
+    """Whether news vetoes an entry on `side` (#115, PRD #114).
+
+    Live, source-cited assessments are netted by impact, exactly as the news vote is
+    (NEUTRAL adds nothing); the entry is refused if the net opposes `side` with
+    magnitude >= NEWS_VETO_IMPACT. The same news is already cited in the decision's
+    evidence refs. A guard, not a vote: it can only turn an entry into WAIT, it ignores
+    the forecast's lineage, it never touches exits, and no news means no veto.
+    """
+    net = sum(
+        (_signed(n.direction, n.impact) for n in ev.news
+         if n.source_refs and live(n.available_at, n.valid_until, now)),
+        D(0),
+    )  # fmt: skip
+    against = -net if side is Direction.UP else net if side is Direction.DOWN else D(0)
+    return against >= NEWS_VETO_IMPACT
 
 
 def _live_forecast(ev: Evidence, now: datetime) -> PredictionGenerated | None:

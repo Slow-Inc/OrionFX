@@ -225,3 +225,13 @@ def test_a_managed_decision_bets_on_the_held_side_and_an_exit_against_it() -> No
     assert hold.horizon is None  # only a DOWN proposal: no UP horizon to borrow
     assert add.created.action is DecisionAction.ADD and add.direction is Direction.UP
     assert add.horizon is Timeframe.H1
+
+
+def test_the_news_veto_never_touches_managing_a_held_basket() -> None:
+    """#115: the veto guards entries only. Strong news against a held BUY still counts as
+    one exit vote exactly as before, and an add is never answered with NEWS_VETO."""
+    strong = Evidence(forecast=_forecast(), news=[_news(impact="1")])
+    d = _manage(evidence=strong)
+    assert "NEWS_VETO" not in _reasons(d)
+    alone = _manage([], Evidence(news=[_news(impact="1")]))
+    assert alone.created.action is DecisionAction.EXIT  # the news still calls the exit

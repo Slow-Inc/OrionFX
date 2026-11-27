@@ -71,12 +71,18 @@ def _forecast(
     )  # fmt: skip
 
 
-def _news(direction: Direction = Direction.DOWN, cited: bool = True) -> NewsAssessment:
+def _news(
+    direction: Direction = Direction.DOWN,
+    cited: bool = True,
+    impact: str = "0.8",
+    aid: str = "na_1",
+    valid_until: datetime = LATER,
+) -> NewsAssessment:
     return NewsAssessment(
-        assessment_id="na_1", news_ids=["n1"], source_refs=["src"] if cited else [],
-        direction=direction, impact=D("0.8"),
+        assessment_id=aid, news_ids=["n1"], source_refs=["src"] if cited else [],
+        direction=direction, impact=D(impact),
         score=Confidence(value=D("0.6"), semantics="uncalibrated LLM score"),
-        available_at=T0, valid_until=LATER,
+        available_at=T0, valid_until=valid_until,
     )  # fmt: skip
 
 
