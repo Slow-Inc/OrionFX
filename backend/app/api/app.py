@@ -177,6 +177,16 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
                 risk_locked = payload_as(ev, RiskUpdated).risk_locked
             lock_seq = ev.seq
 
+        latest_risk = journal.recent(["risk.updated"], limit=1)
+        risk = None
+        if latest_risk:
+            # The lock itself is reported once, at the top level (newest of the events
+            # that carry it); this object is the DD reading and when it was observed.
+            reading = payload_as(latest_risk[0], RiskUpdated).model_dump(
+                mode="json", exclude={"risk_locked"}
+            )
+            risk = {**reading, "observed_at": latest_risk[0].envelope.occurred_at.isoformat()}
+
         health = {}
         for ev in journal.latest_per_payload_field("health.updated", "component"):
             beat = effective_health(payload_as(ev, HealthUpdated), now, HEALTH_TTL)
@@ -193,6 +203,7 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
             "account_mode": cfg.trading.account_mode,
             "missing_for_start": missing_for_start(cfg),
             "live_allowed": ProtectedPolicy().live_allowed,
+            "risk": risk,
             "health": health,
             "latest_seq": journal.latest_seq(),
         }

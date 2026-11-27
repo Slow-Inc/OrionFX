@@ -193,3 +193,24 @@ dd {
     transition: border-color 150ms ease;
   }
 }
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+.confirm {
+  display: inline-flex;
+  gap: 4px;
+}
+.emergency {
+  margin-top: calc(var(--space) * 3);
+  border-color: var(--danger);
+}
+.money.gain > span:first-child {
+  color: var(--ok);
+}
+.money.loss > span:first-child {
+  color: var(--danger);
+}

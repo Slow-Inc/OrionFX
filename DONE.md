@@ -6,6 +6,40 @@
 
 ---
 
+## M01 slice B: Trading view (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/74-m01-trading`)
+
+**Goal:** see and control the bot honestly (PRD-01 #72, slice #74; UI-02, UST-01). The Account DD is kept apart from the Cycle Net estimate, nothing stale looks live, nothing sent looks done, and there is no accidental Emergency Stop.
+
+**Shipped:**
+- Backend: `/api/status` gains `risk`, the latest Account DD reading with `observed_at`. The lock is reported once, at the top level.
+- Frontend `trading.tsx`:
+  - Account card and Account DD, each with freshness. An unknown DD shows as "Unknown", never 0.
+  - Current cycle, with Cycle Net labelled an estimate and signed with a word.
+  - Positions say "not available yet", with no stub fetch.
+  - Controls are enabled only for a known state that allows them.
+  - One `ConfirmButton` for every control. Emergency Stop sits in its own zone and needs STOP typed.
+- `commands.ts`: `runCommand` stays PENDING until M06 answers. UNRESOLVED and REJECTED are shown, and a timeout reads STILL_PENDING. Polling is abortable and stops on sign-out.
+- `snapshot.ts`: `useSnapshot`.
+- `format.ts`: `formatPercent`.
+
+**Validation:**
+- Backend verify green.
+- Frontend lint, typecheck, test (37) and build green.
+- 16 mutation probes, all caught.
+
+**Review fixes:**
+- A second command can't be confirmed while one is pending.
+- Start is not enabled while the state is unknown or wrong.
+- The Account DD and the cycle show their age.
+- Read errors show as errors.
+- A malformed money value can't crash the view.
+- Polling stops on unmount or sign-out.
+- Emergency Stop's Cancel clears the typed word.
+- One lock value in `/api/status`.
+- "Approve Recovery" uses the glossary term.
+
+---
+
 ## M01 slice A: frontend foundation (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/73-m01-foundation`)
 
 **Goal:** a dashboard foundation that never pretends. Stale is never shown as Live, a failed sign-in is never shown as a lost session, and money never drifts (PRD-01 #72, slice #73; UI-01, UST-01).

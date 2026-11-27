@@ -31,6 +31,17 @@ function render(cents: bigint): string {
   return `${whole}.${(abs % 100n).toString().padStart(2, "0")}`;
 }
 
+/** A decimal percent string for display ("0E-8" -> "0"), or "—" when not a decimal. */
+export function formatPercent(value: string | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  try {
+    const p = plain(value);
+    return p.includes(".") ? p.replace(/\.?0+$/, "") : p;
+  } catch {
+    return "—";
+  }
+}
+
 export function formatMoney(value: string | null | undefined): string {
   if (value === null || value === undefined) return "—";
   try {
@@ -47,8 +58,14 @@ export interface Signed {
   sign: -1 | 0 | 1;
 }
 
-export function signed(value: string): Signed {
-  const cents = toCents(value);
+/** A signed amount, or null when the value is not a decimal (shown as "—", never thrown). */
+export function signed(value: string): Signed | null {
+  let cents: bigint;
+  try {
+    cents = toCents(value);
+  } catch {
+    return null;
+  }
   if (cents > 0n) return { text: `+${render(cents)}`, word: "gain", sign: 1 };
   if (cents < 0n) return { text: `−${render(cents)}`, word: "loss", sign: -1 };
   return { text: render(cents), word: "flat", sign: 0 };
