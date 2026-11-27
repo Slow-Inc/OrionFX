@@ -55,7 +55,7 @@ def _card(**over: object) -> ModelCard:
         "model_version": "1.0.0",
         "artifact_hash": None,  # stamped from the registry on load
         "lineage": ForecastLineage.CHART_ONLY,
-        "feature_schema": "m02.features.v1",
+        "feature_schema": "m02.features.v2",
         "required_features": ["H1.rsi_14.rsi", "H1.atr_14.atr"],
         "feature_ranges": {"H1.rsi_14.rsi": ParameterBound(low=D(5), high=D(95)),
                            "H1.atr_14.atr": ParameterBound(low=D("0.5"), high=D(30))},
@@ -143,7 +143,7 @@ def _snapshot(**values: Decimal | None) -> FeatureSnapshot:
     base.update(values)
     return FeatureSnapshot(
         symbol="XAUUSD",
-        feature_schema="m02.features.v1",
+        feature_schema="m02.features.v2",
         values=base,
         quality=DataQuality.OK,
         as_of=T0,
@@ -238,7 +238,7 @@ def test_prediction_carries_lineage_semantics_and_validity(
     assert p.lineage is ForecastLineage.CHART_ONLY and p.probability.calibrated is False
     assert "score for the predicted direction" in p.probability.semantics
     assert p.valid_until == T0 + timedelta(minutes=5)
-    assert p.input_refs == [f"m02.features.v1@{T0.isoformat()}"]
+    assert p.input_refs == [f"m02.features.v2@{T0.isoformat()}"]
     down = predict(loaded, _snapshot(**{"H1.rsi_14.rsi": D(40)}), now=NOW)
     assert down.direction is Direction.DOWN and down.probability.value == D("0.6")
 
@@ -338,3 +338,13 @@ class _Impostor:
 def test_a_lookalike_of_a_loaded_predictor_is_refused() -> None:
     with pytest.raises(Refused, match="loaded predictor"):
         predict(_Impostor(), _snapshot(), now=NOW)  # type: ignore[arg-type]
+
+
+def test_forecast_quality_is_judged_on_the_features_the_model_reads() -> None:
+    """#124 (BLK-01b): a technique the model does not read being degraded must not mark
+    the forecast degraded, or M05 can never compute an expected value."""
+    base = load_baseline(BASELINE, mode=Mode.DEMO)
+    snap = _snapshot(**{"M5.macd_12_26_9.macd": None}).model_copy(
+        update={"quality": DataQuality.DEGRADED}
+    )
+    assert predict(base, snap, now=NOW).data_quality is DataQuality.OK

@@ -106,7 +106,7 @@ def test_live_rows_carry_the_account_mode_and_backfill_rows_say_so(
     assert (rows[0]["provenance"], rows[0]["mode"]) == ("LIVE", Mode.SHADOW.value)
     assert {(r["provenance"], r["mode"]) for r in rows[1:]} == {("BACKFILL", None)}
     assert {r["dataset_version"] for r in rows} == {"v1"}
-    assert {r["feature_schema"] for r in rows} == {"m02.features.v1"}
+    assert {r["feature_schema"] for r in rows} == {"m02.features.v2"}
 
 
 def test_a_label_is_the_raw_move_known_only_once_the_horizon_bar_closed(

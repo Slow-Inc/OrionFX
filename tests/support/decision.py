@@ -28,7 +28,7 @@ LATER = T0 + timedelta(minutes=5)
 def _ctx(**over: object) -> DecisionContext:
     snap = FeatureSnapshot(
         symbol="XAUUSD",
-        feature_schema="m02.features.v1",
+        feature_schema="m02.features.v2",
         values={ATR_M15: D(4)},
         quality=DataQuality.OK,
         as_of=T0,

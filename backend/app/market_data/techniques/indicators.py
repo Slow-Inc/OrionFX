@@ -25,6 +25,7 @@ from itertools import pairwise
 from app.core.contracts import CandleClosed, TechniqueObservation
 from app.core.enums import QualityFlag
 from app.core.time import TIMEFRAME_DURATION
+from app.market_data.session import SessionSchedule, next_slot
 
 D = Decimal
 BB_K = Decimal(2)
@@ -241,9 +242,17 @@ def _ref(bar: CandleClosed) -> str:
 
 
 def observe(
-    technique: Technique, bars: Sequence[CandleClosed], now: datetime
+    technique: Technique,
+    bars: Sequence[CandleClosed],
+    now: datetime,
+    *,
+    session: SessionSchedule | None = None,
 ) -> TechniqueObservation:
-    """One observation from closed bars (oldest first) of one symbol and timeframe."""
+    """One observation from closed bars (oldest first) of one symbol and timeframe.
+
+    With a `session`, bars are expected only while the market is open: a window that
+    spans a scheduled closure is contiguous, and the last bar before one stays valid
+    until the next expected bar closes. Without one the market never closes (24/7)."""
     if not bars:
         raise ValueError("observe needs at least one bar")
     last = bars[-1]
@@ -256,12 +265,17 @@ def observe(
     blockers: list[QualityFlag] = []
     if len(window) < technique.lookback:
         blockers.append(QualityFlag.WARMUP)
-    contiguous = all(b.open_time - a.open_time == size for a, b in pairwise(window))
+    contiguous = all(b.open_time == next_slot(session, a.open_time, size)
+                     for a, b in pairwise(window))  # fmt: skip
     if not contiguous or any(QualityFlag.GAP in b.quality_flags for b in window):
         blockers.append(QualityFlag.GAP_IN_WINDOW)  # no indicator spans missing data
     if technique.needs_volume and last.volume is None:
         blockers.append(QualityFlag.MISSING_INPUT)
-    valid_until = last.close_time + size  # the next bar replaces this one
+    # The next bar replaces this one. Across a scheduled closure it is valid only until
+    # the market reopens: after that, the next bar must close before it counts as fresh
+    # (safety over availability; the reopen is when spreads are widest).
+    reopen = next_slot(session, last.open_time, size)
+    valid_until = reopen + size if reopen == last.close_time else reopen
     if now >= valid_until:
         blockers.append(QualityFlag.STALE)
         # TechniqueObservation needs valid_until > available_at even when stale.

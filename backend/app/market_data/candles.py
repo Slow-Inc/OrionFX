@@ -25,6 +25,7 @@ from app.core.enums import DataQuality, QualityFlag, Timeframe
 from app.core.time import CLOCK_SKEW, TIMEFRAME_DURATION, Clock, broker_to_utc, fresh, utc_now
 from app.execution.broker import Quote
 from app.market_data.port import RawTick
+from app.market_data.session import SessionSchedule
 
 FRAMES = TIMEFRAME_DURATION
 M5 = FRAMES[Timeframe.M5]
@@ -77,6 +78,9 @@ class CandleEngine:
     symbols: Mapping[str, str]
     """Broker symbol -> canonical symbol; only ticks mapping to `symbol` are used."""
     clock: Clock = utc_now
+    session: SessionSchedule | None = None
+    """The market's trading schedule: no tick during a scheduled closure is not a gap.
+    None means the market never closes."""
     issues: Counter[Issue] = field(default_factory=Counter)
     _open: dict[Timeframe, _Open] = field(default_factory=dict)
     _last: Quote | None = None
@@ -111,8 +115,9 @@ class CandleEngine:
         if tick is None:
             return []
         last = self._last
-        # A whole M5 interval with no tick lies between the last tick and this one.
-        hole = last is not None and _floor(tick.time, M5) > _floor(last.time, M5) + M5
+        # An M5 interval the market was open for, with no tick, lies between the last
+        # tick and this one.
+        hole = last is not None and self._missed(_floor(last.time, M5), _floor(tick.time, M5))
         if hole:
             self.issues[Issue.GAP] += 1
         spread = tick.ask - tick.bid
@@ -146,6 +151,14 @@ class CandleEngine:
         self._seen_at_last.add((tick.bid, tick.ask))
         self._last, self._last_offset = tick, raw.broker_utc_offset_minutes
         return closed
+
+    def _missed(self, last_slot: datetime, this_slot: datetime) -> bool:
+        t = last_slot + M5
+        while t < this_slot:
+            if self.session is None or self.session.expects(t, M5):
+                return True
+            t += M5
+        return False
 
     def _close(self, at: datetime, tf: Timeframe, size: timedelta, cur: _Open) -> ClosedBar:
         return ClosedBar(

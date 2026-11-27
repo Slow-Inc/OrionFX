@@ -54,7 +54,7 @@ def _dataset(version: str = "1", **over: object) -> DatasetManifest:
 def _model(version: str, sha: str, modes: list[Mode] | None = None) -> ModelCard:
     return ModelCard(
         model_id="xgb-dir", model_version=version, artifact_hash="sha256:" + sha * 64,
-        lineage=ForecastLineage.CHART_ONLY, feature_schema="m02.features.v1",
+        lineage=ForecastLineage.CHART_ONLY, feature_schema="m02.features.v2",
         required_features=["k"], feature_ranges={}, horizon=Timeframe.H1, horizon_bars=1,
         semantics="calibrated P(dir)", calibrated=False, validation={"brier": D("0.24")},
         evidence_refs=[], supported_modes=modes or [Mode.SHADOW, Mode.DEMO, Mode.LIVE],
