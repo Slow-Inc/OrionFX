@@ -1,7 +1,8 @@
 # T4 verify — the server-side ship gate.
 #
 # Jobs: `guards` (the three .githooks scripts), and the backend `lint`,
-# `typecheck`, `test` (P1 Foundation, issue #5). Frontend jobs land with M01.
+# `typecheck`, `test` (P1 Foundation, issue #5), and `frontend` (M01 dashboard: Biome lint,
+# tsc, Vitest, Vite build).
 # Keep `.claude/t4.json` "verify" a literal prefix of these jobs, so the local
 # gate fails for the same reasons, sooner.
 #
@@ -77,3 +78,19 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --locked
       - run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5  # pinned: a new Bun must not change CI on its own
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run build
