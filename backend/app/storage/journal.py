@@ -114,6 +114,22 @@ class Journal:
         ).fetchone()
         return self._stored(row) if row else None
 
+    def unanswered(
+        self, request_type: str, answer_type: str, key: str, *, within: int
+    ) -> list[StoredEvent]:
+        """Of the newest `within` events of `request_type`, those with no `answer_type`
+        event sharing payload `key`, oldest first (e.g. intents M06 has not decided)."""
+        path = self._json_path(key)
+        rows = self._conn.execute(
+            "SELECT seq, body FROM events i WHERE i.seq IN ("
+            " SELECT seq FROM events WHERE event_type = ? ORDER BY seq DESC LIMIT ?)"
+            " AND NOT EXISTS (SELECT 1 FROM events r WHERE r.event_type = ?"
+            f" AND json_extract(r.body, '{path}') = json_extract(i.body, '{path}'))"
+            " ORDER BY seq",
+            (request_type, within, answer_type),
+        ).fetchall()
+        return [self._stored(r) for r in rows]
+
     def latest_seq(self) -> int:
         row = self._conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
         return int(row[0])

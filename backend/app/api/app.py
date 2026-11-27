@@ -33,6 +33,7 @@ from starlette.websockets import WebSocketDisconnect
 from app.api.auth import LoginThrottle, SessionStore
 from app.core.config import ProtectedPolicy, SystemConfig, UserConfig, missing_for_start
 from app.core.contracts import (
+    SNAPSHOT_STALE_AFTER,
     AccountSnapshot,
     ControlCompleted,
     ControlRequested,
@@ -53,7 +54,6 @@ from app.storage.db import connect, transaction
 from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag
 from app.storage.journal import Journal, payload_as
 
-SNAPSHOT_STALE_AFTER = timedelta(seconds=60)
 HEALTH_TTL = timedelta(seconds=60)
 WS_POLL_SECONDS = 0.5
 

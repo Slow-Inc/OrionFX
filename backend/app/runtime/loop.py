@@ -9,28 +9,36 @@ One `tick()` at the clock's `now`:
    holds a basket), and journals `decision.created` and any `trade.intent` with
    deterministic ids, so a repeated tick on the same inputs adds nothing;
 5. records the M07 experience and labels whatever outcomes are now known.
-It never calls the broker: M06 alone vets and executes intents. A failing tick reports
-`health.updated` (DOWN) and is not retried until a backoff has passed.
+It never calls the broker: M06 alone vets and executes intents. It fails closed: when an
+input is not known well enough (no Initial Lot, no bars, a stale quote, positions not
+freshly reported, a basket outside the open cycle) it decides nothing and reports
+DEGRADED; while a cycle is closing it decides nothing. A failing tick reports DOWN and
+is not retried until a backoff has passed. Health is journaled on change and as a
+heartbeat.
 """
 
+import logging
 import sqlite3
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 from app.core.contracts import (
+    SNAPSHOT_STALE_AFTER,
     BotPosition,
     CandleClosed,
     CycleUpdated,
     FeatureSnapshot,
     HealthUpdated,
+    MarketSnapshot,
     PositionsSnapshot,
+    RiskDecision,
     StrategyProposal,
     TradeIntent,
 )
 from app.core.enums import (
     CycleState,
+    DataQuality,
     Direction,
     HealthStatus,
     IntentAction,
@@ -40,13 +48,12 @@ from app.core.enums import (
 )
 from app.core.events import make_event
 from app.core.ids import stable_id
-from app.core.time import Clock, utc_now
+from app.core.time import Clock, fresh, utc_now
 from app.decision.context import DecisionContext
 from app.decision.decide import decide
 from app.decision.fusion import Costs, CycleView, Decision, Evidence, to_events, usable_proposals
 from app.decision.gate import Strategy, eligible
 from app.decision.manage import Held, manage
-from app.engine.engine import SNAPSHOT_EVERY
 from app.learning.experience import ExperienceLog
 from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot
 from app.market_data.store import CandleStore
@@ -59,12 +66,21 @@ COMPONENT = "M05.loop"
 SOURCE = "m05"
 LOOKBACK = max(t.lookback for t in DEFAULT_TECHNIQUES)
 BACKOFF = timedelta(seconds=60)
-POSITIONS_STALE_AFTER = 2 * SNAPSHOT_EVERY
-"""Older than this, M06's positions snapshot no longer says what the bot holds."""
-PENDING_LOOKBACK = 50
-"""How many recent intents to scan for ones M06 has not decided yet."""
+PENDING_WINDOW = 50
+"""Newest intents checked for an M06 decision; intents live seconds, so older ones have
+expired (and M06 refuses an expired intent anyway)."""
+HEARTBEAT_EVERY = timedelta(seconds=60)
+"""An unchanged health status is re-reported this often (a change is reported at once)."""
 
 EvidenceProvider = Callable[[datetime], Evidence]
+QuoteProvider = Callable[[datetime], MarketSnapshot]
+"""The current quote (M02 `CandleBuilder.snapshot`); price and spread come from it."""
+
+log = logging.getLogger(__name__)
+
+
+class NotKnown(Exception):
+    """An input the decision depends on is not known well enough: no decision this tick."""
 
 
 class DecisionLoop:
@@ -79,6 +95,7 @@ class DecisionLoop:
         strategies: Sequence[Strategy],
         registry: ArtifactRegistry,
         evidence: EvidenceProvider,
+        quote: QuoteProvider,
         costs: Costs,
         experiences: ExperienceLog,
         policy: RiskPolicy = DEFAULT_POLICY,
@@ -94,6 +111,7 @@ class DecisionLoop:
         self._strategies = list(strategies)
         self._registry = registry
         self._evidence = evidence
+        self._quote = quote
         self._costs = costs
         self.experiences = experiences
         self._policy = policy
@@ -101,61 +119,68 @@ class DecisionLoop:
         self._bot_id = bot_id
         self._clock = clock
         self._retry_at: datetime | None = None
+        self._mode = Mode.SHADOW  # the last mode read; used if reading the config fails
+        self._last_health: tuple[HealthStatus, str | None, datetime] | None = None
 
     # --- M06 state, read from the journal ----------------------------------------------
 
-    def _cycle(self, now: datetime) -> tuple[CycleView, Decimal | None]:
+    def _cycle(self) -> tuple[CycleUpdated | None, str | None, datetime | None]:
+        """M06's latest cycle update and its cycle id, and when a cycle last closed (kept
+        after the next cycle opens, so the re-entry cooldown still applies)."""
         latest = self._journal.recent(["cycle.updated"], limit=1)
-        pending = self._pending(now)
+        closed = self._journal.find("cycle.updated", "state", CycleState.CLOSED.value)
+        closed_at = None if closed is None else closed.envelope.occurred_at
         if not latest:
-            return CycleView(None, 0, None, pending), None
-        upd = payload_as(latest[0], CycleUpdated)
-        if upd.state is CycleState.CLOSED:
-            closed_at = latest[0].envelope.occurred_at
-            return CycleView(None, 0, closed_at, pending), None
-        return (
-            CycleView(latest[0].envelope.cycle_id, 0, None, pending),
-            upd.cycle_net_estimated_usd,
-        )
+            return None, None, closed_at
+        return payload_as(latest[0], CycleUpdated), latest[0].envelope.cycle_id, closed_at
 
-    def _positions(self, now: datetime) -> list[BotPosition] | None:
-        """The bot's positions from M06's latest snapshot, or None when not known at `now`
-        (no snapshot, or one older than `POSITIONS_STALE_AFTER`)."""
+    def _positions(self, now: datetime, cycle_id: str | None) -> list[BotPosition]:
+        """The bot's positions in the open cycle, from M06's latest snapshot. Raises
+        `NotKnown` unless that snapshot is fresh, newer than M06's last risk decision (an
+        allowed order may not be reported yet), and describes one open basket only."""
         latest = self._journal.recent(["positions.snapshot"], limit=1)
         if not latest:
-            return None
+            raise NotKnown("bot positions not reported yet")
         snap = payload_as(latest[0], PositionsSnapshot)
-        if now - snap.observed_at > POSITIONS_STALE_AFTER:
-            return None
-        return list(snap.items)
+        if not fresh(snap.observed_at, now, SNAPSHOT_STALE_AFTER):
+            raise NotKnown("bot positions not known (stale)")
+        decided = self._journal.recent(["risk.decision"], limit=1)
+        if decided and payload_as(decided[0], RiskDecision).decided_at > snap.observed_at:
+            raise NotKnown("bot positions not reported since M06's last decision")
+        items = list(snap.items)
+        if any(p.symbol != self._symbol or p.cycle_id != cycle_id for p in items):
+            raise NotKnown("bot positions outside the open cycle")
+        if len({p.side for p in items}) > 1:
+            raise NotKnown("bot positions on both sides")
+        return items
 
     def _pending(self, now: datetime) -> frozenset[IntentAction]:
         """Intent actions M06 has not decided yet (and that have not expired)."""
-        out: set[IntentAction] = set()
-        for ev in self._journal.recent(["trade.intent"], limit=PENDING_LOOKBACK):
-            intent = payload_as(ev, TradeIntent)
-            if intent.valid_until <= now:
-                continue
-            if self._journal.find("risk.decision", "intent_id", intent.intent_id) is None:
-                out.add(intent.action)
-        return frozenset(out)
+        intents = (
+            payload_as(ev, TradeIntent)
+            for ev in self._journal.unanswered(
+                "trade.intent", "risk.decision", "intent_id", within=PENDING_WINDOW
+            )
+        )
+        return frozenset(i.action for i in intents if now < i.valid_until)
 
     # --- the tick ---------------------------------------------------------------------
 
     def _health(self, status: HealthStatus, detail: str | None, now: datetime) -> None:
+        """Report health when it changes, and re-report it every `HEARTBEAT_EVERY`."""
+        last = self._last_health
+        if last is not None and last[:2] == (status, detail) and now - last[2] < HEARTBEAT_EVERY:
+            return
+        self._last_health = (status, detail, now)
         self._journal.append(
             make_event(
                 "health.updated", source=SOURCE,
                 payload=HealthUpdated(component=COMPONENT, status=status, last_heartbeat=now,
                                       detail=detail),
-                account_id=self._account_id, bot_id=self._bot_id, mode=self._mode(),
+                account_id=self._account_id, bot_id=self._bot_id, mode=self._mode,
                 event_id=stable_id("evt", COMPONENT, now, status), occurred_at=now,
             )
         )  # fmt: skip
-
-    def _mode(self) -> Mode:
-        _, cfg = ConfigStore(self._conn).current()
-        return Mode(cfg.trading.account_mode)
 
     def tick(self) -> Decision | None:
         now = self._clock()
@@ -163,48 +188,62 @@ class DecisionLoop:
             return None
         try:
             decision = self._tick(now)
+        except NotKnown as unknown:  # refuse to decide on inputs it cannot trust
+            self._report(HealthStatus.DEGRADED, str(unknown), now)
+            return None
         except Exception as exc:  # a fault reports and backs off; it never loops hot
             self._retry_at = now + BACKOFF
-            self._health(HealthStatus.DOWN, f"{type(exc).__name__}: {exc}", now)
+            self._report(HealthStatus.DOWN, f"{type(exc).__name__}: {exc}", now)
             return None
         self._retry_at = None
         return decision
 
+    def _report(self, status: HealthStatus, detail: str, now: datetime) -> None:
+        """Health on a failure path: if even the journal fails, log it rather than raise."""
+        try:
+            self._health(status, detail, now)
+        except Exception:
+            log.exception("M05 loop could not report %s: %s", status.value, detail)
+
     def _bars(self, now: datetime) -> dict[Timeframe, list[CandleClosed]]:
-        out: dict[Timeframe, list[CandleClosed]] = {}
-        for tf in self._timeframes:
-            bars = self._candles.bars(self._symbol, tf, as_of=now, limit=LOOKBACK)
-            if bars:
-                out[tf] = bars
-        return out
+        """Every configured timeframe, empty if it has no bar yet, so a missing context
+        timeframe makes the feature snapshot MISSING instead of silently vanishing."""
+        return {
+            tf: self._candles.bars(self._symbol, tf, as_of=now, limit=LOOKBACK)
+            for tf in self._timeframes
+        }
 
     def _tick(self, now: datetime) -> Decision | None:
         _, cfg = ConfigStore(self._conn).current()
+        mode = self._mode = Mode(cfg.trading.account_mode)
         lot = cfg.trading.initial_lot
+        if lot is None:
+            raise NotKnown("no Initial Lot configured")
         bars = self._bars(now)
-        if lot is None or self._timeframes[0] not in bars:
-            self._health(HealthStatus.DEGRADED, "no initial lot or no bars yet", now)
-            return None
-        last = bars[self._timeframes[0]][-1]  # the store returns only bars available at now
+        if not bars[self._timeframes[0]]:
+            raise NotKnown("no bars yet")
+        quote = self._quote(now)
+        if quote.quality is not DataQuality.OK or quote.bid is None:
+            raise NotKnown(f"market quote {quote.quality.value.lower()}")
         snapshot = build_feature_snapshot(self._symbol, bars, now)
-        mode = Mode(cfg.trading.account_mode)
-        ctx = DecisionContext(now=now, mode=mode, snapshot=snapshot, price=last.close,
-                              spread=last.spread, initial_lot=lot)  # fmt: skip
+        ctx = DecisionContext(now=now, mode=mode, snapshot=snapshot, price=quote.bid,
+                              spread=quote.spread, initial_lot=lot)  # fmt: skip
         gate = eligible(self._strategies, ctx, enabled=cfg.trading.strategies_enabled,
                         registry=self._registry)  # fmt: skip
         ctx = gate.with_allowed(ctx)
         proposals = [p for s in gate.allowed if (p := s.propose(ctx)) is not None]
         evidence = self._evidence(now)
-        cycle, cycle_net = self._cycle(now)
-        positions: list[BotPosition] = []
-        if cycle.cycle_id is not None:  # entering or managing depends on what the bot holds
-            known = self._positions(now)
-            if known is None:
-                self._health(HealthStatus.DEGRADED, "bot positions not known (stale)", now)
-                return None
-            positions = known
-            cycle = replace(cycle, open_positions=len(positions))
-        held = _held(positions, cycle_net) if positions else None
+        upd, cycle_id, closed_at = self._cycle()
+        if upd is not None and upd.state is CycleState.CLOSING:
+            self._health(HealthStatus.OK, "cycle closing: no new decisions", now)
+            return None
+        if upd is not None and upd.state is CycleState.CLOSED:
+            cycle_id = None
+        # what the bot holds decides between entering and managing: always know it
+        positions = self._positions(now, cycle_id)
+        cycle = CycleView(cycle_id, len(positions), closed_at, self._pending(now))
+        net = None if upd is None or cycle_id is None else upd.cycle_net_estimated_usd
+        held = _held(positions, net) if positions else None
         pv = self._policy.policy_version
         if held is None:
             d = decide(ctx, proposals, evidence, cycle=cycle, costs=self._costs,
@@ -214,9 +253,9 @@ class DecisionLoop:
             d = manage(ctx, proposals, evidence, cycle=cycle, held=held,
                        max_positions=caps.max_positions, costs=self._costs,
                        symbol=self._symbol, policy_version=pv)  # fmt: skip
+        self._record(d, snapshot, proposals, held, mode, now)  # LRN-02 before M06 sees it
         for env in to_events(d, account_id=self._account_id, bot_id=self._bot_id):
             self._journal.append(env)
-        self._record(d, snapshot, proposals, held, mode, now)
         self.experiences.label_due(now=now)
         self._health(HealthStatus.OK, None, now)
         return d

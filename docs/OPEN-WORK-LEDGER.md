@@ -48,7 +48,12 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 | Frontend CI jobs (lint/typecheck/test/build) + `verify` for `frontend/` | 🟡 | Owner review: touches `.github/workflows` and `.claude/t4.json` (enforcement paths) | Separate PR after M01; run locally meanwhile (`cd frontend && bun run lint && bun run typecheck && bun run test && bun run build`) |
 | Positions read model for the dashboard | ✅ | — | #82: `positions.snapshot` (bot only) → `/api/positions` → Trading view |
 | `/api/account` and `/api/positions` read the newest snapshot regardless of account/bot id | 🔴 | M08 slice | Filter by the configured account/bot once multiple logins are supported (found in #82 review; pre-existing) |
-| Runtime orchestrator: M02 ingest → M04 → M05 decide/manage → journal → M06, plus M07 experience recording each tick | 🔴 | Integration slice (X01) | All parts exist and are tested in isolation and in the M05→M06 integration test; nothing runs them on a live clock yet |
+| Runtime decision loop: M02 → evidence → M05 decide/manage → journal → M06, plus M07 experience and labels each tick | ✅ | — | #84: `app.runtime.loop.DecisionLoop`, tested against replayed bars and the real M06 engine on the fake broker |
+| Run the decision loop in the `serve` process with real providers (MT5 quote/candle feed, M04 forecasts, M03 news/reasoning) | ⛔ | Blocked | Needs the MT5 adapter (#17), news/LLM keys (#41) and trained models (#48); the loop takes quote and evidence providers so they plug in without changes |
+| M06 exits (CLOSE/CLOSE_ALL) ignore `intent.cycle_id`; a stale exit from cycle A could close cycle B's basket | 🔴 | M06 slice | Refuse an exit naming another cycle (found in #84 scrutiny; pre-existing) |
+| M06 state read from the journal is "latest by seq", not as-of `now`; replay on a reused database can see the future | 🔴 | X02/M08 slice | Replay on a fresh database, or read state as-of the replay clock (found in #84 scrutiny) |
+| The loop recomputes the experience's direction and horizon instead of `Decision` carrying what it acted on | 🔴 | M05 slice | Put direction and horizon on `Decision` (found in #84 simplify) |
+| No expression index for `intent_id` lookups on `risk.decision` | 🔴 | M08 slice | Add an index if journal growth makes `find`/`unanswered` slow (found in #84 review) |
 | `available_at` on `LlmReasoning` (no look-ahead guard for reasoning) | ✅ | — | #83: required, stamped after the answer returns, judged by `live()` in fusion |
 | `StrategyProposal` has no availability time; fusion checks only its expiry | 🔴 | Contract change (X01) | Add `available_at` if proposals are ever built ahead of `now` (found in #83 review; pre-existing) |
 
