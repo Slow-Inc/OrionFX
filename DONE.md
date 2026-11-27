@@ -6,6 +6,20 @@
 
 ---
 
+## M03 reasoning prompt v2: chart features are not citable (2026-11-27, /tdd + review subagent (code-review + scrutinize lens), simplify inline, security-review n-a, branch `fix/99-reason-prompt`)
+
+**Goal:** stop real models citing chart feature keys as ids, which invalidated whole reasoning answers (#99, PRD #98).
+
+**Shipped:** `m03.reason.v2` lists "Citable assessment ids" / "Citable prediction ids" (or "none"), says "Cite no other id", and labels the chart summary as context that is never cited. Validator unchanged.
+
+**Evidence (live, OpenCode Go, 42 reasoning cases):** answers rejected for citing ids not given fell from 27/336 (v1: GLM 16, Qwen3.8 7, DeepSeek 4) to 0/252 (v2, same models).
+
+**Review:** subagent: ship; nit (drop the version-string assert) declined: the version bump is the audit contract and a mutation probe relies on it. Mutation probes: 4/4 caught.
+
+**Validation:** backend verify green.
+
+---
+
 ## CI: Dependabot PRs pass the T4 guards (2026-11-27, subagent review: correctness + security + simpler-alternative, simplify n-a, branch `ci/93-dependabot-guards`)
 
 **Goal:** a Dependabot PR (e.g. #3) can go green and be merged by the agent under `requireGreenCI` (#93).
