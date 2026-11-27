@@ -9,8 +9,11 @@ back-fills historical candles: construct it with `Provenance.BACKFILL` and run `
 Given loaded M04 predictors, it also records what each one said about every newly
 recorded bar, made at that bar's close (#109). A refused prediction (e.g. not enough
 history for the model's features) is skipped. A model added later predicts only the
-bars recorded after it was added. These are learning rows: they are never journaled as
-`prediction.generated` and never reach trading.
+bars recorded after it was added. A model that fails is logged and skipped for that bar;
+the snapshot and the other models are still recorded. Each prediction carries the bar's
+provenance: a BACKFILL prediction may be in-sample for a model trained on those candles
+(cards have no training cutoff yet to refuse such bars). These are learning rows: never
+journaled as `prediction.generated`, never trading evidence.
 
 A bar is tagged LIVE only when it is recorded within `LIVE_WITHIN` of becoming
 available (the bot saw it as it happened); bars caught up after downtime, and every bar
@@ -128,15 +131,22 @@ class MarketRecorder:
                 mode=mode if live else None, dataset_version=version,
             )  # fmt: skip
             if recorded:
-                self._predict(snapshot, version)
+                self._predict(snapshot, Provenance.LIVE if live else Provenance.BACKFILL,
+                              version)  # fmt: skip
 
-    def _predict(self, snapshot: FeatureSnapshot, version: str) -> None:
+    def _predict(self, snapshot: FeatureSnapshot, provenance: Provenance, version: str) -> None:
+        """Each model in its own savepoint: one failing model never stops the snapshot or
+        the other models from being recorded."""
         for loaded in self._predictors:
             try:
-                p = predict(loaded, snapshot, now=snapshot.available_at)
+                with transaction(self._conn):
+                    p = predict(loaded, snapshot, now=snapshot.available_at)
+                    self._log.record_prediction(p, snapshot, provenance=provenance,
+                                                dataset_version=version)  # fmt: skip
             except Refused:
                 continue  # this model cannot speak to this bar: nothing to record
-            self._log.record_prediction(p, snapshot, dataset_version=version)
+            except Exception:
+                log.exception("M07 recorder: %s failed on %s", loaded.card.ref, snapshot.ref)
 
     def _mode(self) -> Mode | None:
         if self._provenance is not Provenance.LIVE:

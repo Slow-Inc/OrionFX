@@ -76,6 +76,8 @@ class SnapshotRow:
 @dataclass(frozen=True, slots=True)
 class RecordedPrediction:
     as_of: datetime
+    provenance: Provenance
+    """The bar's: a BACKFILL prediction may be in-sample for a model trained on it."""
     prediction: PredictionGenerated
 
 
@@ -112,18 +114,24 @@ class BarLog:
             ).rowcount)  # fmt: skip
 
     def record_prediction(
-        self, p: PredictionGenerated, snapshot: FeatureSnapshot, *, dataset_version: str
+        self,
+        p: PredictionGenerated,
+        snapshot: FeatureSnapshot,
+        *,
+        provenance: Provenance,
+        dataset_version: str,
     ) -> bool:
         """Store what a model said about this bar; False if already recorded."""
         with transaction(self._conn):
             return bool(self._conn.execute(
                 "INSERT INTO learning_predictions (symbol, as_of, feature_schema,"
                 " dataset_version, model_id, model_version, horizon, horizon_bars, direction,"
-                " body, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " provenance, body, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT DO NOTHING",
                 (snapshot.symbol, _ts(snapshot.as_of), snapshot.feature_schema, dataset_version,
                  p.model_id, p.model_version, p.horizon.value, p.horizon_bars,
-                 p.direction.value, p.model_dump_json(), _ts(self._clock())),
+                 p.direction.value, provenance.value, p.model_dump_json(),
+                 _ts(self._clock())),
             ).rowcount)  # fmt: skip
 
     def label_due(
@@ -224,41 +232,54 @@ class BarLog:
         return [BarOutcome.model_validate_json(b) for (b,) in rows]
 
     def predictions(
-        self, symbol: str, model_id: str, *, start: datetime, end: datetime
+        self,
+        symbol: str,
+        model_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        model_version: str | None = None,
     ) -> list[RecordedPrediction]:
-        """Recorded predictions of `model_id` with `start <= as_of < end`, oldest first."""
+        """Recorded predictions of `model_id` (one version if given) with
+        `start <= as_of < end`, oldest first."""
         rows = self._conn.execute(
-            "SELECT as_of, body FROM learning_predictions WHERE symbol = ? AND model_id = ?"
-            " AND as_of >= ? AND as_of < ? ORDER BY as_of, model_version, dataset_version",
-            (symbol, model_id, _ts(start), _ts(end)),
+            "SELECT as_of, provenance, body FROM learning_predictions WHERE symbol = ?"
+            " AND model_id = ? AND (? IS NULL OR model_version = ?) AND as_of >= ?"
+            " AND as_of < ? ORDER BY as_of, model_version, dataset_version",
+            (symbol, model_id, model_version, model_version, _ts(start), _ts(end)),
         ).fetchall()
-        return [
-            RecordedPrediction(
-                datetime.fromisoformat(a), PredictionGenerated.model_validate_json(b)
-            )
-            for a, b in rows
-        ]
+        return [_recorded(a, pv, b) for a, pv, b in rows]
 
     def prediction_outcomes(
-        self, symbol: str, model_id: str, *, start: datetime, end: datetime
+        self,
+        symbol: str,
+        model_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        model_version: str | None = None,
     ) -> list[tuple[RecordedPrediction, BarOutcome | None]]:
         """Each recorded prediction with its bar's outcome over the model's own horizon
         (None until that outcome is known, or if the bar has no label)."""
         rows = self._conn.execute(
-            "SELECT p.as_of, p.body, o.body FROM learning_predictions p"
+            "SELECT p.as_of, p.provenance, p.body, o.body FROM learning_predictions p"
             " LEFT JOIN learning_outcomes o ON o.symbol = p.symbol AND o.as_of = p.as_of"
             " AND o.horizon = p.horizon AND o.horizon_bars = p.horizon_bars"
             " AND o.dataset_version = p.dataset_version"
-            " WHERE p.symbol = ? AND p.model_id = ? AND p.as_of >= ? AND p.as_of < ?"
+            " WHERE p.symbol = ? AND p.model_id = ? AND (? IS NULL OR p.model_version = ?)"
+            " AND p.as_of >= ? AND p.as_of < ?"
             " ORDER BY p.as_of, p.model_version, p.dataset_version",
-            (symbol, model_id, _ts(start), _ts(end)),
+            (symbol, model_id, model_version, model_version, _ts(start), _ts(end)),
         ).fetchall()
         return [
-            (
-                RecordedPrediction(
-                    datetime.fromisoformat(a), PredictionGenerated.model_validate_json(pb)
-                ),
-                None if ob is None else BarOutcome.model_validate_json(ob),
-            )
-            for a, pb, ob in rows
+            (_recorded(a, pv, pb), None if ob is None else BarOutcome.model_validate_json(ob))
+            for a, pv, pb, ob in rows
         ]
+
+
+def _recorded(as_of: str, provenance: str, body: str) -> RecordedPrediction:
+    return RecordedPrediction(
+        datetime.fromisoformat(as_of),
+        Provenance(provenance),
+        PredictionGenerated.model_validate_json(body),
+    )

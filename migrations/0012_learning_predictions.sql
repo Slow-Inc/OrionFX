@@ -1,6 +1,8 @@
 -- M07 dataset: what each loaded prediction model said on each recorded bar (#109,
 -- PRD #107). Learning data only: never journaled as prediction.generated, so it never
--- reaches trading. Append-only; one row per (bar, model version).
+-- reaches trading. Append-only; one row per (bar, model version). Provenance is the
+-- bar's: a BACKFILL prediction may be in-sample for a model trained on those candles, so
+-- an evaluation must tell them apart.
 CREATE TABLE learning_predictions (
     symbol          TEXT NOT NULL,
     as_of           TEXT NOT NULL,
@@ -11,6 +13,7 @@ CREATE TABLE learning_predictions (
     horizon         TEXT NOT NULL,
     horizon_bars    INTEGER NOT NULL CHECK (horizon_bars > 0),
     direction       TEXT NOT NULL,
+    provenance      TEXT NOT NULL CHECK (provenance IN ('LIVE', 'BACKFILL')),
     body            TEXT NOT NULL,
     recorded_at     TEXT NOT NULL,
     PRIMARY KEY (symbol, as_of, feature_schema, dataset_version, model_id, model_version)

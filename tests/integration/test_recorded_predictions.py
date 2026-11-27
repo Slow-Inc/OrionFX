@@ -145,3 +145,41 @@ def test_the_outcome_matches_the_models_own_horizon_among_several(
     pairs = BarLog(conn).prediction_outcomes("XAUUSD", "trend-m15", start=T0, end=clock.t)
     outcomes = [o for _, o in pairs if o is not None]
     assert outcomes and {(o.horizon_bars, o.move) for o in outcomes} == {(4, Decimal(4))}
+
+
+def test_a_failing_model_never_stops_the_snapshots_or_other_models(
+    conn: sqlite3.Connection, candles: CandleStore, model: LoadedPredictor
+) -> None:
+    conn.execute(
+        "CREATE TRIGGER no_trend BEFORE INSERT ON learning_predictions"
+        " WHEN NEW.model_id = 'trend-m15' BEGIN SELECT RAISE(ABORT, 'disk full'); END"
+    )
+
+    class Other(TrendM15):
+        card = TrendM15.card.model_copy(update={"model_id": "other-m15"})
+
+    other = load_baseline(Other(), mode=Mode.DEMO)
+    n = LOOKBACK + 6
+    _bars(candles, _closes(n))
+    clock = Clock(_bar_close(n - 1) + LAG)
+    MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
+                   horizons=[H4], provenance=Provenance.BACKFILL, predictors=[model, other],
+                   clock=clock).tick()  # fmt: skip
+    assert len(BarLog(conn).snapshots("XAUUSD", M15, start=T0, end=clock.t)) == n
+    assert BarLog(conn).predictions("XAUUSD", "other-m15", start=T0, end=clock.t)
+    assert BarLog(conn).predictions("XAUUSD", "trend-m15", start=T0, end=clock.t) == []
+
+
+def test_predictions_carry_the_bars_provenance_and_filter_by_version(
+    conn: sqlite3.Connection, candles: CandleStore, model: LoadedPredictor
+) -> None:
+    n = LOOKBACK + 6
+    _bars(candles, _closes(n))
+    clock = Clock(_bar_close(n - 1) + LAG)
+    _recorder(conn, candles, clock, model).tick()
+    log = BarLog(conn)
+    rows = log.predictions("XAUUSD", "trend-m15", start=T0, end=clock.t)
+    assert rows and {r.provenance for r in rows} == {Provenance.BACKFILL}
+    assert log.predictions("XAUUSD", "trend-m15", start=T0, end=clock.t, model_version="9") == []
+    same = log.predictions("XAUUSD", "trend-m15", start=T0, end=clock.t, model_version="0.1.0")
+    assert len(same) == len(rows)
