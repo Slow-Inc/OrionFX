@@ -23,6 +23,7 @@ import multiprocessing
 import re
 import types
 from collections.abc import Callable
+from datetime import datetime
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any, cast
@@ -90,12 +91,27 @@ class ArtifactLoader:
         return module
 
     def load(
-        self, kind: SubjectKind, subject_id: str, version: str, module_name: str, *, mode: Mode
+        self,
+        kind: SubjectKind,
+        subject_id: str,
+        version: str,
+        module_name: str,
+        *,
+        mode: Mode,
+        at: datetime | None = None,
     ) -> types.ModuleType:
-        """For trading use: needs a current eligibility record that approves `mode`."""
-        record = self._registry.eligibility(kind, subject_ref(subject_id, version))
+        """For trading use: needs an eligibility record that approves `mode`. With `at`,
+        the record current at `at` and its expiry at `at` (point-in-time, for replay);
+        without it, the current record."""
+        ref = subject_ref(subject_id, version)
+        if at is None:  # legacy: mode only, expiry by the registry clock (no production caller)
+            record = self._registry.eligibility(kind, ref)
+            approved = record is not None and mode in record.approved_modes
+        else:
+            record = self._registry.eligibility_at(kind, ref, at)
+            approved = record is not None and record.approves(mode, at)
         # A DISABLED or revoked record approves no modes (EligibilityRecord enforces it).
-        if record is None or mode not in record.approved_modes:
+        if not approved:
             raise UntrustedArtifact(f"{kind} {subject_id}@{version} is not eligible for {mode}")
         return self._load(kind, subject_id, version, module_name)
 

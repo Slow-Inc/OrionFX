@@ -117,7 +117,7 @@ def _publish(
         SOURCE.format(card=card.model_dump_json(), body=body), encoding="utf-8", newline="\n"
     )
     file_hash = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-    reg = ArtifactRegistry(conn)
+    reg = ArtifactRegistry(conn, clock=lambda: T0 - timedelta(days=1))  # approved before NOW
     reg.register(
         "model", card.model_copy(update={"artifact_hash": file_hash}).manifest(), actor="m07"
     )
@@ -348,3 +348,34 @@ def test_forecast_quality_is_judged_on_the_features_the_model_reads() -> None:
         update={"quality": DataQuality.DEGRADED}
     )
     assert predict(base, snap, now=NOW).data_quality is DataQuality.OK
+
+
+def test_loading_is_point_in_time_on_the_eligibility_record(
+    conn: sqlite3.Connection, pkg: Path
+) -> None:
+    """#126 (MAJ-09.1): a revocation recorded after `now` does not exist yet at `now`, and
+    one recorded before it does."""
+    reg, loader, module = _publish(conn, pkg)
+    manifest = reg.get("model", "toy", "1.0.0")
+    assert manifest is not None
+    later = ArtifactRegistry(conn, clock=lambda: NOW + timedelta(hours=1))
+    later.set_eligibility(_elig(manifest.artifact_hash, user_enabled=False,
+                                eligibility=Eligibility.DISABLED, approved_modes=[],
+                                evidence_refs=[], revoked_at=NOW + timedelta(hours=1)),
+                          actor="owner")  # fmt: skip
+    assert _load(reg, loader, module)  # at NOW the revocation is in the future
+    with pytest.raises(Refused):
+        _load(reg, loader, module, now=NOW + timedelta(hours=2))
+
+
+def test_a_loaded_model_stops_predicting_when_its_approval_expires(
+    conn: sqlite3.Connection, pkg: Path
+) -> None:
+    reg, loader, module = _publish(conn, pkg, expires_at=NOW + timedelta(hours=1))
+    loaded = _load(reg, loader, module)
+    later = NOW + timedelta(hours=2)
+    snap = _snapshot().model_copy(update={"as_of": later - timedelta(seconds=5),
+                                          "available_at": later - timedelta(seconds=4),
+                                          "valid_until": later + timedelta(minutes=5)})  # fmt: skip
+    with pytest.raises(Refused, match="approval"):
+        predict(loaded, snap, now=later)

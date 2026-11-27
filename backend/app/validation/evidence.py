@@ -235,14 +235,19 @@ class EvidenceStore:
                 runs.append(run)
         if not runs:
             reasons.append("NO_EVIDENCE")
+        # Judged per subject (#126, BLK-05): only subjects every run tested are qualified,
+        # so one subject's runs can never lend coverage to another.
+        common = set.intersection(*(set(r.subject_refs) for r in runs)) if runs else set()
+        if runs and not common:
+            reasons.append("NO_COMMON_SUBJECT")
         reasons += _reasons(policy, runs)
         if reasons:
             return Readiness(Verdict.NOT_READY, reasons, None)
-        subjects = sorted({s for r in runs for s in r.subject_refs})
+        subjects = sorted(common)
         return Readiness(Verdict.READY, [], self._issue(policy.version, run_refs, subjects))
 
     def _issue(self, policy_version: str, run_refs: list[str], subjects: list[str]) -> str:
-        qid = content_hash(policy_version, sorted(run_refs))
+        qid = content_hash(policy_version, sorted(run_refs), subjects)  # binds what it qualifies
         body = ValidationQualification(policy_version=policy_version, run_refs=sorted(run_refs),
                                        subject_refs=subjects).model_dump_json()  # fmt: skip
         with transaction(self._conn):

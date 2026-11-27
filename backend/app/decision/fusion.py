@@ -158,6 +158,18 @@ def usable_proposals(proposals: list[StrategyProposal], now: datetime) -> list[S
     )  # fmt: skip
 
 
+def _choose(
+    usable: list[StrategyProposal], forecast: PredictionGenerated | None
+) -> StrategyProposal | None:
+    """The proposal to price: one whose horizon and direction match the forecast if any
+    does (#126, MAJ-04.3; EV needs that match), else the first in deterministic order."""
+    if forecast is not None:
+        for p in usable:
+            if p.horizon is forecast.horizon and p.direction is forecast.direction:
+                return p
+    return usable[0] if usable else None
+
+
 def _signed(d: Direction, x: Decimal) -> Decimal:
     return x if d is Direction.UP else -x if d is Direction.DOWN else D(0)
 
@@ -243,7 +255,7 @@ def gather(
     chart = next(iter(directions)) if len(directions) == 1 else None
     return Inputs(
         usable=usable,
-        chosen=usable[0] if usable else None,
+        chosen=_choose(usable, forecast),
         chart=chart,
         forecast=forecast,
         votes=votes,

@@ -50,6 +50,8 @@ class LoadedPredictor:
     predictor: Predictor
     mode: Mode
     _gate: object
+    approved_until: datetime | None = None
+    """When the approval it was loaded under expires; `predict` refuses from then on."""
 
     def __post_init__(self) -> None:
         if self._gate is not _GATE:
@@ -91,7 +93,8 @@ def load_model(
 ) -> LoadedPredictor:
     """The module must define `build() -> Predictor`; its bytes are hash-verified."""
     try:
-        code: types.ModuleType = loader.load("model", model_id, version, module, mode=mode)
+        code: types.ModuleType = loader.load("model", model_id, version, module, mode=mode,
+                                             at=now)  # fmt: skip
     except UntrustedArtifact as exc:
         raise Refused(str(exc)) from None
     built: Predictor = code.build()
@@ -102,10 +105,11 @@ def load_model(
     predictor = _Stamped(
         built, built.card.model_copy(update={"artifact_hash": manifest.artifact_hash})
     )
-    record = registry.eligibility("model", predictor.card.ref)
+    # Point-in-time (#126, MAJ-09.1): the record that was current at `now`, not the newest.
+    record = registry.eligibility_at("model", predictor.card.ref, now)
     if record is None or not record.approves(mode, now):
         raise Refused(f"{predictor.card.ref} is not approved for {mode} at {now.isoformat()}")
-    return LoadedPredictor(predictor, mode, _GATE)
+    return LoadedPredictor(predictor, mode, _GATE, record.expires_at)
 
 
 def _features(card: ModelCard, values: Mapping[str, Decimal | None]) -> dict[str, Decimal]:
@@ -142,6 +146,8 @@ def predict(
     if not isinstance(loaded, LoadedPredictor):
         raise Refused("predict accepts only a loaded predictor")
     card = loaded.card
+    if loaded.approved_until is not None and now >= loaded.approved_until:
+        raise Refused(f"{card.ref}: its approval expired at {loaded.approved_until.isoformat()}")
     if card.lineage is ForecastLineage.NEWS_ENHANCED:
         raise Refused(f"{card.ref}: news-enhanced inference needs news features (not built, #48)")
     if news_assessment_ids:

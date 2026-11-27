@@ -388,3 +388,24 @@ def test_good_news_vetoes_a_sell_entry() -> None:
     assert _reasons(d) == ["NEWS_VETO"] and d.direction is Direction.DOWN
     agreeing = Evidence(forecast=_forecast(direction=Direction.DOWN), news=[_news(impact="0.8")])
     assert _decide([down], agreeing).created.action is DecisionAction.ENTER
+
+
+def test_the_proposal_whose_horizon_matches_the_forecast_is_chosen() -> None:
+    """#126 (MAJ-04.3): with an M15 and an H1 proposal agreeing, an H1 forecast must price
+    the H1 one; the alphabetically first (breakout, M15) gave EV_UNKNOWN."""
+    m15 = _proposal("breakout").model_copy(update={"horizon": Timeframe.M15})
+    d = _decide([m15, _proposal("trend_following")])
+    assert d.created.action is DecisionAction.ENTER
+    assert d.created.strategy_id == "trend_following"
+
+
+def test_without_a_horizon_match_the_first_proposal_is_priced() -> None:
+    m15 = _proposal("breakout").model_copy(update={"horizon": Timeframe.M15})
+    d = _decide([m15], Evidence(forecast=_forecast()))
+    assert d.created.strategy_id == "breakout"  # usable[0]; EV then needs the match
+
+
+def test_conflicting_proposals_credit_the_one_agreeing_with_the_forecast() -> None:
+    up, down = _proposal("trend_following"), _proposal("breakout", Direction.DOWN)
+    d = _decide([down, up], Evidence(forecast=_forecast()))
+    assert d.created.action is DecisionAction.WAIT and d.created.strategy_id == "trend_following"
