@@ -174,3 +174,71 @@ def test_only_the_requested_candle_dataset_version_is_exported(
                    clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
     _export(conn, tmp_path / "d.jsonl")
     assert {r["dataset_version"] for r in _rows(tmp_path / "d.jsonl")} == {"v1"}
+
+
+def test_only_the_requested_feature_schema_is_exported(
+    conn: sqlite3.Connection, candles: CandleStore, tmp_path: Path
+) -> None:
+    from app.learning.bars import BarLog
+
+    log = BarLog(conn)
+    first = log.snapshots("XAUUSD", M15, start=_bar_close(0), end=_bar_close(1))[0].snapshot
+    log.record(first.model_copy(update={"feature_schema": "m02.features.v2"}), timeframe=M15,
+               provenance=Provenance.BACKFILL, mode=None, dataset_version="v1")  # fmt: skip
+    _export(conn, tmp_path / "d.jsonl")
+    rows = _rows(tmp_path / "d.jsonl")
+    assert {r["feature_schema"] for r in rows} == {"m02.features.v1"}
+    assert len({r["as_of"] for r in rows}) == len(rows)
+
+
+def test_a_refused_export_leaves_the_registered_file_untouched(
+    conn: sqlite3.Connection, candles: CandleStore, tmp_path: Path
+) -> None:
+    out = tmp_path / "d.jsonl"
+    _export(conn, out)
+    before = out.read_bytes()
+    other = [*_splits()[:2], Split(name="holdout", start=_bar_close(30), end=_bar_close(36))]
+    with pytest.raises(LifecycleRefused):
+        _export(conn, out, splits=other)
+    assert out.read_bytes() == before
+    with pytest.raises(ValueError):  # invalid splits: refused before anything is written
+        _export(conn, tmp_path / "bad.jsonl", version="bad", splits=list(reversed(_splits())))
+    assert not (tmp_path / "bad.jsonl").exists()
+
+
+def test_purge_uses_the_longest_horizon_and_rows_say_if_fully_labelled(
+    conn: sqlite3.Connection, candles: CandleStore, tmp_path: Path
+) -> None:
+    from app.learning.bars import Horizon
+
+    two = Horizon(M15, 2)
+    MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
+                   horizons=[two, H4], provenance=Provenance.BACKFILL,
+                   clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
+    _export(conn, tmp_path / "d.jsonl", version="two", horizons=[two, H4])
+    rows = _rows(tmp_path / "d.jsonl")
+    train = [r["as_of"] for r in rows if r["split"] == "train"]
+    assert _bar_close(17).isoformat() not in train  # 2-bar label fits, 4-bar label does not
+    assert all(r["labelled"] == all(v is not None for v in r["labels"].values()) for r in rows)
+    assert any(not r["labelled"] for r in rows)  # the tail of the holdout
+
+
+def test_news_that_arrived_after_the_close_is_not_joined_to_that_bar(
+    conn: sqlite3.Connection, candles: CandleStore, tmp_path: Path
+) -> None:
+    """Known 1 s after bar 4 closed (before its snapshot was taken 2 s after): the label
+    is measured from that close, so this news must not sit on bar 4's row."""
+    at = _bar_close(4) + timedelta(seconds=1)
+    a = NewsAssessment(
+        assessment_id="a-gap", news_ids=["n1"], source_refs=["https://wire.example/n1"],
+        direction=Direction.UP, impact=Decimal("0.7"),
+        score=Confidence(value=Decimal("0.8"), semantics="test"),
+        available_at=at, valid_until=at + timedelta(hours=1),
+    )  # fmt: skip
+    Journal(conn).append(make_event("news.assessment", source="m03", payload=a,
+                                    account_id="local-account", bot_id="bot-1",
+                                    mode=Mode.SHADOW, occurred_at=at))  # fmt: skip
+    _export(conn, tmp_path / "d.jsonl")
+    rows = {r["as_of"]: r for r in _rows(tmp_path / "d.jsonl")}
+    assert rows[_bar_close(4).isoformat()]["news"] is None
+    assert rows[_bar_close(5).isoformat()]["news"]["assessment_id"] == "a-gap"

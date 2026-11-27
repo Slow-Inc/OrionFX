@@ -206,7 +206,7 @@ class BarLog:
         rows = self._conn.execute(
             "SELECT body, provenance, mode, dataset_version FROM learning_snapshots"
             " WHERE symbol = ? AND timeframe = ? AND as_of >= ? AND as_of < ?"
-            " ORDER BY as_of, dataset_version",
+            " ORDER BY as_of, dataset_version, feature_schema",
             (symbol, timeframe.value, _ts(start), _ts(end)),
         ).fetchall()
         return [

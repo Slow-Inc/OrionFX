@@ -6,6 +6,32 @@
 
 ---
 
+## M07 dataset slice C: deterministic leak-free dataset export (2026-11-28, /tdd + review subagent (code-review + simplify + scrutinize lens), security-review n-a, branch `feat/110-dataset-export`)
+
+**Goal:** turn the recorded bars into a training dataset that a model card can cite exactly, with no look-ahead (#110, PRD #107).
+
+**Shipped:** `app.learning.export.export_dataset(...)` writes sorted JSONL, one row per recorded bar, for one candle dataset version and one feature schema. Each row has:
+- features as of the bar's close;
+- a label per horizon, kept only if known by the window end, else null;
+- a `labelled` flag;
+- the news assessment known at the bar's close, if still live then.
+
+Splits run in time order. Rows whose longest label crosses their split's end are purged. The manifest is validated and registered through `DatasetStore` before the file is written, via a temporary file and an atomic replace. Exporting the same inputs gives byte-identical output.
+
+**Review fixes:**
+- Rows were not filtered by feature schema, and tie order was undefined.
+- The file was written before the manifest was validated or saved: a refused re-export could overwrite a registered file.
+- News was joined at snapshot time, which could leak post-close (e.g. weekend) news into a row whose label starts at the close.
+- Rows had no `labelled` flag.
+- The news scan was unbounded.
+- The embargo rationale was not documented.
+
+**Validation:**
+- Backend verify green; 12 export tests.
+- Mutation probes: 12 caught. One survivor is equivalent (the memory-only news filter).
+
+---
+
 ## M07 dataset slice B: recorded model predictions, kept out of trading (2026-11-28, /tdd + review subagent (code-review + simplify + scrutinize lens), security-review n-a, branch `feat/109-recorded-predictions`)
 
 **Goal:** keep what each M04 model said on every recorded bar, joined later to that bar's outcome, without it ever reaching trading (#109, PRD #107).
