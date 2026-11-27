@@ -1,6 +1,6 @@
 # .opencode — skills for the OpenCode PR review
 
-`.github/workflows/opencode-review.yml` runs OpenCode in normal mode on each PR. OpenCode discovers project skills in `.opencode/skills/<id>/SKILL.md`, and its review prompt loads them in this order: `code-review`, `scrutinize`, `simplify`, `t4-gates`.
+The OpenCode workflows (`.github/workflows/opencode-*.yml`, via `.github/actions/opencode-run`) run the OpenCode CLI read-only in the repo checkout. OpenCode discovers project skills in `.opencode/skills/<id>/SKILL.md`. The PR review prompt loads them in this order: `code-review`, `scrutinize`, `simplify`, `t4-gates`.
 
 These skills are read from the **PR head**, so a PR can change its own reviewer. Review edits to this folder with that in mind.
 

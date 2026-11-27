@@ -1,0 +1,87 @@
+# Run OpenCode once, read-only, and write its final answer to a file.
+#
+# Shared by every OpenCode workflow. It signs in through an OpenCode Console
+# OIDC service account, so no repo secret is needed. Then it runs the pinned
+# OpenCode CLI with a deny-by-default tool policy: read/glob/grep/list inside
+# the checkout and the skill tool only. There is no bash, no edit, no web, and
+# no reads outside the checkout. The model gets no GitHub token; the calling
+# workflow posts the answer in a trusted step.
+name: OpenCode run (read-only)
+description: Sign in via OIDC, run OpenCode read-only, write the final answer to a file.
+inputs:
+  client-id:
+    description: >-
+      OpenCode Console service-account credential ID. NOT a secret: it only
+      works with an OIDC token from this repo, on the event the account allows.
+      Its `sk_` prefix may trip secret scanners; that is a false positive.
+    required: true
+  prompt-file:
+    description: Path to the prompt text.
+    required: true
+  output-file:
+    description: Path where the final answer is written.
+    required: true
+  model:
+    description: The one place the OpenCode Go model is set for every workflow.
+    default: opencode-go/deepseek-v4.1-flash
+  timeout-minutes:
+    description: Hard cap on the OpenCode process.
+    default: '10'
+runs:
+  using: composite
+  steps:
+    - name: Sign in to OpenCode
+      shell: bash
+      env:
+        AUDIENCE: https://opencode.ai/console
+        CLIENT_ID: ${{ inputs.client-id }}
+      run: |
+        set -euo pipefail
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::error::No OIDC token available. The job needs 'id-token: write'; fork PRs never get one."
+          exit 1
+        fi
+        oidc=$(curl -sSf --oauth2-bearer "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" | jq -r .value)
+        echo "::add-mask::$oidc"
+        token=$(curl -sSf https://opencode.ai/console/auth/oauth/token \
+          -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+          -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
+          -d client_id="$CLIENT_ID" \
+          -d subject_token="$oidc" | jq -r .access_token)
+        if [ -z "$token" ] || [ "$token" = "null" ]; then
+          echo "::error::OpenCode Console token exchange returned no access token (client $CLIENT_ID)."
+          exit 1
+        fi
+        echo "::add-mask::$token"
+        echo "OPENCODE_API_KEY=$token" >> "$GITHUB_ENV"
+    - name: Install OpenCode
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm install -g --no-fund --no-audit opencode-ai@1.19.6
+        opencode --version
+    - name: Run OpenCode
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+        PROMPT_FILE: ${{ inputs.prompt-file }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        OPENCODE_CONFIG_CONTENT: >-
+          {"permission": {"*": "deny", "read": "allow", "glob": "allow",
+          "grep": "allow", "list": "allow", "skill": "allow",
+          "todowrite": "allow", "todoread": "allow",
+          "external_directory": "deny"}}
+      run: |
+        set -euo pipefail
+        events="$RUNNER_TEMP/opencode-events.jsonl"
+        status=0
+        timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
+          opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
+          < /dev/null > "$events" || status=$?
+        python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE"
+        if [ "$status" -ne 0 ]; then
+          echo "::error::OpenCode exited with status $status (124 = timed out after ${TIMEOUT_MINUTES}m)."
+          exit "$status"
+        fi

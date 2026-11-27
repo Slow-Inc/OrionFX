@@ -28,40 +28,49 @@ Hard ordering: **PRD → issues → PR**. Never open a PR without a referenced i
 | Touching a security boundary | `/security-review` | Every change crossing auth, secrets, broker credentials, the MT5/EA bridge, or LLM/news input handling |
 | After implementation | `/verify` | Confirm the feature works in the app |
 
-## OpenCode review gate
+## OpenCode (advisory, read-only)
 
-`.github/workflows/opencode-review.yml` runs OpenCode on every PR, in the action's normal mode (runtime v1). The reviewer reads `CLAUDE.md`, loads the repo skills in `.opencode/skills/` in this order (`code-review`, `scrutinize`, `simplify`, `t4-gates`), and posts one consolidated PR comment from `github-actions[bot]` whose first line is `OpenCode review of <head SHA>`. Provenance and licences for the skills are in `.opencode/README.md`.
+OpenCode is a second, advisory reviewer and assistant. It **never changes code**: no job has `contents: write`, and none commits, pushes, opens PRs or edits files. Claude is the developer.
 
-Before `gh pr merge`:
+Every job runs the shared action `.github/actions/opencode-run` with the same three-step pattern:
 
-1. Wait for the `review` check to finish (`gh pr checks <n> --watch`).
-2. Read the OpenCode comment (`gh pr view <n> --comments`). Its first line must name the current head SHA. After a new push, wait for the new comment. A comment that only carries an error is not a review.
+1. **Sign in.** Exchange the job's GitHub OIDC token for a 1-hour OpenCode key, with no repo secret. The step fails fast if the exchange returns nothing.
+2. **Run.** Run the pinned CLI (`opencode-ai@1.19.6`) with a deny-by-default tool policy: only `read`, `glob`, `grep` and `list` inside the checkout, plus the `skill` tool. It has no bash, no edit, no web and no reads outside the checkout. The model never gets a GitHub token, and no tool lets it read its env.
+3. **Post.** A trusted workflow step posts the answer.
+
+Each job's context is pre-fetched into `.git/opencode-ctx/`. The model is set in one place, the `model` default in that action (`opencode-go/deepseek-v4.1-flash`).
+
+| Workflow | Trigger | Can | Cannot |
+|---|---|---|---|
+| `opencode-review.yml` | `pull_request` from collaborator authors, non-draft, non-bot | Load the repo skills (`code-review`, `scrutinize`, `simplify`, `t4-gates`) and post ONE review with event `COMMENT`, plus up to 10 inline comments on lines in the diff | Approve, request changes, push, merge |
+| `opencode-ask.yml` | A comment starting `/oc` or `/opencode` by OWNER/MEMBER/COLLABORATOR, on `issue_comment` or `pull_request_review_comment` | Read the repo and reply once | Change code. It refuses and says Claude is the developer |
+| `opencode-audit.yml` | `schedule` (Mon 02:00 UTC) + `workflow_dispatch` | Review the last week of `main` and check that the ledger and catalog are honest; open ONE bilingual issue labelled `needs-triage` + `repo-ops`, or comment on the open one; post nothing if there are no findings | Close or edit issues |
+| `opencode-triage.yml` | `issues: opened` by a trusted author | Add one Component label and one triage role when the issue has none (never `wontfix`); ask for a missing EN/TH part | Close issues, edit the body |
+| `opencode-dispatch.yml` | `workflow_dispatch` with `prompt` (and an optional `issue`) | Answer to the job summary or as an issue comment | Change code |
+
+Service accounts (OpenCode Console, created 2026-11-28). Both are OIDC, pinned to repo ID 1473623856, Models: Request only, any IP:
+
+- **"OrionFX PR Review"**, `sk_dcae4ec7-…`: runs from pull requests. It serves `opencode-review` and `/oc` on PR review comments.
+- **"OrionFX Automation"**, `sk_a7b3d9af-…`: runs from branch `main` only. It serves `/oc` on issue comments, audit, triage and dispatch.
+
+The client IDs are credential IDs, not secrets. A scanner flagging their `sk_` prefix is a false positive. To revoke access, disable the account in the Console.
+
+### Gate before `gh pr merge`
+
+1. Wait for the `review` check (`gh pr checks <n> --watch`).
+2. Read the OpenCode review (`gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`, author `github-actions[bot]`, body starting `OpenCode review of <sha>`) and its inline comments. Its `commit_id` must be the current head. After a push, wait for the new review.
 3. For each finding: fix it if it is valid, or reply on the PR saying why not.
 
-It is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`.
+The review is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`. Issues filed by the audit enter the normal triage flow through `needs-triage`. Issues created with `GITHUB_TOKEN` do not trigger `opencode-triage`.
 
-Why normal mode: the owner chose repo skills over isolation (2026-11-28). The action's review-only mode turns off project skills.
+### Honest limits
 
-Threat model: the repo is **public**. The v1 handler puts every PR comment and review into the prompt, whoever wrote it, so any GitHub user can attempt prompt injection.
-
-What the agent can reach: `read`, `glob`, `grep` and `list` inside the checkout (the PR head), and the `skill` tool. Nothing else is allowed (`OPENCODE_CONFIG_CONTENT`, deny-by-default): no bash, no edit, no web, and no reads outside the checkout. The process env holds `OPENCODE_API_KEY` and `GITHUB_TOKEN`, but the model has no tool that can read them. A trusted workflow step writes the diff and any linked issues into `.git/opencode-review/` before OpenCode starts.
-
-What blocks what:
-
-- The job token (`contents: read`, `pull-requests: write`) stops push and merge, including the handler's own auto-push when the tree is dirty.
-- Approving is off, because the repo setting "Allow GitHub Actions to create and approve pull requests" is disabled.
-- The model cannot post extra comments or edit the PR, because it has no shell or network.
-- Untrusted comment text can still bias **what the review says**. Treat it as advisory.
-
-Honest limits:
-
-- It is not a required check (free plan), so nothing blocks a merge without it.
-- A green check can still carry findings. Read the comment, not the status.
-- A **skipped** check means no review ran (draft PR, bot or Dependabot PR, or author not OWNER/MEMBER/COLLABORATOR). Treat it as "no review", not as a pass.
-- Fork PRs are excluded.
-- The skills are read from the PR head, so a PR can change its own reviewer. Review edits to `.opencode/` with that in mind.
-- **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28, where the run hung for 18 minutes). The job uses `opencode-go/deepseek-v4-pro`, billed to the owner's Go plan. Every review spends that allowance, so keep the prompt lean. Hard caps: 15 minutes for the job, 12 for OpenCode.
-- **No repo secret.** The OpenCode Console service account "OrionFX PR Review" (created 2026-11-28 via the Console) trusts GitHub Actions OIDC. It is pinned to `Slow-Inc/OrionFX` (repo ID 1473623856), accepts pull_request runs only, and has the permission Models: Request. The "Sign in to OpenCode" step exchanges the job's OIDC token (`id-token: write`) for a 1-hour key, masks it, and fails fast if the exchange returns nothing. The client ID `sk_dcae4ec7-d3b6-4328-92a0-b14ae60dfad8` is a credential ID, not a secret; a scanner flagging the `sk_` prefix is a false positive. To revoke access, disable the service account in the Console.
+- It is not a required check (free plan). A green check can still carry findings, so read the review. A **skipped** check means no review ran. Fork PRs get no OIDC token, so they get no review.
+- The repo is **public**. Text in issues, PR bodies and comments may come from anyone, and can bias **what the answer says**. It cannot give the model new tools.
+- The skills and the shared action are read from the PR head, so a collaborator PR can change its own reviewer. That is no escalation, because such a PR could edit the workflow anyway.
+- **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28; that run hung for 18 minutes). Billing goes to the owner's Go plan. Every workflow has a hard `timeout-minutes`.
+- `opencode-go/deepseek-v4-pro` is the stronger choice, but it returned 403 "Model access is disabled" for this workspace. Enable it in the Console's Go model access before switching to it.
+- Workflows on `issue_comment`, `issues`, `schedule` and `workflow_dispatch` run from `main`, so they work only after merge.
 
 ## Training-loop research
 
