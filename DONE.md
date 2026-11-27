@@ -6,6 +6,40 @@
 
 ---
 
+## M07 dataset slice A: per-bar feature snapshots and outcome labels with backfill (2026-11-27, /tdd + review subagent (code-review + simplify + scrutinize lens) + advisor, security-review n-a, branch `feat/108-bar-recorder`)
+
+**Goal:** keep the bot's real per-bar view as a training dataset for M04 later, without training and without feeding trading (#108, PRD #107).
+
+**Shipped:**
+- Migration 0011: `learning_snapshots` and `learning_outcomes`, append-only, with an index for labelling.
+- `app.learning.bars.BarLog`:
+  - records one snapshot per closed bar;
+  - labels the raw close-to-close move per `Horizon`, stamped with the end bar's `available_at`; a missing start or end bar gives no label;
+  - provides readers for the export.
+- `app.runtime.market_recorder.MarketRecorder.tick()`:
+  - catches up from the last recorded bar, with an `after` cursor on `CandleStore.bars`;
+  - builds each snapshot from exactly the bars available at that bar's close;
+  - tags a bar LIVE (with the account mode) only if it was seen as it happened, and BACKFILL otherwise;
+  - commits one transaction per pass;
+  - never raises: DEGRADED health and a backoff on failure, OK once a pass succeeds again;
+  - refuses a horizon that does not line up with the recorded bars.
+
+**Review fixes:**
+- A back-fill got almost no labels: a wall-clock 7-day window, now removed.
+- Each tick read and parsed all candle history: now an `after` cursor.
+- One commit per bar.
+- Caught-up rows were tagged LIVE.
+- No index for the labelling query.
+- Health never returned to OK.
+- Horizon alignment was not checked.
+- Late-bar loss and first-writer provenance were not documented.
+
+**Validation:**
+- Backend verify green; 13 recorder tests.
+- Mutation probes: 14 caught. Three surviving mutants are equivalent: the redundant skip/`ON CONFLICT` pair, and a not-yet-due label query.
+
+---
+
 ## M03 off-tick news worker and journal-backed evidence (2026-11-27, /tdd + review subagent (code-review + simplify + scrutinize lens) + advisor, security-review n-a, branch `feat/101-news-worker`)
 
 **Goal:** a real LLM answer (up to about a minute at max effort) never runs inside the decision tick; the decision loop reads evidence from the journal (#101, PRD #98).

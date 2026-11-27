@@ -17,6 +17,8 @@ CREATE TABLE learning_snapshots (
     PRIMARY KEY (symbol, timeframe, as_of, feature_schema, dataset_version)
 );
 
+CREATE INDEX learning_snapshots_by_version ON learning_snapshots (symbol, dataset_version, as_of);
+
 CREATE TABLE learning_outcomes (
     symbol          TEXT NOT NULL,
     as_of           TEXT NOT NULL,

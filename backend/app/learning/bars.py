@@ -11,9 +11,11 @@ Nothing here trains, and nothing here feeds trading: these rows are learning dat
   `as_of` to the bar closing `horizon_bars` later (the same rule as M07's MARKET_MOVE
   experience labels). It is stamped with the end bar's `available_at`, the moment the
   move became known, and carries the start bar's spread when known. A missing start or
-  end bar gives no label, never a stretched one. No neutral threshold is applied: that
-  is a training choice.
-Both tables are append-only (migration 0011).
+  end bar gives no label, never a stretched one (such rows, mostly next to weekends, are
+  re-checked each pass; there are only a few per week). No neutral threshold is applied:
+  that is a training choice.
+Both tables are append-only (migration 0011). The first writer of a bar wins: if a
+LIVE and a BACKFILL recorder both reach it, its provenance is whichever wrote first.
 """
 
 import sqlite3
@@ -29,10 +31,6 @@ from app.market_data.store import CandleStore
 from app.storage.db import transaction
 
 __all__ = ["BarLog", "BarOutcome", "Horizon", "Provenance", "SnapshotRow"]
-
-LABEL_LAG = timedelta(days=7)
-"""Unlabelled rows older than this past their horizon end are not retried (a permanent
-gap); bounds the work per labelling pass [PROPOSED]."""
 
 
 class Provenance(StrEnum):
@@ -107,19 +105,19 @@ class BarLog:
     def label_due(
         self, candles: CandleStore, *, symbol: str, horizons: list[Horizon], now: datetime
     ) -> list[BarOutcome]:
-        """Label every recorded bar whose horizon has ended by `now` (within LABEL_LAG);
-        store and return the new outcomes."""
+        """Label every recorded bar whose horizon has ended by `now`; store and return the
+        new outcomes. No wall-clock window: a back-fill run long after its data, or a
+        recorder that was down, still labels everything."""
         new: list[BarOutcome] = []
         version = candles.dataset_version
         for h in horizons:
             rows = self._conn.execute(
                 "SELECT DISTINCT s.as_of FROM learning_snapshots s WHERE s.symbol = ?"
-                " AND s.dataset_version = ? AND s.as_of <= ? AND s.as_of >= ? AND NOT EXISTS"
+                " AND s.dataset_version = ? AND s.as_of <= ? AND NOT EXISTS"
                 " (SELECT 1 FROM learning_outcomes o WHERE o.symbol = s.symbol"
                 " AND o.as_of = s.as_of AND o.horizon = ? AND o.horizon_bars = ?"
                 " AND o.dataset_version = s.dataset_version) ORDER BY s.as_of",
-                (symbol, version, _ts(now - h.length), _ts(now - h.length - LABEL_LAG),
-                 h.timeframe.value, h.bars),
+                (symbol, version, _ts(now - h.length), h.timeframe.value, h.bars),
             ).fetchall()  # fmt: skip
             for (as_of_text,) in rows:
                 outcome = self._outcome(candles, symbol, h, datetime.fromisoformat(as_of_text),
@@ -156,15 +154,18 @@ class BarLog:
 
     # --- reading -----------------------------------------------------------------------
 
-    def last_as_of(
+    def last_recorded(
         self, symbol: str, timeframe: Timeframe, feature_schema: str, dataset_version: str
-    ) -> datetime | None:
+    ) -> tuple[datetime, datetime] | None:
+        """(as_of, available_at) of the newest recorded bar, if any."""
         row = self._conn.execute(
-            "SELECT MAX(as_of) FROM learning_snapshots WHERE symbol = ? AND timeframe = ?"
-            " AND feature_schema = ? AND dataset_version = ?",
+            "SELECT as_of, available_at FROM learning_snapshots WHERE symbol = ?"
+            " AND timeframe = ? AND feature_schema = ? AND dataset_version = ?"
+            " ORDER BY as_of DESC LIMIT 1",
             (symbol, timeframe.value, feature_schema, dataset_version),
         ).fetchone()
-        return None if row[0] is None else datetime.fromisoformat(row[0])
+        return None if row is None else (datetime.fromisoformat(row[0]),
+                                         datetime.fromisoformat(row[1]))  # fmt: skip
 
     def snapshots(
         self, symbol: str, timeframe: Timeframe, *, start: datetime, end: datetime

@@ -197,3 +197,64 @@ def test_each_snapshot_equals_one_built_from_only_the_bars_known_at_that_close(
         known = candles.bars("XAUUSD", M15, as_of=at, limit=LOOKBACK)
         expected = build_feature_snapshot("XAUUSD", {M15: known}, at)
         assert snaps[i].snapshot == expected
+
+
+def test_a_backfill_long_after_the_data_still_labels_every_row(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    _bars(candles, _closes(12))
+    later = Clock(_bar_close(11) + timedelta(days=30))
+    _recorder(conn, candles, later, Provenance.BACKFILL).tick()
+    assert len(_rows(conn, "learning_outcomes")) == 8  # bars 0..7 (8..11 lack 4 more bars)
+
+
+def test_rows_caught_up_after_downtime_are_tagged_backfill_not_live(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    _bars(candles, _closes(10))
+    _recorder(conn, candles, Clock(_bar_close(9) + LAG)).tick()  # bot was down until bar 9
+    rows = {r["as_of"]: r["provenance"] for r in _rows(conn, "learning_snapshots")}
+    assert rows[_bar_close(9).isoformat()] == "LIVE"  # the bar it saw as it happened
+    assert rows[_bar_close(0).isoformat()] == "BACKFILL"  # bars it never saw live
+
+
+def test_health_returns_to_ok_after_a_failure_clears(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    from app.core.contracts import HealthUpdated
+    from app.storage.journal import Journal, payload_as
+
+    class Flaky(CandleStore):
+        fail = True
+
+        def bars(self, *a: object, **k: object) -> list[CandleClosed]:  # type: ignore[override]
+            if Flaky.fail:
+                raise sqlite3.OperationalError("disk I/O error")
+            return super().bars(*a, **k)  # type: ignore[arg-type]
+
+    _bars(candles, _closes(4))
+    clock = Clock(_bar_close(3) + LAG)
+    rec = _recorder(conn, Flaky(conn, dataset_version="v1"), clock)
+    rec.tick()
+    Flaky.fail = False
+    clock.t += timedelta(minutes=3)
+    rec.tick()
+    rec.tick()  # a second good pass reports nothing new
+    statuses = [payload_as(e, HealthUpdated).status.value
+                for e in reversed(Journal(conn).recent(["health.updated"]))]  # fmt: skip
+    assert statuses == ["DEGRADED", "OK"]
+
+
+def test_a_horizon_that_does_not_line_up_with_the_recorded_bars_is_refused(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    with pytest.raises(ValueError, match="horizon"):
+        MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=Timeframe.H1,
+                       context_timeframes=[], horizons=[Horizon(M15, 4)],
+                       clock=Clock(T0))  # fmt: skip
+
+
+def test_bars_after_a_cursor_skip_the_history_already_seen(candles: CandleStore) -> None:
+    _bars(candles, _closes(6))
+    later = candles.bars("XAUUSD", M15, as_of=_bar_close(5) + LAG, after=_bar_close(2) + LAG)
+    assert [b.close_time for b in later] == [_bar_close(3), _bar_close(4), _bar_close(5)]
