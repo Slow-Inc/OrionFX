@@ -11,7 +11,8 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
   - `promote` makes a stored candidate the champion. Only the owner may approve, by
     allow-list (OWNER_ACTOR); no module or system actor can. It needs evidence refs and
     a policy ref, and the modes must be ones the model supports. LIVE additionally
-    needs a separate `x02:live-qualification:` ref; it is never implied by DEMO.
+    needs a `x02:live-qualification:` ref that X02's verifier confirms was issued for
+    this model under the current policy; with no verifier wired, LIVE is refused.
     The previous champion is disabled.
   - `rollback` (owner only) restores the champion that preceded the current one, using
     a champion stack: rolling back twice never brings back the version just rolled
@@ -49,13 +50,13 @@ from app.prediction.card import ModelCard
 from app.storage.audit import audit
 from app.storage.db import transaction
 from app.storage.registry import ArtifactRegistry, UnknownSubject, split_ref, subject_ref
+from app.validation.evidence import QUALIFICATION_PREFIX
 
 D = Decimal
 RETRAIN_PSI = D("0.25")
 PSI_FLOOR = D("0.0001")
 """Empty-bin proportion floor, so ln() stays finite."""
 OWNER_ACTOR = "owner"
-LIVE_EVIDENCE_PREFIX = "x02:live-qualification:"
 SPLIT_ORDER = ("train", "validation", "holdout")
 
 
@@ -146,10 +147,11 @@ class ModelLifecycle:
         datasets: DatasetStore,
         *,
         clock: Clock = utc_now,
-        live_verifier: Callable[[str], bool] | None = None,
+        live_verifier: Callable[[str, str], bool] | None = None,
     ) -> None:
-        """`live_verifier` (X02's `EvidenceStore.verify_live_qualification`) checks that a
-        Live qualification ref was really issued under the current readiness policy."""
+        """`live_verifier(ref, subject)` is X02's `EvidenceStore.verify_live_qualification`:
+        it checks that a Live qualification was issued for this model under the current
+        readiness policy. Without it, Live promotion is refused (fails closed)."""
         self._conn = conn
         self.registry = registry
         self.datasets = datasets
@@ -274,13 +276,14 @@ class ModelLifecycle:
             raise LifecycleRefused(f"{model_id}@{version} does not support {sorted(unsupported)}")
         evidence = list(evidence_refs)
         if Mode.LIVE in modes:
-            if live_qualification_ref is None or not live_qualification_ref.startswith(
-                LIVE_EVIDENCE_PREFIX
-            ):
-                raise LifecycleRefused(f"live approval needs a {LIVE_EVIDENCE_PREFIX} ref")
-            if self._live_verifier is not None and not self._live_verifier(live_qualification_ref):
+            if live_qualification_ref is None:
+                raise LifecycleRefused(f"live approval needs a {QUALIFICATION_PREFIX} ref")
+            if self._live_verifier is None:
+                raise LifecycleRefused("live approval needs X02's verifier wired in")
+            if not self._live_verifier(live_qualification_ref, f"model:{model_id}@{version}"):
                 raise LifecycleRefused(
-                    f"{live_qualification_ref} was not issued by X02 under the current policy"
+                    f"{live_qualification_ref} was not issued by X02 for this model under the"
+                    " current policy"
                 )
             evidence.append(live_qualification_ref)
         record = EligibilityRecord(

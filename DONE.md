@@ -6,6 +6,42 @@
 
 ---
 
+## X02 slice C: evidence store, protected readiness gate, live qualifications (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/68-x02-readiness`)
+
+**Goal:** Live approval rests on stored, protected evidence that nobody can type in or edit (PRD-X02 #65, slice #68; VAL-04/05/06, AT-16, AT-24).
+
+**Shipped:**
+- `migrations/0010_validation.sql`: runs, policies and qualifications, all append-only.
+- `backend/app/validation/evidence.py`:
+  - `ValidationRun`, a content-addressed `x02:run:` record.
+  - `ReadinessPolicy`, with immutable versions. A certified policy needs criteria and regimes. `DEFAULT_POLICY` is uncertified and every threshold is TBD.
+  - `EvidenceStore.evaluate`, which judges only against the current policy and reports every reason.
+  - A qualification is issued only on READY, bound to the subjects it tested and to the policy version.
+- `core.ids.content_hash`.
+- M07 `ModelLifecycle(live_verifier=…)`. LIVE fails closed without the verifier, and the ref must belong to the model being promoted.
+
+**Validation:**
+- `uv run pytest`: all pass, including 11 readiness tests and 1 new lifecycle test.
+- 10 mutation probes: 9 caught, 1 equivalent. A duplicated run merges into the same window cluster anyway, and is still flagged RUN_DUPLICATE.
+
+**Review fixes:**
+- Duplicated runs are refused.
+- Coverage counts distinct evidence: windows are merged, gaps are not covered days, and overlapping runs count their trades once.
+- The trade count is an explicit field.
+- Evaluation always uses the current policy.
+- `issue` is private.
+- The qualification is bound to its subjects.
+- Live fails closed without the verifier.
+- A run window must end after it starts.
+- An empty certified policy is refused.
+- No duplicate audit row on re-evaluation.
+- One prefix constant.
+- Hash-based policy immutability.
+
+**Skipped:** a shared "insert immutable version" helper across the registry, datasets and policies. The three have different conflict semantics and exceptions; noted as a candidate refactor.
+
+---
+
 ## X02 slice B: point-in-time replay harness, cost model and AT-25 scenarios (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/67-x02-replay`)
 
 **Goal:** replay history exactly as the bot would have seen it, through the real M02/M05 code, with every cost stated (PRD-X02 #65, slice #67; VAL-02, VAL-03, AT-15, AT-25).
