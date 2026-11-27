@@ -6,6 +6,18 @@
 
 ---
 
+## M02 slice C — price-action techniques CAT-T03 + feature snapshot (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/31-m02-price-action`)
+
+**Goal:** non-repainting price action and one versioned, point-in-time feature snapshot for M04/M05 (PRD-02 #28, slice #31; DAT-02, DAT-04, UST-03).
+
+**Shipped:** `backend/app/market_data/techniques/price_action.py` (`make_price_action`: bar shape, patterns, S/R, structure, swings sharing one window, regime, per-timeframe direction); `backend/app/market_data/features.py` (`build_feature_snapshot`, schema `m02.features.v1`, `mtf.aligned`); `Technique.outputs`, `adx_lookback`, `OptValues`. Catalog CAT-T03-01..07 → tested (replay data only).
+
+**Validation:** `uv run pytest` → 380 passed, 1 skipped. Tests written first (red on import). 29 mutation probes caught (3 survivors on the first pass fixed with new tests).
+
+**Review fixes:** fixed key set in every data state; "no level found" no longer degrades the snapshot; CAT-T03-07 runs through `observe` (guards + lineage) and `aligned` is None when a direction is unknown; parameters in technique ids; one swing window for S/R/structure/swings; bars checked against their timeframe key; a requested timeframe with no bar is MISSING; tests for every output (bar shape, regime range/volatile, all patterns).
+
+---
+
 ## M02 slice B — indicator techniques CAT-T01 + tick volume CAT-T09-01 (2026-11-27, /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/30-m02-indicators`)
 
 **Goal:** deterministic MVP indicators as `TechniqueObservation`s that never emit a false valid value (PRD-02 #28, slice #30; UST-02, UST-03).

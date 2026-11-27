@@ -16,7 +16,7 @@ with the SMA of its first window, population standard deviation for Bollinger
 Bands). Default periods are [PROPOSED] (master plan: "exact periods TBD").
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -31,6 +31,12 @@ BB_K = Decimal(2)
 RECURSIVE_LOOKBACK = 5  # [PROPOSED] smoothed indicators read 5x their period
 
 Values = dict[str, Decimal]
+OptValues = dict[str, Decimal | None]
+"""For techniques where 'not present' (e.g. no level found) is a real answer."""
+
+
+def adx_lookback(n: int) -> int:
+    return (RECURSIVE_LOOKBACK + 1) * n + 1
 
 
 # --- series math (pure) ----------------------------------------------------------------------
@@ -115,7 +121,9 @@ class Technique:
     lookback: int
     """Exactly this many closed bars are read; fewer means WARMUP."""
     unit: str
-    compute: Callable[[Sequence[CandleClosed]], Values]
+    compute: Callable[[Sequence[CandleClosed]], Mapping[str, Decimal | None]]
+    outputs: tuple[str, ...] = ()
+    """The value keys it always reports: a feature schema stays the same shape."""
     flags: tuple[QualityFlag, ...] = ()
     needs_volume: bool = False
     version: str = "1.0.0"
@@ -141,31 +149,90 @@ def make_library(
 ) -> dict[str, Technique]:
     """The MVP indicator set; parameters are part of each technique's identity."""
     r = RECURSIVE_LOOKBACK
-    adx_lookback = (r + 1) * adx_n + 1
     techniques = [
-        Technique(f"sma_{sma_n}", "CAT-T01-01", lookback=sma_n, unit="price",
-                  compute=lambda b: {"sma": sma(_closes(b), sma_n)}),
-        Technique(f"ema_{ema_n}", "CAT-T01-02", lookback=r * ema_n, unit="price",
-                  compute=lambda b: {"ema": ema_series(_closes(b), ema_n)[-1]}),
-        Technique(f"wma_{wma_n}", "CAT-T01-03", lookback=wma_n, unit="price",
-                  compute=lambda b: {"wma": wma(_closes(b), wma_n)}),
-        Technique(f"rsi_{rsi_n}", "CAT-T01-04", lookback=r * rsi_n + 1, unit="index_0_100",
-                  compute=lambda b: {"rsi": rsi(_closes(b), rsi_n)}),
-        Technique(f"macd_{macd_fast}_{macd_slow}_{macd_signal}", "CAT-T01-05",
-                  lookback=r * macd_slow + macd_signal, unit="price",
-                  compute=lambda b: macd(_closes(b), macd_fast, macd_slow, macd_signal)),
-        Technique(f"atr_{atr_n}", "CAT-T01-06", lookback=r * atr_n + 1, unit="price",
-                  compute=lambda b: {"atr": wilder(true_ranges(b), atr_n)[-1]}),
-        Technique(f"adx_{adx_n}", "CAT-T01-07", lookback=adx_lookback, unit="index_0_100",
-                  compute=lambda b: {"adx": dmi(b, adx_n)["adx"]}),
-        Technique(f"dmi_{adx_n}", "CAT-T01-08", lookback=adx_lookback, unit="index_0_100",
-                  compute=lambda b: {k: x for k, x in dmi(b, adx_n).items() if k != "adx"}),
-        Technique(f"bb_{bb_n}_{bb_k.normalize()}", "CAT-T01-09", lookback=bb_n, unit="price",
-                  compute=lambda b: bollinger(_closes(b), bb_n, bb_k)),
-        Technique("tick_volume", "CAT-T09-01", lookback=1, unit="broker_ticks",
-                  compute=lambda b: {"tick_volume": b[-1].volume or D(0)},
-                  flags=(QualityFlag.TICK_COUNT_NOT_TRADED_VOLUME,), needs_volume=True),
-    ]  # fmt: skip
+        Technique(
+            f"sma_{sma_n}",
+            "CAT-T01-01",
+            lookback=sma_n,
+            unit="price",
+            outputs=("sma",),
+            compute=lambda b: {"sma": sma(_closes(b), sma_n)},
+        ),
+        Technique(
+            f"ema_{ema_n}",
+            "CAT-T01-02",
+            lookback=r * ema_n,
+            unit="price",
+            outputs=("ema",),
+            compute=lambda b: {"ema": ema_series(_closes(b), ema_n)[-1]},
+        ),
+        Technique(
+            f"wma_{wma_n}",
+            "CAT-T01-03",
+            lookback=wma_n,
+            unit="price",
+            outputs=("wma",),
+            compute=lambda b: {"wma": wma(_closes(b), wma_n)},
+        ),
+        Technique(
+            f"rsi_{rsi_n}",
+            "CAT-T01-04",
+            lookback=r * rsi_n + 1,
+            unit="index_0_100",
+            outputs=("rsi",),
+            compute=lambda b: {"rsi": rsi(_closes(b), rsi_n)},
+        ),
+        Technique(
+            f"macd_{macd_fast}_{macd_slow}_{macd_signal}",
+            "CAT-T01-05",
+            lookback=r * macd_slow + macd_signal,
+            unit="price",
+            outputs=("macd", "signal", "histogram"),
+            compute=lambda b: macd(_closes(b), macd_fast, macd_slow, macd_signal),
+        ),
+        Technique(
+            f"atr_{atr_n}",
+            "CAT-T01-06",
+            lookback=r * atr_n + 1,
+            unit="price",
+            outputs=("atr",),
+            compute=lambda b: {"atr": wilder(true_ranges(b), atr_n)[-1]},
+        ),
+        Technique(
+            f"adx_{adx_n}",
+            "CAT-T01-07",
+            lookback=adx_lookback(adx_n),
+            unit="index_0_100",
+            outputs=("adx",),
+            compute=lambda b: {"adx": dmi(b, adx_n)["adx"]},
+        ),
+        Technique(
+            f"dmi_{adx_n}",
+            "CAT-T01-08",
+            lookback=adx_lookback(adx_n),
+            unit="index_0_100",
+            outputs=("plus_di", "minus_di"),
+            compute=lambda b: {k: x for k, x in dmi(b, adx_n).items() if k != "adx"},
+        ),
+        Technique(
+            f"bb_{bb_n}_{bb_k.normalize()}",
+            "CAT-T01-09",
+            lookback=bb_n,
+            unit="price",
+            outputs=("middle", "upper", "lower"),
+            compute=lambda b: bollinger(_closes(b), bb_n, bb_k),
+        ),
+        Technique(
+            "tick_volume",
+            "CAT-T09-01",
+            lookback=1,
+            unit="broker_ticks",
+            outputs=("tick_volume",),
+            compute=lambda b: {"tick_volume": b[-1].volume or D(0)},
+            flags=(QualityFlag.TICK_COUNT_NOT_TRADED_VOLUME,),
+            needs_volume=True,
+        ),
+    ]
     return {t.technique_id: t for t in techniques}
 
 

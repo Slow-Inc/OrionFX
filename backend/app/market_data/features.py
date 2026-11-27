@@ -1,0 +1,85 @@
+"""The versioned `feature.snapshot` (#31; DAT-02, DAT-04, UST-03).
+
+- Point-in-time: only bars with `available_at <= now` are read, so a snapshot
+  for time T never changes when later bars arrive.
+- Fixed shape: every technique reports all of its declared outputs for every
+  requested timeframe, as `{tf}.{technique_id}.{key}`; unusable ones are None.
+  `mtf.aligned` is 1 when every timeframe's direction agrees (and is not flat),
+  0 when they disagree, None when any direction is unknown (CAT-T03-07).
+- Quality is the worst input: MISSING if a requested timeframe has no bar,
+  STALE if any input expired, DEGRADED if a technique could not run (warm-up,
+  gap, missing input), else OK. A technique answering "no level here" (None)
+  does not degrade the snapshot: that is information, not missing data.
+"""
+
+from collections.abc import Mapping, Sequence
+from datetime import datetime
+from decimal import Decimal
+
+from app.core.contracts import CandleClosed, FeatureSnapshot
+from app.core.enums import DataQuality, QualityFlag, Timeframe
+from app.market_data.techniques.indicators import Technique, make_library, observe
+from app.market_data.techniques.price_action import make_price_action
+
+FEATURE_SCHEMA = "m02.features.v1"
+DEFAULT_TECHNIQUES: tuple[Technique, ...] = (
+    *make_library().values(),
+    *make_price_action().values(),
+)
+
+
+def build_feature_snapshot(
+    symbol: str,
+    bars_by_tf: Mapping[Timeframe, Sequence[CandleClosed]],
+    now: datetime,
+    techniques: Sequence[Technique] = DEFAULT_TECHNIQUES,
+) -> FeatureSnapshot:
+    known: dict[Timeframe, list[CandleClosed]] = {}
+    for tf, bars in bars_by_tf.items():
+        if any(b.timeframe != tf or b.symbol != symbol for b in bars):
+            raise ValueError(f"bars filed under {tf} must be {symbol} {tf} bars")
+        known[tf] = sorted((b for b in bars if b.available_at <= now), key=lambda b: b.open_time)
+    if not any(known.values()):
+        raise ValueError("no bar was available at `now`")
+
+    values: dict[str, Decimal | None] = {}
+    missing_tf = stale = degraded = False
+    valid_until: list[datetime] = []
+    directions: list[Decimal | None] = []
+    for tf, bars in known.items():
+        for tech in techniques:
+            obs = observe(tech, bars, now) if bars else None
+            got = {} if obs is None else obs.values
+            for key in tech.outputs:
+                values[f"{tf}.{tech.technique_id}.{key}"] = got.get(key)
+            if tech.catalog_id == "CAT-T03-07":
+                directions.append(got.get("direction"))
+            if obs is None:
+                missing_tf = True
+            elif QualityFlag.STALE in obs.quality_flags:
+                stale = True
+            elif not obs.values:
+                degraded = True
+            else:
+                valid_until.append(obs.valid_until)
+    known_dirs = [d for d in directions if d is not None]
+    if not directions or len(known_dirs) < len(directions):
+        values["mtf.aligned"] = None
+    else:
+        values["mtf.aligned"] = Decimal(int(known_dirs[0] != 0 and len(set(known_dirs)) == 1))
+
+    quality = (
+        DataQuality.MISSING if missing_tf
+        else DataQuality.STALE if stale
+        else DataQuality.DEGRADED if degraded
+        else DataQuality.OK
+    )  # fmt: skip
+    return FeatureSnapshot(
+        symbol=symbol,
+        feature_schema=FEATURE_SCHEMA,
+        values=values,
+        quality=quality,
+        as_of=max(bars[-1].close_time for bars in known.values() if bars),
+        available_at=now,
+        valid_until=max(now, min(valid_until, default=now)),
+    )
