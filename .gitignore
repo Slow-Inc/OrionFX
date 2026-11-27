@@ -52,3 +52,8 @@ Thumbs.db
 
 # Claude local-only settings
 .claude/settings.local.json
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
