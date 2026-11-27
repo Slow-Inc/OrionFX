@@ -30,20 +30,37 @@ Hard ordering: **PRD → issues → PR**. Never open a PR without a referenced i
 
 ## OpenCode review gate
 
-`.github/workflows/opencode-review.yml` runs an AI review on every PR and posts one `COMMENT` review from `opencode-agent[bot]`. Before `gh pr merge`:
+`.github/workflows/opencode-review.yml` runs OpenCode on every PR, in the action's normal mode (runtime v1). The reviewer reads `CLAUDE.md`, loads the repo skills in `.opencode/skills/` in this order (`code-review`, `scrutinize`, `simplify`, `t4-gates`), and posts one consolidated PR comment from `github-actions[bot]` whose first line is `OpenCode review of <head SHA>`. Provenance and licences for the skills are in `.opencode/README.md`.
 
-1. Wait for the `review / opencode-review` check to finish (`gh pr checks <n> --watch`).
-2. Read the OpenCode review (`gh pr view <n> --comments`, or `gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`). It must be on the current head SHA (`commit_id`); after a new push, wait for the new one.
+Before `gh pr merge`:
+
+1. Wait for the `review` check to finish (`gh pr checks <n> --watch`).
+2. Read the OpenCode comment (`gh pr view <n> --comments`). Its first line must name the current head SHA. After a new push, wait for the new comment. A comment that only carries an error is not a review.
 3. For each finding: fix it if it is valid, or reply on the PR saying why not.
 
-It is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`. Honest limits:
+It is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`.
+
+Why normal mode: the owner chose repo skills over isolation (2026-11-28). The action's review-only mode turns off project skills.
+
+Threat model: the repo is **public**. The v1 handler puts every PR comment and review into the prompt, whoever wrote it, so any GitHub user can attempt prompt injection.
+
+What the agent can reach: `read`, `glob`, `grep` and `list` inside the checkout (the PR head), and the `skill` tool. Nothing else is allowed (`OPENCODE_CONFIG_CONTENT`, deny-by-default): no bash, no edit, no web, and no reads outside the checkout. The process env holds `OPENCODE_API_KEY` and `GITHUB_TOKEN`, but the model has no tool that can read them. A trusted workflow step writes the diff and any linked issues into `.git/opencode-review/` before OpenCode starts.
+
+What blocks what:
+
+- The job token (`contents: read`, `pull-requests: write`) stops push and merge, including the handler's own auto-push when the tree is dirty.
+- Approving is off, because the repo setting "Allow GitHub Actions to create and approve pull requests" is disabled.
+- The model cannot post extra comments or edit the PR, because it has no shell or network.
+- Untrusted comment text can still bias **what the review says**. Treat it as advisory.
+
+Honest limits:
 
 - It is not a required check (free plan), so nothing blocks a merge without it.
-- A green check can still carry findings. Read the review, not the status.
+- A green check can still carry findings. Read the comment, not the status.
 - A **skipped** check means no review ran (draft PR, bot or Dependabot PR, or author not OWNER/MEMBER/COLLABORATOR). Treat it as "no review", not as a pass.
 - Fork PRs are excluded.
-- The default free model can change or be withdrawn. To switch to OpenCode Go, add the `OPENCODE_API_KEY` secret and set `model:` in the workflow (see its header).
-- It reads only the diff and frozen repo files, not `CLAUDE.md`. The workflow prompt carries the few repo rules it checks.
+- The skills are read from the PR head, so a PR can change its own reviewer. Review edits to `.opencode/` with that in mind.
+- **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28, where the run hung for 18 minutes). The job uses `opencode-go/deepseek-v4-pro` with the `OPENCODE_API_KEY` secret and fails fast without it. Hard caps: 15 minutes for the job, 12 for OpenCode. Every review spends the Go allowance.
 
 ## Training-loop research
 
