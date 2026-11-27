@@ -6,6 +6,44 @@
 
 ---
 
+## M03 off-tick news worker and journal-backed evidence (2026-11-27, /tdd + review subagent (code-review + simplify + scrutinize lens) + advisor, security-review n-a, branch `feat/101-news-worker`)
+
+**Goal:** a real LLM answer (up to about a minute at max effort) never runs inside the decision tick; the decision loop reads evidence from the journal (#101, PRD #98).
+
+**Shipped:**
+- `app.runtime.news_worker.NewsWorker.tick()` runs on its own connection and never raises:
+  - it fetches news on schedule;
+  - it assesses when a new story arrives, when the newest view expires while news is still live, or after a failed attempt's backoff;
+  - it reasons about that assessment and journals `news.assessment`, `llm.reasoning` and health;
+  - every journal entry is stamped from the worker clock when the answer returned;
+  - the provider is rebuilt, and the old one closed, when the LLM config changes.
+- `journal_evidence(conn)`:
+  - returns the newest assessment known at `now` if it is still live, and never falls back to an older one;
+  - returns reasoning only if it cites that assessment and no forecast other than the one returned;
+  - returns the newest live forecast;
+  - never calls a provider.
+- `WORKER_TIMEOUT_S = 45` s per attempt, so one stage takes at most about 90 s; `RETRY_AFTER = 2` min. Both are [PROPOSED].
+
+**Review fixes:**
+- An exception escaped `tick()`, and a failed fetch lost its window.
+- A failed journal write dropped the assessment.
+- A failed reasoning was never retried.
+- An expired view was not re-assessed.
+- Evidence could fall back to a stale older assessment.
+- Reasoning built on a different forecast could still vote.
+- News flagged as injection was retried forever.
+- `_close` could raise in the middle of a rebuild.
+- Health ids collided under a frozen clock.
+- The monkeypatched test was replaced by behaviour tests.
+
+**Validation:**
+- Backend verify green; 18 worker tests; mutation probes 20/20 caught.
+- Live on OpenCode Go with `qwen3.8-flash` and a temporary DB:
+  - war news was assessed UP and the reasoning was UP;
+  - evidence read at the tick start was empty, because the answer did not exist yet.
+
+---
+
 ## M03 LLM provider research + model benchmark v1/v2 (2026-11-27, research + live benchmark, no product code, branch `docs/97-m03-llm-benchmark`)
 
 **Goal:** record why OpenCode Go and which model, so the choice can be audited and re-run, and measure how well an LLM works inside OrionFX (#97, for PRD #98 / #41).
