@@ -475,10 +475,13 @@ class Engine:
 
     def _engine_reasons(self, intent: TradeIntent, cfg: UserConfig) -> list[str]:
         """Checks only the engine can make: mode, cycle, basket, reconcile state, exit
-        targets. An entry (OPEN/ADD) is refused in Shadow (no broker order, master plan
+        targets. An exit naming no cycle or another cycle is refused. An entry (OPEN/ADD) is
+        refused in Shadow (no broker order, master plan
         §13), when it names no cycle or another cycle, when an OPEN would start a second
         basket, or when an ADD is on the other side of the bot's basket."""
         if intent.action in EXITS:
+            if intent.cycle_id is None or intent.cycle_id != self._book.open_cycle_id():
+                return ["CYCLE_MISMATCH"]  # a late exit never closes another cycle's basket
             return [] if self._exit_targets(intent) else ["NOTHING_TO_CLOSE"]
         reasons = []
         if Mode(cfg.trading.account_mode) is Mode.SHADOW:

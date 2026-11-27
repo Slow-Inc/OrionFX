@@ -869,3 +869,19 @@ def test_m06_events_carry_the_engine_clock(
     eng.tick()
     found = Journal(conn).find("risk.decision", "intent_id", iid)
     assert found is not None and found.envelope.occurred_at == broker.now
+
+
+def test_an_exit_naming_no_cycle_or_another_cycle_closes_nothing(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#89: a late CLOSE_ALL written for an old cycle never closes the new cycle's basket."""
+    eng = _two_positions(conn, broker, clock)
+    stale = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None,
+                    cycle_id="cycle-closed-earlier")  # fmt: skip
+    unnamed = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None,
+                      cycle_id=None)  # fmt: skip
+    eng.tick()
+    for iid in (stale, unnamed):
+        decision = _decision(conn, iid)
+        assert decision.verdict is Verdict.DENY and "CYCLE_MISMATCH" in decision.reason_codes
+    assert len(_bot_positions(broker)) == 2
