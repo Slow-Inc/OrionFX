@@ -16,6 +16,13 @@ def utc_now_iso() -> str:
     return utc_now().isoformat()
 
 
+def utc_iso(t: datetime) -> str:
+    """UTC ISO text, which sorts in time order: store and query times in this form."""
+    if t.tzinfo is None:
+        raise ValueError("naive datetime: pass an aware UTC time")
+    return t.astimezone(UTC).isoformat()
+
+
 def require_utc(value: datetime) -> datetime:
     """Pydantic validator: the value must already be expressed in UTC (offset 0)."""
     if value.utcoffset() != timedelta(0):

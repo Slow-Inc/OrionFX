@@ -9,8 +9,8 @@
 - A bar is final only when a tick from a later interval arrives; `available_at`
   is that arrival time, never earlier than the close (no look-ahead).
 - Missing M5 intervals are not filled with synthetic bars: every bar that
-  contains or directly follows the hole carries a GAP flag, on the published
-  `CandleClosed` too. Tick count is broker tick volume, not traded volume.
+  contains the hole, and the M5 bar directly after it, carries a GAP flag, on the
+  published `CandleClosed` too. Tick count is broker tick volume, not traded volume.
 """
 
 from collections import Counter
@@ -115,9 +115,11 @@ class CandleEngine:
         if tick is None:
             return []
         last = self._last
-        # An M5 interval the market was open for, with no tick, lies between the last
+        # The first M5 interval the market was open for, with no tick, between the last
         # tick and this one.
-        hole = last is not None and self._missed(_floor(last.time, M5), _floor(tick.time, M5))
+        this_slot = _floor(tick.time, M5)
+        missed = None if last is None else self._first_missed(_floor(last.time, M5), this_slot)
+        hole = missed is not None
         if hole:
             self.issues[Issue.GAP] += 1
         spread = tick.ask - tick.bid
@@ -125,18 +127,26 @@ class CandleEngine:
         for tf, size in FRAMES.items():
             cur = self._open.get(tf)
             if cur is not None and tick.time >= cur.open_time + size:
+                # A hole that starts before the bar's end lies inside the bar.
+                cur.gap = cur.gap or (missed is not None and missed < cur.open_time + size)
                 closed.append(self._close(tick.time, tf, size, cur))
                 cur = None
             if cur is None:
+                opened = _floor(tick.time, size)
+                # The M5 bar right after a hole carries the flag; a higher bar only if
+                # the hole reaches into it.
+                gap = missed is not None and (
+                    size == M5 or self._first_missed(opened - M5, this_slot) is not None
+                )
                 self._open[tf] = _Open(
-                    _floor(tick.time, size),
+                    opened,
                     tick.bid,
                     tick.bid,
                     tick.bid,
                     tick.bid,
                     1,
                     spread,
-                    hole,
+                    gap,
                     last is None,
                 )
             else:
@@ -152,13 +162,13 @@ class CandleEngine:
         self._last, self._last_offset = tick, raw.broker_utc_offset_minutes
         return closed
 
-    def _missed(self, last_slot: datetime, this_slot: datetime) -> bool:
+    def _first_missed(self, last_slot: datetime, this_slot: datetime) -> datetime | None:
         t = last_slot + M5
         while t < this_slot:
             if self.session is None or self.session.expects(t, M5):
-                return True
+                return t
             t += M5
-        return False
+        return None
 
     def _close(self, at: datetime, tf: Timeframe, size: timedelta, cur: _Open) -> ClosedBar:
         return ClosedBar(

@@ -153,6 +153,37 @@ def test_higher_bars_containing_a_hole_are_flagged() -> None:
     assert _only(bars, Timeframe.H1).quality_flags == ["GAP"]
 
 
+def test_a_hole_before_a_higher_bar_closes_flags_that_bar() -> None:
+    eng = _engine()
+    eng.on_tick(_tick(T0 + timedelta(minutes=1), "2000"))
+    closed = eng.on_tick(_tick(T0 + timedelta(hours=1, minutes=1), "2001"))  # 11 M5 silent
+    assert _only(closed, Timeframe.H1).quality_flags == ["GAP"]
+    assert _only(closed, Timeframe.M15).quality_flags == ["GAP"]
+    assert _only(closed, Timeframe.M5).quality_flags == []  # an M5 bar cannot hold a hole
+    assert eng.issues[Issue.GAP] == 1  # one outage, counted once
+
+
+def test_a_hole_flags_only_the_higher_bars_it_lies_in() -> None:
+    eng = _engine()
+    bars: list[ClosedBar] = []
+    minutes = [*range(0, 31), *range(61, 120), *range(140, 181)]  # holes 10:35-55, 12:00-15
+    for minute in minutes:
+        bars += eng.on_tick(_tick(T0 + timedelta(minutes=minute), "2000"))
+    flags = {(b.timeframe, b.event.open_time.strftime("%H:%M")): b.event.quality_flags
+             for b in bars}  # fmt: skip
+    assert flags[(Timeframe.H1, "10:00")] == ["GAP"]
+    assert flags[(Timeframe.M15, "11:00")] == [] and flags[(Timeframe.H1, "11:00")] == []
+    assert flags[(Timeframe.H1, "12:00")] == ["GAP"]  # opened after the hole, inside it
+
+
+def test_a_hole_after_a_higher_bar_does_not_flag_it() -> None:
+    eng = _engine()
+    for minute in range(60):
+        eng.on_tick(_tick(T0 + timedelta(minutes=minute), "2000"))
+    closed = eng.on_tick(_tick(T0 + timedelta(hours=1, minutes=16), "2001"))
+    assert _only(closed, Timeframe.H1).quality_flags == []
+
+
 def test_future_tick_is_refused_and_does_not_block_real_ones() -> None:
     eng = _engine(now=T0)
     eng.on_tick(_tick(T0 + timedelta(hours=1), "2100"))  # stale DST offset: 1h ahead

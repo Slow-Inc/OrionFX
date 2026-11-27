@@ -59,6 +59,7 @@ CERTIFIED = ReadinessPolicy(
     criteria=[Criterion(metric="expectancy", at_least=D("0.50")),
               Criterion(metric="profit_factor", at_least=D("1.20"))],
     min_trades=200, min_days=60, required_regimes=["TREND", "RANGE"],
+    min_trades_per_regime=100,
 )  # fmt: skip
 
 
@@ -98,6 +99,7 @@ def test_the_default_policy_is_uncertified_and_undecided_so_never_ready(
     assert "POLICY_UNCERTIFIED" in r.reasons
     assert any(reason.startswith("THRESHOLD_TBD") for reason in r.reasons)
     assert "MIN_TRADES_TBD" in r.reasons and "MIN_DAYS_TBD" in r.reasons
+    assert "MIN_TRADES_PER_REGIME_TBD" in r.reasons
 
 
 def test_every_failed_criterion_is_reported(store: EvidenceStore) -> None:
@@ -107,6 +109,38 @@ def test_every_failed_criterion_is_reported(store: EvidenceStore) -> None:
     assert {"METRIC_BELOW:expectancy", "MIN_TRADES", "MIN_DAYS", "REGIME_MISSING:RANGE"} <= set(
         r.reasons
     )
+
+
+def test_a_run_too_small_does_not_cover_a_regime(store: EvidenceStore) -> None:
+    store.save_policy(CERTIFIED)
+    lucky = store.record_run(ValidationRun(
+        kind="replay", subject_refs=[MODEL], config={}, regimes=["TREND", "RANGE"],
+        window_start=T0 + 70 * DAY, window_end=T0 + 71 * DAY, trades=1,
+        metrics={"expectancy": Metric(D("9"), 1), "profit_factor": Metric(D("9"), 1)},
+    ))  # fmt: skip
+    r = store.evaluate([_run(store, "TREND", trades=250, days=70), lucky])
+    assert r.verdict is Verdict.NOT_READY and r.reasons == ["REGIME_MISSING:RANGE"]
+
+
+def test_a_run_with_exactly_the_per_regime_minimum_covers_its_regime(
+    store: EvidenceStore,
+) -> None:
+    store.save_policy(CERTIFIED)
+    trend = _run(store, "TREND", trades=100)  # exactly min_trades_per_regime
+    r = store.evaluate([trend, _run(store, "RANGE", trades=100, start=T0 + 40 * DAY)])
+    assert r.verdict is Verdict.READY
+
+
+def test_a_negative_per_regime_minimum_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        ReadinessPolicy.model_validate(CERTIFIED.model_dump() | {"min_trades_per_regime": -1})
+
+
+def test_an_undecided_per_regime_minimum_is_not_ready(store: EvidenceStore) -> None:
+    store.save_policy(CERTIFIED.model_copy(update={"version": "readiness-2",
+                                                   "min_trades_per_regime": None}))  # fmt: skip
+    r = store.evaluate(_two(store))
+    assert r.verdict is Verdict.NOT_READY and r.reasons == ["MIN_TRADES_PER_REGIME_TBD"]
 
 
 def test_a_certified_passing_gate_issues_a_live_qualification_for_its_subjects(
