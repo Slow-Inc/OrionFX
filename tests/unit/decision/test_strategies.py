@@ -48,7 +48,7 @@ def _ctx(
 ) -> DecisionContext:
     snap = FeatureSnapshot(
         symbol="XAUUSD",
-        feature_schema="m02.features.v1",
+        feature_schema="m02.features.v2",
         values={**BASE, **values},
         quality=DataQuality.OK,
         as_of=T0,

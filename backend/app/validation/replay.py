@@ -30,6 +30,7 @@ from app.decision.decide import decide
 from app.decision.fusion import Costs, CycleView, Evidence
 from app.decision.gate import Strategy, eligible
 from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot
+from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
 from app.storage.registry import ArtifactRegistry
 from app.validation.metrics import Metric, expectancy, max_drawdown, profit_factor, win_rate
@@ -158,6 +159,7 @@ def replay(
     cost: CostModel,
     evidence: EvidenceProvider = lambda _t: Evidence(),
     policy_version: str = "replay",
+    session: SessionSchedule | None = None,
 ) -> ReplayResult:
     enabled = list(enabled)
     tfs = list(dict.fromkeys([timeframe, *context_timeframes]))
@@ -183,7 +185,8 @@ def replay(
             i = bisect.bisect_right(available[tf], now)
             bars_by_tf[tf] = history[tf][max(0, i - LOOKBACK) : i]
         seen.append(max(b.available_at for bs in bars_by_tf.values() for b in bs))
-        snapshot = build_feature_snapshot(symbol, {k: v for k, v in bars_by_tf.items() if v}, now)
+        snapshot = build_feature_snapshot(symbol, {k: v for k, v in bars_by_tf.items() if v}, now,
+                                          session=session)  # fmt: skip
         spread = cost.spread(bar)
         ctx = DecisionContext(now=now, mode=Mode.SHADOW, snapshot=snapshot, price=bar.close,
                               spread=spread, initial_lot=initial_lot)  # fmt: skip

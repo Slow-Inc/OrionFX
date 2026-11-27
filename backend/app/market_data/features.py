@@ -19,10 +19,13 @@ from decimal import Decimal
 from app.core.contracts import CandleClosed, FeatureSnapshot
 from app.core.enums import DataQuality, QualityFlag, Timeframe
 from app.core.time import live
+from app.market_data.session import SessionSchedule
 from app.market_data.techniques.indicators import Technique, make_library, observe
 from app.market_data.techniques.price_action import make_price_action
 
-FEATURE_SCHEMA = "m02.features.v1"
+FEATURE_SCHEMA = "m02.features.v2"
+"""v2 (#124): technique windows honour the market's session schedule when one is given,
+so values across a scheduled closure differ from v1."""
 DEFAULT_TECHNIQUES: tuple[Technique, ...] = (
     *make_library().values(),
     *make_price_action().values(),
@@ -79,7 +82,10 @@ def build_feature_snapshot(
     bars_by_tf: Mapping[Timeframe, Sequence[CandleClosed]],
     now: datetime,
     techniques: Sequence[Technique] = DEFAULT_TECHNIQUES,
+    *,
+    session: SessionSchedule | None = None,
 ) -> FeatureSnapshot:
+    """`session`: the market's trading schedule (see `observe`); None means 24/7."""
     known: dict[Timeframe, list[CandleClosed]] = {}
     for tf, bars in bars_by_tf.items():
         if any(b.timeframe != tf or b.symbol != symbol for b in bars):
@@ -94,7 +100,7 @@ def build_feature_snapshot(
     directions: list[Decimal | None] = []
     for tf, bars in known.items():
         for tech in techniques:
-            obs = observe(tech, bars, now) if bars else None
+            obs = observe(tech, bars, now, session=session) if bars else None
             got = {} if obs is None else obs.values
             for key in tech.outputs:
                 values[_key(tf, tech.technique_id, key)] = got.get(key)

@@ -47,7 +47,7 @@ def _prediction(i: str) -> PredictionGenerated:
 
 SNAPSHOT = FeatureSnapshot(
     symbol="XAUUSD",
-    feature_schema="m02.features.v1",
+    feature_schema="m02.features.v2",
     values={
         "H1.direction_10.direction": D(1),
         "mtf.aligned": D(1),
@@ -142,7 +142,7 @@ def test_a_snapshot_not_yet_available_is_not_used() -> None:
 
 
 def test_a_snapshot_of_another_schema_is_not_used() -> None:
-    other = SNAPSHOT.model_copy(update={"feature_schema": "m02.features.v2"})
+    other = SNAPSHOT.model_copy(update={"feature_schema": "m02.features.v1"})
     provider = FakeProvider([_answer(cited_prediction_ids=[])])
     reason([_assessment("a1")], [], other, provider, now=NOW)
     assert "mtf.aligned" not in provider.prompts[0]
@@ -166,7 +166,7 @@ def test_duplicate_citations_are_collapsed_and_the_snapshot_is_recorded() -> Non
     r = reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, FakeProvider([answer]), now=NOW)
     assert r.reasoning is not None
     assert r.reasoning.news_assessment_ids == ["a1"] and r.reasoning.prediction_ids == ["p1"]
-    assert r.reasoning.feature_snapshot_ref == f"m02.features.v1@{T0.isoformat()}"
+    assert r.reasoning.feature_snapshot_ref == f"m02.features.v2@{T0.isoformat()}"
 
 
 def test_invented_ids_never_reach_health_detail() -> None:

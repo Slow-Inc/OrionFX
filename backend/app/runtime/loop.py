@@ -53,6 +53,7 @@ from app.decision.gate import Strategy, eligible
 from app.decision.manage import Held, manage
 from app.learning.experience import ExperienceLog
 from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot
+from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
 from app.risk.policy import DEFAULT_POLICY, RiskPolicy
 from app.storage.config_store import ConfigStore
@@ -99,7 +100,9 @@ class DecisionLoop:
         account_id: str = "local-account",
         bot_id: str = "bot-1",
         clock: Clock = utc_now,
+        session: SessionSchedule | None = None,
     ) -> None:
+        self._session = session  # the market's trading schedule; None means 24/7
         self._conn = conn
         self._journal = Journal(conn)
         self._candles = candles
@@ -222,7 +225,7 @@ class DecisionLoop:
         quote = self._quote(now)
         if quote.quality is not DataQuality.OK or quote.bid is None:
             raise NotKnown(f"market quote {quote.quality.value.lower()}")
-        snapshot = build_feature_snapshot(self._symbol, bars, now)
+        snapshot = build_feature_snapshot(self._symbol, bars, now, session=self._session)
         ctx = DecisionContext(now=now, mode=mode, snapshot=snapshot, price=quote.bid,
                               spread=quote.spread, initial_lot=lot)  # fmt: skip
         gate = eligible(self._strategies, ctx, enabled=cfg.trading.strategies_enabled,

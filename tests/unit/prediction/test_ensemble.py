@@ -26,7 +26,7 @@ def _card(
         model_version="1.0.0",
         artifact_hash="sha256:" + "0" * 64,
         lineage=lineage,
-        feature_schema="m02.features.v1",
+        feature_schema="m02.features.v2",
         required_features=["H1.rsi_14.rsi"],
         feature_ranges={"H1.rsi_14.rsi": ParameterBound(low=D(0), high=D(100))},
         horizon=Timeframe.H1,

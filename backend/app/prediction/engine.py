@@ -28,7 +28,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from app.core.contracts import Confidence, FeatureSnapshot, PredictionGenerated
-from app.core.enums import Direction, ForecastLineage, Mode
+from app.core.enums import DataQuality, Direction, ForecastLineage, Mode
 from app.core.ids import new_id
 from app.core.time import TIMEFRAME_DURATION
 from app.market_data.features import snapshot_problem
@@ -172,7 +172,9 @@ def predict(
             semantics=f"{card.semantics}; the model's score for the predicted direction",
             calibrated=card.calibrated,
         ),
-        data_quality=snapshot.quality,
+        # Judged on what the model read (#124, BLK-01b): the snapshot is usable and live,
+        # and every required feature is present and in range, or we refused above.
+        data_quality=DataQuality.OK,
         input_refs=[snapshot.ref],
         generated_at=now,
         valid_until=min(snapshot.valid_until, horizon_end),

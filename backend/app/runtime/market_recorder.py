@@ -40,6 +40,7 @@ from app.core.ids import stable_id
 from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.learning.bars import BarLog, Horizon, Provenance
 from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, build_feature_snapshot
+from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
 from app.prediction.engine import LoadedPredictor, Refused, predict
 from app.storage.config_store import ConfigStore
@@ -74,8 +75,10 @@ class MarketRecorder:
         clock: Clock = utc_now,
         account_id: str = "local-account",
         bot_id: str = "bot-1",
+        session: SessionSchedule | None = None,
     ) -> None:
         self._conn, self._candles, self._symbol = conn, candles, symbol
+        self._session = session  # the market's trading schedule; None means 24/7
         self._timeframes = [timeframe, *context_timeframes]
         self._horizons = list(horizons)
         step = TIMEFRAME_DURATION[timeframe]
@@ -123,7 +126,8 @@ class MarketRecorder:
                 t: self._candles.bars(self._symbol, t, as_of=bar.available_at, limit=LOOKBACK)
                 for t in self._timeframes
             }
-            snapshot = build_feature_snapshot(self._symbol, known, bar.available_at)
+            snapshot = build_feature_snapshot(self._symbol, known, bar.available_at,
+                                              session=self._session)  # fmt: skip
             live = self._provenance is Provenance.LIVE and bar.available_at >= live_after
             recorded = self._log.record(
                 snapshot, timeframe=tf,

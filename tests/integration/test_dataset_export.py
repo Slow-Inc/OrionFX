@@ -187,7 +187,7 @@ def test_only_the_requested_feature_schema_is_exported(
                provenance=Provenance.BACKFILL, mode=None, dataset_version="v1")  # fmt: skip
     _export(conn, tmp_path / "d.jsonl")
     rows = _rows(tmp_path / "d.jsonl")
-    assert {r["feature_schema"] for r in rows} == {"m02.features.v1"}
+    assert {r["feature_schema"] for r in rows} == {"m02.features.v2"}
     assert len({r["as_of"] for r in rows}) == len(rows)
 
 
