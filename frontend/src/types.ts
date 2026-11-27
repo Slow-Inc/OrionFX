@@ -51,7 +51,6 @@ export interface Risk {
   lifetime_dd_percent: string | null;
   epoch_ceiling_percent: string;
   lifetime_ceiling_percent: string;
-  risk_locked: boolean;
   reason_codes: string[];
   policy_version: string;
   observed_at: string;

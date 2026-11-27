@@ -1,19 +1,33 @@
 // Trading view (#74; UI-02). Account health and the Account DD sit apart from the bot's
-// Cycle Net, which is always labelled an estimate. Every panel says how fresh it is.
-// Controls need confirmation; Emergency Stop lives in its own zone and needs STOP typed.
-import { useState } from "react";
+// Cycle Net, which is always labelled an estimate. Every panel says how fresh it is, and
+// a failed read says so instead of looking like "no data". Controls are enabled only for
+// a known bot state that allows them; each needs confirmation, and Emergency Stop lives
+// in its own zone and needs STOP typed. One command runs at a time.
+import { useEffect, useRef, useState } from "react";
 import { useApp, useNow } from "./app";
 import { type CommandState, runCommand } from "./commands";
-import { formatMoney, signed } from "./format";
+import { formatMoney, formatPercent, signed } from "./format";
 import { freshness } from "./freshness";
 import { useSnapshot } from "./snapshot";
-import type { ControlAction, Cycle, Status } from "./types";
+import type { ControlAction, ControlState, Cycle, Status } from "./types";
 
+/** Keep equal to the backend's ACCOUNT_STALE_AFTER (backend/app/api/app.py). */
 const ACCOUNT_MAX_AGE_MS = 60_000;
+/** M06 reports the Account DD on change; an older reading is shown with its age. */
+const RISK_MAX_AGE_MS = 5 * 60_000;
+const CYCLE_MAX_AGE_MS = 60_000;
 
-function Fresh({ asOf, stale }: { asOf: string | null; stale?: boolean }) {
+function Fresh({
+  asOf,
+  maxAgeMs,
+  stale,
+}: {
+  asOf: string | null;
+  maxAgeMs: number;
+  stale?: boolean;
+}) {
   const now = useNow();
-  const old = stale === true || freshness(asOf, now, ACCOUNT_MAX_AGE_MS) === "STALE";
+  const old = stale === true || freshness(asOf, now, maxAgeMs) === "STALE";
   return (
     <p className="muted">
       {old ? <span className="pill warn">Stale</span> : <span className="pill ok">Fresh</span>}{" "}
@@ -22,9 +36,13 @@ function Fresh({ asOf, stale }: { asOf: string | null; stale?: boolean }) {
   );
 }
 
+function ReadError() {
+  return <p role="alert">Could not read this from the bot. Retrying…</p>;
+}
+
 function Money({ value }: { value: string | null }) {
-  if (value === null) return <span>—</span>;
-  const s = signed(value);
+  const s = value === null ? null : signed(value);
+  if (s === null) return <span>—</span>;
   return (
     <span className={`money ${s.word}`}>
       <span>{s.text}</span> <span className="muted">{s.word}</span>
@@ -40,7 +58,10 @@ function AccountCard({ status }: { status: Status | null }) {
     <section className="card" aria-labelledby="acct">
       <h3 id="acct">Account</h3>
       {account.loading && <p className="muted">Loading…</p>}
-      {!account.loading && !snap && <p className="muted">No account reading yet.</p>}
+      {account.error !== null && <ReadError />}
+      {!account.loading && account.error === null && !snap && (
+        <p className="muted">No account reading yet.</p>
+      )}
       {snap && (
         <>
           <dl>
@@ -55,7 +76,11 @@ function AccountCard({ status }: { status: Status | null }) {
             <dt>Broker</dt>
             <dd>{snap.connected ? "Connected" : "Disconnected"}</dd>
           </dl>
-          <Fresh asOf={snap.observed_at} stale={account.data?.stale ?? true} />
+          <Fresh
+            asOf={snap.observed_at}
+            maxAgeMs={ACCOUNT_MAX_AGE_MS}
+            stale={account.data?.stale ?? true}
+          />
         </>
       )}
       <dl>
@@ -63,9 +88,10 @@ function AccountCard({ status }: { status: Status | null }) {
         <dd>
           {risk?.epoch_dd_percent == null
             ? "Unknown"
-            : `${risk.epoch_dd_percent}% of ${risk.epoch_ceiling_percent}% limit`}
+            : `${formatPercent(risk.epoch_dd_percent)}% of ${formatPercent(risk.epoch_ceiling_percent)}% limit`}
         </dd>
       </dl>
+      {risk && <Fresh asOf={risk.observed_at} maxAgeMs={RISK_MAX_AGE_MS} />}
     </section>
   );
 }
@@ -77,43 +103,46 @@ function CycleCard() {
     <section className="card" aria-labelledby="cycle">
       <h3 id="cycle">Current cycle</h3>
       {cycles.loading && <p className="muted">Loading…</p>}
-      {!cycles.loading && !cycle && <p className="muted">No cycle yet.</p>}
+      {cycles.error !== null && <ReadError />}
+      {!cycles.loading && cycles.error === null && !cycle && <p className="muted">No cycle yet.</p>}
       {cycle && (
-        <dl>
-          <dt>State</dt>
-          <dd>{cycle.state}</dd>
-          <dt>Cycle Net (estimate)</dt>
-          <dd>
-            <Money value={cycle.cycle_net_estimated_usd} />
-          </dd>
-          <dt>Profit Target</dt>
-          <dd>{formatMoney(cycle.target_usd)}</dd>
-          <dt>Trailing</dt>
-          <dd>
-            {cycle.trailing_active
-              ? `active, floor ${formatMoney(cycle.trailing_floor_usd)}`
-              : "not active"}
-          </dd>
-          {cycle.unresolved.length > 0 && (
-            <>
-              <dt>Unresolved</dt>
-              <dd>{cycle.unresolved.join(", ")}</dd>
-            </>
-          )}
-        </dl>
+        <>
+          <dl>
+            <dt>State</dt>
+            <dd>{cycle.state}</dd>
+            <dt>Cycle Net (estimate)</dt>
+            <dd>
+              <Money value={cycle.cycle_net_estimated_usd} />
+            </dd>
+            <dt>Profit Target</dt>
+            <dd>{formatMoney(cycle.target_usd)}</dd>
+            <dt>Trailing</dt>
+            <dd>
+              {cycle.trailing_active
+                ? `active, floor ${formatMoney(cycle.trailing_floor_usd)}`
+                : "not active"}
+            </dd>
+            {cycle.unresolved.length > 0 && (
+              <>
+                <dt>Unresolved</dt>
+                <dd>{cycle.unresolved.join(", ")}</dd>
+              </>
+            )}
+          </dl>
+          <Fresh asOf={cycles.data?.as_of ?? null} maxAgeMs={CYCLE_MAX_AGE_MS} />
+        </>
       )}
     </section>
   );
 }
 
 function PositionsCard() {
-  const positions = useSnapshot((api) => api.positions());
+  // `/api/positions` reports `available: false` until M06's position read model is
+  // exposed: nothing to fetch yet, so nothing is fetched.
   return (
     <section className="card" aria-labelledby="pos">
       <h3 id="pos">Bot positions</h3>
-      {positions.data && !positions.data.available && (
-        <p className="muted">Position list is not available yet.</p>
-      )}
+      <p className="muted">Position list is not available yet.</p>
     </section>
   );
 }
@@ -140,140 +169,119 @@ function CommandOutcome({ state }: { state: CommandState | null }) {
   );
 }
 
+/** One command at a time; polling stops when the view goes away. */
 function useCommand() {
   const { api, refresh } = useApp();
   const [state, setState] = useState<CommandState | null>(null);
+  const abort = useRef<AbortController | null>(null);
+  useEffect(() => () => abort.current?.abort(), []);
   const busy = state?.phase === "SENDING" || state?.phase === "PENDING";
-  const send = (action: ControlAction) =>
-    runCommand(api, action, { onUpdate: setState }).finally(refresh);
+  const send = (action: ControlAction) => {
+    abort.current = new AbortController();
+    void runCommand(api, action, { onUpdate: setState, signal: abort.current.signal }).finally(
+      refresh,
+    );
+  };
   return { state, busy, send };
 }
 
 function ConfirmButton({
   label,
-  action,
   disabled,
-  busy,
-  onSend,
+  onConfirm,
+  confirmWord,
+  danger = false,
 }: {
   label: string;
-  action: ControlAction;
   disabled: boolean;
-  busy: boolean;
-  onSend: (a: ControlAction) => void;
+  onConfirm: () => void;
+  /** When set, the word must be typed before Confirm is enabled. */
+  confirmWord?: string;
+  danger?: boolean;
 }) {
   const [asking, setAsking] = useState(false);
+  const [typed, setTyped] = useState("");
+  const close = () => {
+    setAsking(false);
+    setTyped("");
+  };
+  const cls = danger ? "danger" : undefined;
   if (!asking) {
     return (
-      <button type="button" disabled={disabled || busy} onClick={() => setAsking(true)}>
+      <button type="button" className={cls} disabled={disabled} onClick={() => setAsking(true)}>
         {label}
       </button>
     );
   }
   return (
     <span className="confirm">
+      {confirmWord && (
+        <label>
+          Type {confirmWord} to confirm
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+        </label>
+      )}
       <button
         type="button"
+        className={cls}
+        disabled={disabled || (confirmWord !== undefined && typed !== confirmWord)}
         onClick={() => {
-          setAsking(false);
-          onSend(action);
+          close();
+          onConfirm();
         }}
       >
         Confirm {label}
       </button>
-      <button type="button" className="quiet" onClick={() => setAsking(false)}>
+      <button type="button" className="quiet" onClick={close}>
         Cancel
       </button>
     </span>
   );
 }
 
-function Controls({ status }: { status: Status | null }) {
-  const regular = useCommand();
+const CAN_START: ControlState[] = ["STOPPED", "PAUSED"];
+const CAN_FINISH: ControlState[] = ["RUNNING", "PAUSED"];
+
+function Controls({
+  status,
+  busy,
+  send,
+}: { status: Status | null } & ReturnType<typeof useCommand>) {
   const missing = status?.missing_for_start ?? [];
   const state = status?.control_state;
-  const common = { busy: regular.busy, onSend: (a: ControlAction) => void regular.send(a) };
+  const known = state !== undefined;
   return (
-    <section className="card" aria-labelledby="ctl">
-      <h3 id="ctl">Controls</h3>
-      <div className="row">
+    <div className="row">
+      <ConfirmButton
+        label="Start"
+        disabled={busy || !known || !CAN_START.includes(state) || missing.length > 0}
+        onConfirm={() => send("start")}
+      />
+      <ConfirmButton
+        label="Pause"
+        disabled={busy || state !== "RUNNING"}
+        onConfirm={() => send("pause")}
+      />
+      <ConfirmButton
+        label="Finish Cycle"
+        disabled={busy || !known || !CAN_FINISH.includes(state)}
+        onConfirm={() => send("finish-cycle")}
+      />
+      {status?.risk_locked && (
         <ConfirmButton
-          label="Start"
-          action="start"
-          disabled={missing.length > 0 || state === "RUNNING"}
-          {...common}
+          label="Approve Recovery"
+          disabled={busy}
+          onConfirm={() => send("approve-recovery")}
         />
-        <ConfirmButton label="Pause" action="pause" disabled={state !== "RUNNING"} {...common} />
-        <ConfirmButton
-          label="Finish Cycle"
-          action="finish-cycle"
-          disabled={state !== "RUNNING" && state !== "PAUSED"}
-          {...common}
-        />
-        {status?.risk_locked && (
-          <ConfirmButton
-            label="Approve recovery"
-            action="approve-recovery"
-            disabled={false}
-            {...common}
-          />
-        )}
-      </div>
-      {missing.length > 0 && <p className="muted">Start needs: {missing.join(", ")}</p>}
-      <CommandOutcome state={regular.state} />
-    </section>
-  );
-}
-
-function EmergencyZone() {
-  const stop = useCommand();
-  const [asking, setAsking] = useState(false);
-  const [typed, setTyped] = useState("");
-  return (
-    <section className="card emergency" aria-labelledby="em">
-      <h3 id="em">Emergency</h3>
-      <p className="muted">
-        Closes the bot's positions now. It is done only when the bot confirms every close.
-      </p>
-      {!asking ? (
-        <button
-          type="button"
-          className="danger"
-          disabled={stop.busy}
-          onClick={() => setAsking(true)}
-        >
-          Emergency Stop
-        </button>
-      ) : (
-        <div className="row">
-          <label>
-            Type STOP to confirm
-            <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
-          </label>
-          <button
-            type="button"
-            className="danger"
-            disabled={typed !== "STOP"}
-            onClick={() => {
-              setAsking(false);
-              setTyped("");
-              void stop.send("emergency-stop");
-            }}
-          >
-            Confirm Emergency Stop
-          </button>
-          <button type="button" className="quiet" onClick={() => setAsking(false)}>
-            Cancel
-          </button>
-        </div>
       )}
-      <CommandOutcome state={stop.state} />
-    </section>
+    </div>
   );
 }
 
 export function TradingView() {
   const { status } = useApp();
+  const command = useCommand();
+  const missing = status?.missing_for_start ?? [];
   return (
     <>
       <h2>Trading</h2>
@@ -281,9 +289,27 @@ export function TradingView() {
         <AccountCard status={status} />
         <CycleCard />
         <PositionsCard />
-        <Controls status={status} />
+        <section className="card" aria-labelledby="ctl">
+          <h3 id="ctl">Controls</h3>
+          {status === null && <p className="muted">Bot state unknown: controls are off.</p>}
+          <Controls status={status} {...command} />
+          {missing.length > 0 && <p className="muted">Start needs: {missing.join(", ")}</p>}
+          <CommandOutcome state={command.state} />
+        </section>
       </div>
-      <EmergencyZone />
+      <section className="card emergency" aria-labelledby="em">
+        <h3 id="em">Emergency</h3>
+        <p className="muted">
+          Closes the bot's positions now. It is done only when the bot confirms every close.
+        </p>
+        <ConfirmButton
+          label="Emergency Stop"
+          danger
+          confirmWord="STOP"
+          disabled={command.busy}
+          onConfirm={() => command.send("emergency-stop")}
+        />
+      </section>
     </>
   );
 }

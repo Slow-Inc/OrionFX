@@ -322,3 +322,4 @@ def test_status_risk_lock_follows_newest_event(client: TestClient, db: Path) -> 
     assert body["risk"]["epoch_dd_percent"] == "0"
     assert body["risk"]["epoch_ceiling_percent"] == "20"
     assert body["risk"]["observed_at"] is not None
+    assert "risk_locked" not in body["risk"]  # one lock value, the top-level one

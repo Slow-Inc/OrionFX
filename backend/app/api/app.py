@@ -180,10 +180,12 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
         latest_risk = journal.recent(["risk.updated"], limit=1)
         risk = None
         if latest_risk:
-            risk = {
-                **payload_as(latest_risk[0], RiskUpdated).model_dump(mode="json"),
-                "observed_at": latest_risk[0].envelope.occurred_at.isoformat(),
-            }
+            # The lock itself is reported once, at the top level (newest of the events
+            # that carry it); this object is the DD reading and when it was observed.
+            reading = payload_as(latest_risk[0], RiskUpdated).model_dump(
+                mode="json", exclude={"risk_locked"}
+            )
+            risk = {**reading, "observed_at": latest_risk[0].envelope.occurred_at.isoformat()}
 
         health = {}
         for ev in journal.latest_per_payload_field("health.updated", "component"):

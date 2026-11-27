@@ -1,6 +1,7 @@
 // Read one API snapshot and re-read it whenever the app's revision moves (live events,
 // reconnects, polling). Late answers from superseded requests are dropped.
 import { useEffect, useState } from "react";
+import type { Api } from "./api";
 import { useApp } from "./app";
 
 export interface Snapshot<T> {
@@ -9,7 +10,7 @@ export interface Snapshot<T> {
   loading: boolean;
 }
 
-export function useSnapshot<T>(read: (api: ReturnType<typeof useApp>["api"]) => Promise<T>) {
+export function useSnapshot<T>(read: (api: Api) => Promise<T>) {
   const { api, revision } = useApp();
   const [snap, setSnap] = useState<Snapshot<T>>({ data: null, error: null, loading: true });
   // biome-ignore lint/correctness/useExhaustiveDependencies: `read` is a stable view-level reader

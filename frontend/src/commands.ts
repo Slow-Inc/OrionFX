@@ -23,6 +23,8 @@ export interface CommandState {
 
 export interface RunOptions {
   onUpdate: (state: CommandState) => void;
+  /** Aborted when the view goes away: polling stops and nothing more is reported. */
+  signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
   pollMs?: number;
   timeoutPolls?: number;
@@ -42,10 +44,10 @@ function refusal(err: unknown): string {
 export async function runCommand(
   api: Api,
   action: ControlAction,
-  { onUpdate, sleep = wait, pollMs = 1_000, timeoutPolls = 60 }: RunOptions,
+  { onUpdate, signal, sleep = wait, pollMs = 1_000, timeoutPolls = 60 }: RunOptions,
 ): Promise<CommandState> {
   const emit = (s: CommandState) => {
-    onUpdate(s);
+    if (!signal?.aborted) onUpdate(s);
     return s;
   };
   emit({ action, phase: "SENDING" });
@@ -58,16 +60,15 @@ export async function runCommand(
   emit({ action, phase: "PENDING", commandId });
   for (let i = 0; i < timeoutPolls; i++) {
     await sleep(pollMs);
+    if (signal?.aborted) break;
     let result: CommandResult;
     try {
       result = await api.commandStatus(commandId);
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError && err.kind === "unauthorized") break; // signed out
       continue; // a failed poll is not an answer: keep waiting
     }
-    if (result.status === "ACCEPTED") {
-      emit({ action, phase: "PENDING", commandId });
-      continue;
-    }
+    if (result.status === "ACCEPTED") continue; // still PENDING, already reported
     return emit({ action, phase: result.status, commandId, result });
   }
   return emit({

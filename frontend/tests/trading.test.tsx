@@ -31,7 +31,6 @@ const STATUS: Status = {
     lifetime_dd_percent: "6.10",
     epoch_ceiling_percent: "20",
     lifetime_ceiling_percent: "30",
-    risk_locked: false,
     reason_codes: [],
     policy_version: "p",
     observed_at: NOW,
@@ -80,7 +79,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
   } as unknown as Api;
 }
 
-function renderTrading(api: Api, status: Status = STATUS) {
+function renderTrading(api: Api, status: Status | null = STATUS) {
   const value: AppContextValue = { api, status, feed: "LIVE", revision: 0, refresh: vi.fn() };
   return render(
     <AppContext.Provider value={value}>
@@ -103,7 +102,7 @@ describe("runCommand", () => {
     const api = fakeApi({ commandStatus: vi.fn(async () => replies.shift() as CommandResult) });
     const seen: string[] = [];
     const final = await runCommand(api, "pause", { onUpdate: (s) => seen.push(s.phase), sleep });
-    expect(seen).toEqual(["SENDING", "PENDING", "PENDING", "PENDING", "COMPLETED"]);
+    expect(seen).toEqual(["SENDING", "PENDING", "COMPLETED"]);
     expect(final.result?.resulting_state).toBe("PAUSED");
   });
 
@@ -167,9 +166,66 @@ describe("Trading view", () => {
     expect(within(account).getByText("Unknown")).toBeInTheDocument();
   });
 
-  it("says plainly when positions are not available", async () => {
-    renderTrading(fakeApi());
+  it("says plainly when positions are not available, without fetching a stub", async () => {
+    const api = fakeApi();
+    renderTrading(api);
     expect(await screen.findByText(/Position list is not available yet/)).toBeInTheDocument();
+    expect(api.positions).not.toHaveBeenCalled();
+  });
+
+  it("a failed read says so instead of looking like no data", async () => {
+    renderTrading(
+      fakeApi({
+        cycles: vi.fn(async () => {
+          throw new ApiError("unavailable", 503, "storage unavailable");
+        }),
+      }),
+    );
+    const cycle = await screen.findByRole("region", { name: "Current cycle" });
+    expect(await within(cycle).findByRole("alert")).toHaveTextContent(/Could not read/);
+    expect(within(cycle).queryByText("No cycle yet.")).not.toBeInTheDocument();
+  });
+
+  it("shows how fresh the Account DD is, and formats exponent strings", async () => {
+    const old = {
+      ...STATUS,
+      risk: {
+        ...(STATUS.risk as NonNullable<Status["risk"]>),
+        epoch_dd_percent: "0E-8",
+        observed_at: "2020-01-01T00:00:00Z",
+      },
+    };
+    renderTrading(fakeApi(), old);
+    const account = await screen.findByRole("region", { name: "Account" });
+    expect(within(account).getByText("0% of 20% limit")).toBeInTheDocument();
+    expect(within(account).getAllByText("Stale").length).toBeGreaterThan(0);
+  });
+
+  it("turns every control off while the bot state is unknown", async () => {
+    renderTrading(fakeApi(), null);
+    for (const name of ["Start", "Pause", "Finish Cycle"]) {
+      expect(await screen.findByRole("button", { name })).toBeDisabled();
+    }
+  });
+
+  it("only one command at a time: an open confirm is disabled while one is pending", async () => {
+    const api = fakeApi();
+    renderTrading(api, { ...STATUS, control_state: "PAUSED" });
+    await userEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await userEvent.click(screen.getByRole("button", { name: "Finish Cycle" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Start" }));
+    expect(await screen.findByText(/Pending/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm Finish Cycle" })).toBeDisabled();
+  });
+
+  it("cancelling an Emergency Stop clears the typed word", async () => {
+    renderTrading(fakeApi());
+    const zone = await screen.findByRole("region", { name: "Emergency" });
+    await userEvent.click(within(zone).getByRole("button", { name: "Emergency Stop" }));
+    await userEvent.type(within(zone).getByLabelText(/Type STOP/), "STOP");
+    await userEvent.click(within(zone).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(zone).getByRole("button", { name: "Emergency Stop" }));
+    expect(within(zone).getByRole("button", { name: "Confirm Emergency Stop" })).toBeDisabled();
   });
 
   it("asks before a regular command and only sends after confirming", async () => {
@@ -206,6 +262,37 @@ describe("Trading view", () => {
 
   it("offers recovery approval only while risk-locked", async () => {
     renderTrading(fakeApi(), { ...STATUS, risk_locked: true, control_state: "RISK_LOCKED" });
-    expect(await screen.findByRole("button", { name: "Approve recovery" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Approve Recovery" })).toBeInTheDocument();
+  });
+});
+
+describe("runCommand stops", () => {
+  it("when the view goes away or the session ends", async () => {
+    const controller = new AbortController();
+    const api = fakeApi();
+    let polls = 0;
+    const final = await runCommand(api, "pause", {
+      onUpdate: () => {},
+      signal: controller.signal,
+      sleep: async () => {
+        polls += 1;
+        if (polls === 2) controller.abort();
+      },
+    });
+    expect(polls).toBe(2);
+    expect(final.phase).toBe("STILL_PENDING");
+    const signedOut = fakeApi({
+      commandStatus: vi.fn(async () => {
+        throw new ApiError("unauthorized", 401, "auth");
+      }),
+    });
+    let n = 0;
+    await runCommand(signedOut, "pause", {
+      onUpdate: () => {},
+      sleep: async () => {
+        n += 1;
+      },
+    });
+    expect(n).toBe(1);
   });
 });
