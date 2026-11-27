@@ -19,12 +19,13 @@ Machine Learning Trading (CAT-S01-07) is blocked: it needs a trained model.
 - scalping: M5 direction == M15 direction (non-zero) and spread <= 0.30; M5
   horizon.
 - hybrid: among the members the gate allowed, at least two agree on a direction
-  and outnumber the opposing votes; `propose_all` then drops the outvoted members.
+  and outnumber the opposing votes; it records the agreeing members and versions as
+  its composition, and for an entry `drop_outvoted` drops the outvoted members.
 """
 
 import inspect
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -32,7 +33,6 @@ from app.core.contracts import StrategyManifest, StrategyProposal, sha256_ref
 from app.core.enums import Direction, IntentAction, Mode, Timeframe
 from app.core.ids import new_id
 from app.decision.context import DecisionContext
-from app.decision.gate import Strategy
 from app.market_data.features import feature_key
 from app.prediction.card import unique_leader
 
@@ -108,10 +108,12 @@ def _scalp(ctx: DecisionContext, f: dict[str, Decimal]) -> Direction | None:
     return _sign(f[DIR_M5])
 
 
-def _rule_hash(rule: Callable[..., object], required: tuple[str, ...]) -> str:
+def _rule_hash(
+    rule: Callable[..., object], required: tuple[str, ...], *also: Callable[..., object]
+) -> str:
     thresholds = (TREND_ADX, PULLBACK_ADX, PULLBACK_LOW, PULLBACK_HIGH, RANGE_EDGE_ATR,
                   SCALP_MAX_SPREAD)  # fmt: skip
-    source = inspect.getsource(rule).replace("\r\n", "\n")
+    source = "".join(inspect.getsource(f) for f in (rule, *also)).replace("\r\n", "\n")
     return sha256_ref(f"{source}|{required}|{thresholds}".encode())
 
 
@@ -139,13 +141,15 @@ def _proposal(
     ctx: DecisionContext,
     direction: Direction,
     refs: list[str],
+    composition_id: str | None = None,
 ) -> StrategyProposal:
+    rationale = f"{manifest.strategy_id} rule v{manifest.version} -> {direction}"
     return StrategyProposal(
         proposal_id=new_id("prop"),
         strategy_id=manifest.strategy_id,
         strategy_version=manifest.version,
         technique_refs=refs,
-        composition_id=None,
+        composition_id=composition_id,
         decision_id=None,
         direction=direction,
         action=IntentAction.OPEN,
@@ -154,7 +158,7 @@ def _proposal(
         cost_estimate_usd=None,
         requested_lot=ctx.initial_lot,
         valid_until=ctx.snapshot.valid_until,
-        rationale=f"{manifest.strategy_id} rule v{manifest.version} -> {direction}",
+        rationale=f"{rationale} ({composition_id})" if composition_id else rationale,
         constraints=[],
     )
 
@@ -223,39 +227,35 @@ class Hybrid:
         if lead is None or lead[1] < 2:
             return None
         refs = list(dict.fromkeys(k for m, d in votes if d is lead[0] for k in m.required))
-        return _proposal(self.manifest, self.horizon, ctx, lead[0], refs)
+        agree = sorted(f"{m.manifest.strategy_id}@{m.manifest.version}"
+                       for m, d in votes if d is lead[0])  # fmt: skip
+        composition = f"{self.manifest.strategy_id}:{'+'.join(agree)}"  # exact versions, AT-41
+        return _proposal(self.manifest, self.horizon, ctx, lead[0], refs, composition)
 
 
-_HYBRID_HASH = _rule_hash(Hybrid.propose, tuple(m.manifest.strategy_id for m in _RULES))
+def drop_outvoted(proposals: list[StrategyProposal]) -> list[StrategyProposal]:
+    """For an entry only (#121): when a Hybrid proposes, drop its members' proposals on
+    the other side. They would always conflict with the majority, so Hybrid could never
+    win a 2 vs 1. Agreeing members stay (one may match the forecast's horizon). Never
+    used while managing a basket: there a split chart must stay no vote, or an exit
+    could weaken."""
+    kept = proposals
+    for h in proposals:
+        s = STRATEGIES.get(h.strategy_id)
+        if isinstance(s, Hybrid):
+            members = {m.manifest.strategy_id for m in s.members}
+            kept = [p for p in kept if p.strategy_id not in members or p.direction is h.direction]
+    return kept
+
+
+# Hybrid's behaviour is its vote and the entry-time dropping rule: both are qualified
+_HYBRID_HASH = _rule_hash(
+    Hybrid.propose, tuple(m.manifest.strategy_id for m in _RULES), drop_outvoted
+)
 STRATEGIES: dict[str, RuleStrategy | Hybrid] = {s.manifest.strategy_id: s for s in _RULES}
 STRATEGIES["hybrid"] = Hybrid(
     _manifest("hybrid", "CAT-S01-06", [H1, M15, M5], _HYBRID_HASH, []), tuple(_RULES)
 )
-
-
-def propose_all(strategies: Sequence[Strategy], ctx: DecisionContext) -> list[StrategyProposal]:
-    """Every proposal from `strategies` (the gate's allowed ones), the one place the
-    decision loop and replay collect them. When a Hybrid proposes, the members it
-    outvoted are dropped: their own proposals would otherwise always conflict with the
-    majority, so Hybrid could never win a 2 vs 1 (#121). The agreeing members stay (one
-    may match the forecast's horizon), and the Hybrid proposal records them (AT-41)."""
-    proposals = [p for s in strategies if (p := s.propose(ctx)) is not None]
-    by_id = {p.strategy_id: p for p in proposals}
-    for s in strategies:
-        h = by_id.get(s.manifest.strategy_id)
-        if not isinstance(s, Hybrid) or h is None:
-            continue
-        members = {m.manifest.strategy_id for m in s.members}
-        outvoted = {p.strategy_id for p in proposals
-                    if p.strategy_id in members and p.direction is not h.direction}  # fmt: skip
-        agree = sorted((members & by_id.keys()) - outvoted)
-        composed = h.model_copy(update={
-            "composition_id": f"{h.strategy_id}:{'+'.join(agree)}",
-            "rationale": f"{h.rationale} ({', '.join(agree)})",
-        })  # fmt: skip
-        proposals = [composed if p is h else p for p in proposals
-                     if p.strategy_id not in outvoted]  # fmt: skip
-    return proposals
 
 
 def catalog_ids() -> set[str]:

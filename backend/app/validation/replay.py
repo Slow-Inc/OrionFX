@@ -29,7 +29,6 @@ from app.decision.context import DecisionContext
 from app.decision.decide import decide
 from app.decision.fusion import Costs, CycleView, Evidence
 from app.decision.gate import Strategy, eligible
-from app.decision.strategies import propose_all
 from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot
 from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
@@ -193,7 +192,7 @@ def replay(
                               spread=spread, initial_lot=initial_lot)  # fmt: skip
         gate = eligible(strategies, ctx, enabled=enabled, registry=registry)
         ctx = gate.with_allowed(ctx)
-        proposals = propose_all(gate.allowed, ctx)
+        proposals = [p for s in gate.allowed if (p := s.propose(ctx)) is not None]
         cycle = CycleView("replay", 1 if open_ else 0, last_closed)
         d = decide(ctx, proposals, evidence(now), cycle=cycle, costs=cost.costs, symbol=symbol,
                    policy_version=policy_version)  # fmt: skip

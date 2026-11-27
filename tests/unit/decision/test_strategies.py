@@ -115,28 +115,81 @@ def test_hybrid_needs_two_allowed_strategies_to_agree() -> None:
     assert _side("hybrid", replace(_ctx(**weak), allowed=ALL)) is None
 
 
+def _split_ctx(allowed: frozenset[str] = ALL | {"hybrid"}) -> DecisionContext:
+    """trend and scalping UP, breakout DOWN (price below support): Hybrid votes UP 2 vs 1."""
+    return replace(_ctx(price="1980"), allowed=allowed)
+
+
+def _loop_proposals(ctx: DecisionContext):  # type: ignore[no-untyped-def]
+    """What the decision loop and replay collect: every allowed strategy's proposal."""
+    return [p for s in STRATEGIES.values()
+            if s.manifest.strategy_id in ctx.allowed and (p := s.propose(ctx))]  # fmt: skip
+
+
+COMPOSITION = "hybrid:scalping@1.0.0+trend_following@1.0.0"
+
+
 def test_a_hybrid_majority_is_not_blocked_by_the_member_it_outvoted() -> None:
-    """#121: trend and scalping UP, breakout DOWN (price below support). Hybrid votes UP
-    2 vs 1; the outvoted member's own proposal must not turn that into
-    CONFLICT_STRATEGIES. Agreeing members stay (the H1 one prices the H1 forecast)."""
+    """#121: the outvoted member's own proposal must not turn a Hybrid 2 vs 1 into
+    CONFLICT_STRATEGIES for an entry. Agreeing members stay (the H1 one prices the H1
+    forecast), and the decision cites the exact composition (AT-41)."""
     from tests.support.decision import COSTS, CYCLE, _forecast
 
     from app.core.enums import DecisionAction
     from app.decision.decide import decide
     from app.decision.fusion import Evidence
-    from app.decision.strategies import propose_all
 
-    ctx = replace(_ctx(price="1980"), allowed=ALL | {"hybrid"})
-    props = {p.strategy_id: p for p in propose_all(list(STRATEGIES.values()), ctx)}
-    assert set(props) == {"trend_following", "scalping", "hybrid"}
-    assert props["hybrid"].composition_id == "hybrid:scalping+trend_following"
+    ctx = _split_ctx()
+    props = {p.strategy_id: p for p in _loop_proposals(ctx)}
+    assert set(props) == {"trend_following", "scalping", "breakout", "hybrid"}
+    assert props["hybrid"].composition_id == COMPOSITION
     d = decide(ctx, list(props.values()), Evidence(forecast=_forecast()), cycle=CYCLE,
                costs=COSTS, symbol="XAUUSD", policy_version="p1")  # fmt: skip
     assert d.created.action is DecisionAction.ENTER
     assert d.created.strategy_id == "trend_following"
+    assert COMPOSITION in d.created.evidence_refs
+    assert "breakout@1.0.0" not in d.created.evidence_refs
     # without hybrid nothing is dropped: the members still conflict
-    plain = propose_all([STRATEGIES[s] for s in sorted(ALL)], replace(ctx, allowed=ALL))
-    assert {p.strategy_id for p in plain} == {"trend_following", "scalping", "breakout"}
+    plain = replace(ctx, allowed=ALL)
+    d = decide(plain, _loop_proposals(plain), Evidence(forecast=_forecast()), cycle=CYCLE,
+               costs=COSTS, symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert d.created.reason_codes == ["CONFLICT_STRATEGIES"]
+
+
+def test_a_hybrid_majority_never_weakens_an_exit() -> None:
+    """#121 review blocker: holding BUY with an opposing forecast and no news, the split
+    chart casts no vote, so the forecast alone (1 vs 0) exits. Dropping the outvoted
+    member would make the chart an UP vote and turn the exit into CONFLICT_EVIDENCE."""
+    from tests.support.decision import COSTS, CYCLE, _forecast
+
+    from app.core.enums import DecisionAction, IntentAction, Side
+    from app.decision.fusion import Evidence
+    from app.decision.manage import Held, manage
+
+    ctx = _split_ctx()
+    held = Held(side=Side.BUY, positions=1, cycle_net_usd=D("2"), position_refs=["pos-1"])
+    d = manage(ctx, _loop_proposals(ctx), Evidence(forecast=_forecast(direction=Direction.DOWN)),
+               cycle=replace(CYCLE, open_positions=1), held=held, max_positions=3, costs=COSTS,
+               symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert d.created.action is DecisionAction.EXIT
+    assert d.created.reason_codes == ["EVIDENCE_REVERSED", "VOTES_1_AGAINST_0"]
+    assert d.intent is not None and d.intent.action is IntentAction.CLOSE_ALL
+
+
+PRE_121_HYBRID_HASH = "sha256:91dd5baa12b8a755e9531b91b664d2f896b2a5834ed54b7b088484e719b586f1"
+
+
+def test_the_hybrid_composition_change_requires_requalification() -> None:
+    """#121 (AT-41): Hybrid now trades differently (it records its composition and its
+    outvoted members are dropped for entries), so its artifact hash changed. An approval
+    of the earlier code no longer matches and the gate refuses Hybrid until re-approved."""
+    from app.decision.strategies import _RULES, Hybrid, _rule_hash, drop_outvoted
+
+    h = STRATEGIES["hybrid"].manifest.artifact_hash
+    assert h != PRE_121_HYBRID_HASH
+    # the hash covers the dropping rule too, not only Hybrid.propose
+    ids = tuple(m.manifest.strategy_id for m in _RULES)
+    assert h == _rule_hash(Hybrid.propose, ids, drop_outvoted) != _rule_hash(Hybrid.propose, ids)
 
 
 def test_hybrid_ignores_members_the_gate_did_not_allow() -> None:

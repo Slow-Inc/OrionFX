@@ -73,9 +73,11 @@ def _parse(text: str, given: set[str]) -> _Answer:
 
 
 def _handles(items: Sequence[NewsItem]) -> dict[str, NewsItem]:
-    """The id each item has in the prompt. Items are keyed by (source, item_id), as the
-    cache keys them (#121, MAJ-05.5): a reused item_id gets an `@n` suffix, which no real
-    id can contain (outside NewsItem's id charset), so every handle names one item."""
+    """The id each item has in the prompt, one per item (#121, MAJ-05.5). The cache keys
+    items by (source, item_id), so two sources can share an item_id. The first item with
+    an id keeps it; each later one, in input order, gets `@2`, `@3`, ... `@` is outside
+    NewsItem's id charset, so a suffixed handle never equals a real id and each handle
+    names exactly one item. The source itself is never put in the prompt."""
     seen: Counter[str] = Counter()
     handles: dict[str, NewsItem] = {}
     for i in items:

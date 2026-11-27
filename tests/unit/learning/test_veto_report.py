@@ -12,7 +12,7 @@ import pytest
 from tests.support.decision import T0, _ctx
 from tests.unit.learning.test_experience import _bars, _decision
 
-from app.core.enums import DecisionAction, Direction, Mode, Timeframe
+from app.core.enums import DecisionAction, Direction, Mode, Timeframe, WaitReason
 from app.learning.experience import ExperienceLog
 from app.learning.veto_report import veto_report
 from app.market_data.store import CandleStore
@@ -59,10 +59,15 @@ def test_vetoes_are_classed_saved_missed_flat_or_unknown(
     _veto(log, "unknown", Direction.UP, hours=3)  # its horizon has not closed
     _veto(log, "outside", Direction.UP, hours=9)  # after the report window
     _veto(log, "other", Direction.UP, hours=0, reasons=["CONFLICT_EVIDENCE"])  # not a veto
+    _veto(log, "add", Direction.UP, hours=0, reasons=["NEWS_VETO_ADD"])  # an ADD veto (#121)
     log.label_due(now=T0 + timedelta(hours=5))
-    r = veto_report(log, start=T0 - timedelta(hours=1), end=T0 + timedelta(hours=4),
-                    as_of=T0 + timedelta(hours=5))  # fmt: skip
+    window = {"start": T0 - timedelta(hours=1), "end": T0 + timedelta(hours=4),
+              "as_of": T0 + timedelta(hours=5)}  # fmt: skip
+    r = veto_report(log, **window)  # type: ignore[arg-type]
     assert (r.vetoes, r.saved, r.missed, r.flat, r.unknown) == (5, 2, 1, 1, 1)
+    # ADD vetoes are reported on their own, never mixed into the entry tuning data
+    adds = veto_report(log, **window, reason=WaitReason.NEWS_VETO_ADD)  # type: ignore[arg-type]
+    assert (adds.vetoes, adds.saved) == (1, 1)
     # in the refused side's favour: BUY -10, SELL 0, BUY +15, SELL -15 -> mean -10 / 4
     assert r.mean_move_for_refused_side == (D(-10) + D(0) + D(15) + D(-15)) / 4
 

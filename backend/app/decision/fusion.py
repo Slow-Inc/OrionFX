@@ -55,7 +55,7 @@ from app.core.events import EventEnvelope, make_event
 from app.core.ids import stable_id
 from app.core.time import live
 from app.decision.context import DecisionContext
-from app.decision.strategies import ATR_M15
+from app.decision.strategies import ATR_M15, drop_outvoted
 from app.execution.broker import SymbolSpec
 from app.market_data.features import USABLE_QUALITY
 
@@ -247,10 +247,14 @@ def gather(
     held: Side | None = None,
 ) -> Inputs:
     usable = usable_proposals(proposals, ctx.now)
+    if held is None:  # an entry; managing keeps every vote so an exit never weakens
+        usable = drop_outvoted(usable)
     directions = {p.direction for p in usable}
     forecast = _live_forecast(evidence, ctx.now)
     votes, refs = _votes(evidence, forecast, ctx.now)
-    strategy_refs = [f"{p.strategy_id}@{p.strategy_version}" for p in usable]
+    strategy_refs = [ref for p in usable
+                     for ref in (f"{p.strategy_id}@{p.strategy_version}", p.composition_id)
+                     if ref]  # a composition is cited with its exact members (AT-41)  # fmt: skip
     evidence_refs = [ctx.snapshot.ref, *strategy_refs, *refs]
     cost_basis = None if costs is None else [costs.contract_size, costs.commission_per_lot]
     basis: list[object] = [evidence_refs, cycle.cycle_id, ctx.mode, symbol, policy_version,
