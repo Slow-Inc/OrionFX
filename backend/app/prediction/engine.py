@@ -173,7 +173,7 @@ def predict(
             calibrated=card.calibrated,
         ),
         data_quality=snapshot.quality,
-        input_refs=[f"{snapshot.feature_schema}@{snapshot.as_of.isoformat()}"],
+        input_refs=[snapshot.ref],
         generated_at=now,
         valid_until=min(snapshot.valid_until, horizon_end),
     )

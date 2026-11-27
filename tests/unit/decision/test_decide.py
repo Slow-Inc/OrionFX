@@ -154,19 +154,19 @@ def test_no_proposal_waits() -> None:
 
 def test_strategies_disagreeing_waits() -> None:
     d = _decide([_proposal("a"), _proposal("b", Direction.DOWN)])
-    assert d.created.action is DecisionAction.WAIT and "CONFLICT" in _reasons(d)
+    assert d.created.action is DecisionAction.WAIT and "CONFLICT_STRATEGIES" in _reasons(d)
 
 
 def test_opposing_forecast_waits() -> None:
     d = _decide(evidence=Evidence(forecast=_forecast(direction=Direction.DOWN)))
-    assert d.created.action is DecisionAction.WAIT and "CONFLICT" in _reasons(d)
+    assert d.created.action is DecisionAction.WAIT and "CONFLICT_EVIDENCE" in _reasons(d)
 
 
 def test_opposing_cited_news_waits_but_uncited_news_is_ignored() -> None:
     d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news(cited=True)]))
     assert d.created.action is DecisionAction.ENTER  # 2 agree (chart, forecast) vs 1 news
     both = Evidence(forecast=_forecast(direction=Direction.DOWN), news=[_news()])
-    assert "CONFLICT" in _reasons(_decide(evidence=both))
+    assert "CONFLICT_EVIDENCE" in _reasons(_decide(evidence=both))
     uncited = _decide(evidence=Evidence(forecast=_forecast(), news=[_news(cited=False)]))
     assert "na_1" not in uncited.created.evidence_refs
 
@@ -178,21 +178,24 @@ def test_reasoning_that_restates_counted_news_is_not_a_second_vote() -> None:
     )
     assert _decide(evidence=ev).created.action is DecisionAction.ENTER
     independent = replace(ev, reasoning=_reasoning(Direction.DOWN, []))
-    assert "CONFLICT" in _reasons(_decide(evidence=independent))
+    assert "CONFLICT_EVIDENCE" in _reasons(_decide(evidence=independent))
 
 
 def test_news_inside_a_news_enhanced_forecast_is_not_counted_again() -> None:
     # news-enhanced forecast UP + news DOWN: the news is inside the forecast, so 2 votes vs 0
     enhanced_up = _forecast(lineage=ForecastLineage.NEWS_ENHANCED)
     d = _decide(evidence=Evidence(forecast=enhanced_up, news=[_news()]))
-    assert d.created.action is DecisionAction.ENTER and d.created.reason_codes[-1] == "VOTES_2"
+    assert (
+        d.created.action is DecisionAction.ENTER
+        and d.created.reason_codes[-1] == "VOTES_2_AGAINST_0"
+    )
     chart_only = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()]))
     assert chart_only.created.action is DecisionAction.ENTER
     # plus an independent reasoning DOWN: news-enhanced 2 vs 1 enters; chart-only 2 vs 2 waits
     other = _reasoning(Direction.DOWN, [])
     ev = Evidence(forecast=enhanced_up, news=[_news()], reasoning=other)
     assert _decide(evidence=ev).created.action is DecisionAction.ENTER
-    assert "CONFLICT" in _reasons(_decide(evidence=replace(ev, forecast=_forecast())))
+    assert "CONFLICT_EVIDENCE" in _reasons(_decide(evidence=replace(ev, forecast=_forecast())))
 
 
 def test_without_a_calibrated_probability_ev_is_unknown_and_waits() -> None:
@@ -249,14 +252,94 @@ def test_same_inputs_give_the_same_decision_and_a_repeat_waits() -> None:
 
 def test_events_are_valid_deterministic_and_causally_linked() -> None:
     d = _decide()
-    events = to_events(d, account_id="acc", bot_id="bot", mode=Mode.DEMO)
+    events = to_events(d, account_id="acc", bot_id="bot")
     assert [e.event_type for e in events] == ["decision.created", "trade.intent"]
     assert events[1].causation_id == events[0].event_id
     assert events[0].correlation_id == events[1].correlation_id == d.created.decision_id
-    assert [e.event_id for e in to_events(d, account_id="acc", bot_id="bot", mode=Mode.DEMO)] == [
-        e.event_id for e in events
-    ]
+    again = to_events(d, account_id="acc", bot_id="bot")
+    assert [e.event_id for e in again] == [e.event_id for e in events]
+    assert all(e.mode is Mode.DEMO and e.cycle_id == "cyc_1" for e in events)
     for e in events:
         parse_event(e.model_dump(mode="json"))
-    assert [e.event_type for e in to_events(_decide(proposals=[]), account_id="a", bot_id="b",
-                                            mode=Mode.DEMO)] == ["decision.created"]  # fmt: skip
+    wait = to_events(_decide(proposals=[]), account_id="a", bot_id="b")
+    assert [e.event_type for e in wait] == ["decision.created"]
+    assert wait[0].cycle_id == "cyc_1"  # a WAIT inside a cycle keeps its cycle link
+
+
+# --- review fixes -----------------------------------------------------------------------------
+
+
+def test_stale_snapshot_or_expired_proposal_never_enters() -> None:
+    late = _decide(ctx=_ctx(now=LATER))
+    assert late.created.action is DecisionAction.WAIT and "STALE_INPUT" in _reasons(late)
+    expired = _proposal().model_copy(update={"valid_until": NOW})
+    assert "NO_OPPORTUNITY" in _reasons(_decide([expired]))
+
+
+def test_neutral_or_non_open_proposals_are_not_entries() -> None:
+    # the contract already forbids a NEUTRAL OPEN; a NEUTRAL CLOSE is legal but not an entry
+    closing = _proposal().model_copy(update={"action": IntentAction.CLOSE})
+    neutral_close = closing.model_copy(update={"direction": Direction.NEUTRAL})
+    for p in (closing, neutral_close):
+        assert "NO_OPPORTUNITY" in _reasons(_decide([p]))
+
+
+def test_non_positive_initial_lot_waits_instead_of_raising() -> None:
+    assert "INVALID_LOT" in _reasons(_decide(ctx=_ctx(initial_lot=D(0))))
+
+
+def test_reasoning_restating_the_forecast_is_not_a_second_vote() -> None:
+    # proposal UP, forecast UP, news DOWN: 2 vs 1. A reasoning UP that cites pred_1 adds nothing.
+    restating = _reasoning(Direction.UP, []).model_copy(update={"prediction_ids": ["pred_1"]})
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()], reasoning=restating))
+    assert d.created.reason_codes[-1] == "VOTES_2_AGAINST_1"
+
+
+def test_reasoning_built_on_stale_news_is_ignored() -> None:
+    old = _news().model_copy(update={"assessment_id": "na_old", "valid_until": NOW})
+    on_old = _reasoning(Direction.DOWN, ["na_old"])
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[old], reasoning=on_old))
+    assert d.created.action is DecisionAction.ENTER and "rs_1" not in d.created.evidence_refs
+
+
+def test_reasoning_citing_news_that_cast_no_vote_still_votes() -> None:
+    up = _news(Direction.UP).model_copy(update={"assessment_id": "na_up", "impact": D("0.5")})
+    down = _news(Direction.DOWN).model_copy(update={"impact": D("0.5")})  # nets to zero
+    r = _reasoning(Direction.DOWN, ["na_up"])
+    ev = Evidence(forecast=_forecast(), news=[up, down], reasoning=r)
+    assert _decide(evidence=ev).created.reason_codes[-1] == "VOTES_2_AGAINST_1"
+
+
+def test_forecast_must_have_ok_data_and_the_trade_horizon_to_price_ev() -> None:
+    degraded = _forecast().model_copy(update={"data_quality": DataQuality.DEGRADED})
+    assert "EV_UNKNOWN" in _reasons(_decide(evidence=Evidence(forecast=degraded)))
+    other_horizon = _forecast().model_copy(update={"horizon": Timeframe.M15})
+    assert "EV_UNKNOWN" in _reasons(_decide(evidence=Evidence(forecast=other_horizon)))
+
+
+def test_ev_is_only_reported_once_every_other_gate_passed() -> None:
+    d = _decide(cycle=replace(CYCLE, open_positions=1))
+    assert d.created.expected_value_usd is None
+
+
+def test_a_different_lot_is_a_different_decision() -> None:
+    a = _decide()
+    b = _decide(ctx=_ctx(initial_lot=D("0.02")))
+    assert a.created.decision_id != b.created.decision_id
+    assert (
+        a.intent is not None and b.intent is not None and a.intent.intent_id != b.intent.intent_id
+    )
+
+
+def test_costs_come_from_the_symbol_spec() -> None:
+    from app.execution.broker import SymbolSpec
+
+    spec = SymbolSpec("XAUUSD", D(100), D("0.01"), D("0.01"), D(100), D("0.01"), D(1000), True)
+    assert Costs.from_spec(spec, D("3.5")) == COSTS
+
+
+def test_a_forecast_with_unusable_data_neither_votes_nor_is_cited() -> None:
+    bad = _forecast(direction=Direction.DOWN).model_copy(update={"data_quality": DataQuality.STALE})
+    d = _decide(evidence=Evidence(forecast=bad))
+    assert "EV_UNKNOWN" in _reasons(d)  # not CONFLICT_EVIDENCE: the stale forecast has no vote
+    assert "pred_1" not in d.created.evidence_refs

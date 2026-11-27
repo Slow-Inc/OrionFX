@@ -6,6 +6,33 @@
 
 ---
 
+## M05 slice B — fusion, EV after costs, WAIT rules, decisions and intents (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/53-m05-decide`)
+
+**Goal:** turn proposals and evidence into one explainable ENTER or WAIT, never trading on stale, conflicting or non-positive-EV evidence (PRD-05 #51, slice #53; DEC-01/02/04/05, AT-14/18/19/34).
+
+**Shipped:** `backend/app/decision/decide.py` (`decide`, `to_events`, `Costs.from_spec`, `CycleView`, `Evidence`, `Decision`); `WaitReason` enum; `core.ids.stable_id` (canonical-JSON deterministic ids); `FeatureSnapshot.ref` (now shared by M03/M04/M05).
+
+**Behaviour:** without an approved calibrated model, every decision is WAIT `EV_UNKNOWN`. That is by design: the system does not trade on an edge it cannot evidence.
+
+**Validation:** `uv run pytest`: all pass, including 28 decide tests written before the code. 29 mutation probes, all caught.
+
+**Review fixes:**
+- Stale snapshot, expired proposal, non-OPEN or NEUTRAL proposal, and non-positive lot now WAIT.
+- An LLM reasoning that restates the forecast or counted news, or that rests on stale or uncited news, gets no vote.
+- News that netted to zero no longer suppresses a reasoning vote.
+- p is used only when the forecast has OK data quality and the trade's horizon. Unusable forecasts neither vote nor are cited.
+- EV is computed only after every other gate passes.
+- Lot, spread and costs are now part of the decision id.
+- Events take mode and cycle from the decision, so WAIT events keep their cycle.
+- The two CONFLICT cases now have separate reason codes.
+
+**Skipped:**
+- A shared `CENT` constant; money rounding in core is left for a later slice.
+- A shared decision test fixture module.
+- `LlmReasoning` has no `available_at`, so it has no look-ahead guard. This is a contract gap, recorded here.
+
+---
+
 ## M05 slice A — strategy port, registry gate, MVP rule strategies (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/52-m05-strategies`)
 
 **Goal:** only owner-enabled, registry-approved strategies propose, as documented deterministic rules (PRD-05 #51, slice #52; DEC-03, UST-01/06/08, AT-28, AT-32).
