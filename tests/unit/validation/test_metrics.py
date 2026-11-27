@@ -86,13 +86,14 @@ DAY = timedelta(days=1)
 
 
 def test_folds_are_chronological_embargoed_and_never_touch_the_holdout() -> None:
-    folds, holdout = walk_forward(T0, T0 + 100 * DAY, train=30 * DAY, test=10 * DAY,
-                                  embargo=2 * DAY, holdout=20 * DAY)  # fmt: skip
-    assert holdout == (T0 + 80 * DAY, T0 + 100 * DAY)
-    assert len(folds) == 4
+    plan = walk_forward(T0, T0 + 100 * DAY, train=30 * DAY, test=10 * DAY,
+                        embargo=2 * DAY, holdout=20 * DAY)  # fmt: skip
+    folds, holdout = plan.folds, plan.holdout
+    assert (holdout.start, holdout.end) == (T0 + 80 * DAY, T0 + 100 * DAY)
+    assert len(folds) == 4  # the last tests days 62-72
     for f in folds:
         assert f.train_end + 2 * DAY == f.test_start  # the embargo gap
-        assert f.test_end <= holdout[0]  # no fold reaches the holdout
+        assert f.test_end + 2 * DAY <= holdout.start  # an embargo before the holdout too
     tests = [(f.test_start, f.test_end) for f in folds]
     assert all(a[1] <= b[0] for a, b in itertools.pairwise(tests))  # ordered
 
@@ -103,3 +104,40 @@ def test_walk_forward_refuses_impossible_or_empty_plans() -> None:
                      holdout=10 * DAY)  # fmt: skip
     with pytest.raises(ValueError):
         walk_forward(T0, T0 + 100 * DAY, train=-DAY, test=10 * DAY, embargo=DAY, holdout=DAY)
+
+
+# --- review fixes ---
+
+
+def test_a_certain_forecast_is_never_dropped_whatever_the_bin_count() -> None:
+    for bins in (2, 3, 6, 7, 9):
+        assert sum(b.n for b in reliability([D(1), D(0)], [True, False], bins=bins)) == 2
+
+
+def test_out_of_range_probabilities_and_bad_bins_are_refused() -> None:
+    with pytest.raises(ValueError):
+        brier([D("1.2")], [True])
+    with pytest.raises(ValueError):
+        reliability([D("-0.1")], [False], bins=2)
+    with pytest.raises(ValueError):
+        reliability([D("0.5")], [True], bins=0)
+
+
+def test_abstaining_and_break_even_are_not_counted_as_misses() -> None:
+    assert direction_accuracy([Direction.NEUTRAL, UP], [UP, UP]).value == D(1)
+    assert direction_accuracy([Direction.NEUTRAL, UP], [UP, UP]).n == 1
+    assert win_rate([D(5), D(0)]).value == D(1) and win_rate([D(5), D(0)]).n == 1
+
+
+def test_a_reversed_range_is_reported_as_such() -> None:
+    with pytest.raises(ValueError, match="start must be before end"):
+        walk_forward(T0 + DAY, T0, train=DAY, test=DAY, embargo=DAY, holdout=DAY)
+
+
+def test_the_embargo_also_guards_the_holdout_boundary() -> None:
+    # without the second embargo a 4th fold (test days 68-78) would end 2 days before
+    # the holdout, inside the 8-day embargo
+    plan = walk_forward(T0, T0 + 100 * DAY, train=30 * DAY, test=10 * DAY, embargo=8 * DAY,
+                        holdout=20 * DAY)  # fmt: skip
+    assert len(plan.folds) == 3
+    assert plan.folds[-1].test_end + 8 * DAY <= plan.holdout.start

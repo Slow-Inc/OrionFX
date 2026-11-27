@@ -37,35 +37,50 @@ def _mean(xs: Sequence[Decimal]) -> Metric:
     return Metric(sum(xs, D(0)) / len(xs) if xs else None, len(xs))
 
 
+def _rate(flags: Sequence[bool]) -> Metric:
+    """Share of True."""
+    return Metric(D(sum(flags)) / len(flags) if flags else None, len(flags))
+
+
 def direction_accuracy(predicted: Sequence[Direction], actual: Sequence[Direction]) -> Metric:
-    """Share of correct calls among outcomes that moved (a NEUTRAL outcome is skipped)."""
-    decided = [(p, a) for p, a in zip(predicted, actual, strict=True) if a is not Direction.NEUTRAL]
-    hits = [D(int(p is a)) for p, a in decided]
-    return _mean(hits)
+    """Share of correct calls among real calls on outcomes that moved. A NEUTRAL outcome
+    is skipped, and so is a NEUTRAL prediction: abstaining is not a wrong call."""
+    pairs = list(zip(predicted, actual, strict=True))
+    called = [(p, a) for p, a in pairs if Direction.NEUTRAL not in (p, a)]
+    return _rate([p is a for p, a in called])
+
+
+def _probabilities(ps: Sequence[Decimal]) -> None:
+    if any(not D(0) <= p <= D(1) for p in ps):
+        raise ValueError("probabilities must lie in [0, 1]")
 
 
 def brier(probabilities: Sequence[Decimal], outcomes: Sequence[bool]) -> Metric:
+    _probabilities(probabilities)
     return _mean([(p - D(int(o))) ** 2 for p, o in zip(probabilities, outcomes, strict=True)])
 
 
 def reliability(
     probabilities: Sequence[Decimal], outcomes: Sequence[bool], *, bins: int = 10
 ) -> list[ReliabilityBin]:
-    """Equal-width bins over [0, 1]: forecast vs observed frequency (calibration)."""
-    width = D(1) / bins
-    out: list[ReliabilityBin] = []
-    for i in range(bins):
-        low, high = width * i, width * (i + 1)
-        last = i == bins - 1
-        members = [(p, o) for p, o in zip(probabilities, outcomes, strict=True)
-                   if low <= p < high or (last and p == high)]  # fmt: skip
-        n = len(members)
-        out.append(ReliabilityBin(
-            low, high, n,
-            sum((p for p, _ in members), D(0)) / n if n else None,
-            D(sum(o for _, o in members)) / n if n else None,
-        ))  # fmt: skip
-    return out
+    """Equal-width bins over [0, 1]: forecast vs observed frequency (calibration). A
+    forecast of exactly 1 falls in the last bin."""
+    if bins < 1:
+        raise ValueError("bins must be at least 1")
+    _probabilities(probabilities)
+    buckets: list[list[tuple[Decimal, bool]]] = [[] for _ in range(bins)]
+    for p, o in zip(probabilities, outcomes, strict=True):
+        buckets[min(int(p * bins), bins - 1)].append((p, o))
+    return [
+        ReliabilityBin(
+            low=D(i) / bins,
+            high=D(1) if i == bins - 1 else D(i + 1) / bins,
+            n=len(b),
+            mean_probability=_mean([p for p, _ in b]).value,
+            frequency=_rate([o for _, o in b]).value,
+        )
+        for i, b in enumerate(buckets)
+    ]
 
 
 def mae(predicted: Sequence[Decimal], actual: Sequence[Decimal]) -> Metric:
@@ -79,11 +94,13 @@ def rmse(predicted: Sequence[Decimal], actual: Sequence[Decimal]) -> Metric:
 
 def expectancy(trades: Sequence[Decimal]) -> Metric:
     """Mean net result per trade, after costs."""
-    return _mean(list(trades))
+    return _mean(trades)
 
 
 def win_rate(trades: Sequence[Decimal]) -> Metric:
-    return _mean([D(int(t > 0)) for t in trades])
+    """Share of winning trades among decided ones: a break-even (0) trade is neither a
+    win nor a loss, as in `profit_factor`."""
+    return _rate([t > 0 for t in trades if t != 0])
 
 
 def profit_factor(trades: Sequence[Decimal]) -> Metric:
@@ -94,7 +111,8 @@ def profit_factor(trades: Sequence[Decimal]) -> Metric:
 
 
 def max_drawdown(trades: Sequence[Decimal]) -> Metric:
-    """Deepest peak-to-trough fall of the cumulative result, starting from 0."""
+    """Deepest peak-to-trough fall of the cumulative trade result, starting from 0, in
+    account currency. This is a backtest amount, not the Account DD percent M06 guards."""
     equity = peak = deepest = D(0)
     for t in trades:
         equity += t
@@ -105,4 +123,4 @@ def max_drawdown(trades: Sequence[Decimal]) -> Metric:
 
 def target_hit_rate(hits: Sequence[bool]) -> Metric:
     """Share of cycles that achieved their Profit Target."""
-    return _mean([D(int(h)) for h in hits])
+    return _rate(list(hits))

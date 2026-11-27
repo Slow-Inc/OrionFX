@@ -6,6 +6,39 @@
 
 ---
 
+## X02 slice A: validation metrics and chronological walk-forward splits (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/66-x02-metrics`)
+
+**Goal:** measure models and strategies honestly, with sample sizes, and split time without leakage (PRD-X02 #65, slice #66; VAL-02, VAL-04).
+
+**Shipped:**
+- `backend/app/validation/metrics.py`. Each metric returns its value and `n`, and an empty sample gives None. The metrics are:
+  - direction accuracy, where a NEUTRAL outcome or a NEUTRAL (abstaining) prediction is skipped;
+  - Brier;
+  - reliability bins, single pass, where p = 1 lands in the last bin;
+  - MAE/RMSE;
+  - expectancy;
+  - win rate, where break-even trades count as neither win nor loss;
+  - profit factor, which is None without losses;
+  - max drawdown, as an amount from 0, not Account DD %;
+  - target hit rate.
+- `backend/app/validation/splits.py`: `walk_forward` returns `WalkForward(folds, holdout)`. Folds roll by the test length, an embargo sits after each train window, and a second embargo sits before the sealed holdout.
+
+**Validation:**
+- `uv run pytest`: all pass, including 14 tests in `tests/unit/validation`.
+- Mutation probes: all caught. One survivor came from a test message match that was too loose; the match is tightened.
+
+**Review fixes:**
+- Bins are computed as `i/bins`, so a certain forecast is not dropped at bins = 3, 6, 7, 9.
+- Probabilities outside [0, 1] are refused, and so is `bins` < 1.
+- An embargo now also separates the holdout.
+- A reversed range is reported as such.
+- `_rate` helper; the holdout is a named window.
+
+**Skipped:**
+- Returning the holdout as M07's `Split`: validation should not depend on learning. It uses its own `Window`.
+
+---
+
 ## M07 slice C: dataset manifests, evidenced promotion, rollback and drift (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/61-m07-lifecycle`)
 
 **Goal:** a controlled path from a trained model to the champion, without training anything and without anything promoting itself (PRD-07 #58, slice #61; LRN-04/05/06, AT-13, AT-16, AT-35).
