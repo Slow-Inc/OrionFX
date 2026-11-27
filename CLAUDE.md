@@ -85,7 +85,7 @@ The owner has authorised the agent to **research independently inside the M04 tr
 - data sources the plan already lists;
 - the training pipeline's own code.
 
-The freedom stops at these limits, which are not optional:
+The freedom stops at these limits, which are not optional. The mechanism in full is `docs/agents/training-loop.md`.
 - **Protocol first.** Exploration runs on development data: the walk-forward folds and the debug window. A result becomes a claim only under a pre-registered, hashed protocol version (PRD #120 slice 5). Never tune on the final holdout or the unread slice. An opened holdout becomes development data, so the next claim needs fresh forward data. Report best-of-N with N, and keep every run as evidence, including failures.
 - **The goalposts are the owner's.** Targets, readiness thresholds and the holdout window change only when the owner certifies a new policy version. Research may *propose* a new version, with its evidence. It never adopts one.
 - **Promotion follows ADR 0001.** Autonomous promotion and rollback are allowed in Shadow/Demo only, under a certified policy. Real-money Live stays owner-only.
@@ -121,5 +121,6 @@ Single-context; the glossary is `UBIQUITOUS_LANGUAGE.md` (read it wherever a ski
 ## Pointers
 
 - `docs/agents/workflow.md` — grill → PRD → issues → TDD; auto-triggered skills
+- `docs/agents/training-loop.md` — the M04 training loop: data → labels → training → evaluation tiers → claim protocol → autonomous Shadow/Demo promotion and rollback; built vs planned
 - `docs/agents/domain.md` — how to read CONTEXT / glossary / ADRs / master plan
 - `docs/adr/README.md` — decisions; `docs/reports/README.md` — records

@@ -29,7 +29,7 @@ Hard ordering: **PRD → issues → PR**. Never open a PR without a referenced i
 
 ## Training-loop research
 
-The agent may research and improve M04 models and the training process on its own, within PRD #120's protocol and ADR 0001. The limits are in `CLAUDE.md` → "Training-loop research autonomy". Each research change is still a normal unit of work: issue → TDD → gates → PR. Findings go to `docs/research/`.
+The agent may research and improve M04 models and the training process on its own, within PRD #120's protocol and ADR 0001. The limits are in `CLAUDE.md` → "Training-loop research autonomy"; the mechanism is `docs/agents/training-loop.md`. Each research change is still a normal unit of work: issue → TDD → gates → PR. Findings go to `docs/research/`.
 
 ## Verification mandate
 
