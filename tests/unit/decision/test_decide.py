@@ -48,6 +48,11 @@ def _decide(proposals: list[StrategyProposal] | None = None, evidence: Evidence 
     )  # fmt: skip
 
 
+def _weak(**over: object):  # type: ignore[no-untyped-def]
+    """Opposing news below the #115 veto threshold: for tests about vote counting."""
+    return _news(impact="0.5", **over)  # type: ignore[arg-type]
+
+
 # --- ENTER -------------------------------------------------------------------------------------
 
 
@@ -96,18 +101,22 @@ def test_opposing_forecast_waits() -> None:
 
 
 def test_opposing_cited_news_waits_but_uncited_news_is_ignored() -> None:
-    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news(cited=True)]))
+    # weak news (impact 0.5, below the #115 veto): this test is about vote counting
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_weak(cited=True)]))
     assert d.created.action is DecisionAction.ENTER  # 2 agree (chart, forecast) vs 1 news
-    both = Evidence(forecast=_forecast(direction=Direction.DOWN), news=[_news()])
+    both = Evidence(forecast=_forecast(direction=Direction.DOWN), news=[_weak()])
     assert "CONFLICT_EVIDENCE" in _reasons(_decide(evidence=both))
-    uncited = _decide(evidence=Evidence(forecast=_forecast(), news=[_news(cited=False)]))
+    uncited = _decide(evidence=Evidence(forecast=_forecast(), news=[_weak(cited=False)]))
     assert "na_1" not in uncited.created.evidence_refs
 
 
 def test_reasoning_that_restates_counted_news_is_not_a_second_vote() -> None:
+    # weak news (impact 0.5, below the #115 veto): this test is about vote counting
     # news DOWN + reasoning DOWN citing that same news: one opposing vote, not two
     ev = Evidence(
-        forecast=_forecast(), news=[_news()], reasoning=_reasoning(Direction.DOWN, ["na_1"])
+        forecast=_forecast(),
+        news=[_weak()],
+        reasoning=_reasoning(Direction.DOWN, ["na_1"]),
     )
     assert _decide(evidence=ev).created.action is DecisionAction.ENTER
     independent = replace(ev, reasoning=_reasoning(Direction.DOWN, []))
@@ -115,18 +124,19 @@ def test_reasoning_that_restates_counted_news_is_not_a_second_vote() -> None:
 
 
 def test_news_inside_a_news_enhanced_forecast_is_not_counted_again() -> None:
+    # weak news (impact 0.5, below the #115 veto): this test is about vote counting
     # news-enhanced forecast UP + news DOWN: the news is inside the forecast, so 2 votes vs 0
     enhanced_up = _forecast(lineage=ForecastLineage.NEWS_ENHANCED)
-    d = _decide(evidence=Evidence(forecast=enhanced_up, news=[_news()]))
+    d = _decide(evidence=Evidence(forecast=enhanced_up, news=[_weak()]))
     assert (
         d.created.action is DecisionAction.ENTER
         and d.created.reason_codes[-1] == "VOTES_2_AGAINST_0"
     )
-    chart_only = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()]))
+    chart_only = _decide(evidence=Evidence(forecast=_forecast(), news=[_weak()]))
     assert chart_only.created.action is DecisionAction.ENTER
     # plus an independent reasoning DOWN: news-enhanced 2 vs 1 enters; chart-only 2 vs 2 waits
     other = _reasoning(Direction.DOWN, [])
-    ev = Evidence(forecast=enhanced_up, news=[_news()], reasoning=other)
+    ev = Evidence(forecast=enhanced_up, news=[_weak()], reasoning=other)
     assert _decide(evidence=ev).created.action is DecisionAction.ENTER
     assert "CONFLICT_EVIDENCE" in _reasons(_decide(evidence=replace(ev, forecast=_forecast())))
 
@@ -222,9 +232,10 @@ def test_non_positive_initial_lot_waits_instead_of_raising() -> None:
 
 
 def test_reasoning_restating_the_forecast_is_not_a_second_vote() -> None:
+    # weak news (impact 0.5, below the #115 veto): this test is about vote counting
     # proposal UP, forecast UP, news DOWN: 2 vs 1. A reasoning UP that cites pred_1 adds nothing.
     restating = _reasoning(Direction.UP, []).model_copy(update={"prediction_ids": ["pred_1"]})
-    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()], reasoning=restating))
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_weak()], reasoning=restating))
     assert d.created.reason_codes[-1] == "VOTES_2_AGAINST_1"
 
 
@@ -290,8 +301,9 @@ def test_reasoning_produced_after_now_is_not_used() -> None:
 
 
 def test_reasoning_available_exactly_at_now_is_used() -> None:
+    # weak news (impact 0.5, below the #115 veto): this test is about vote counting
     at_now = _reasoning(Direction.DOWN, []).model_copy(update={"available_at": NOW})
-    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()], reasoning=at_now))
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_weak()], reasoning=at_now))
     assert "rs_1" in d.created.evidence_refs
     assert "CONFLICT_EVIDENCE" in d.created.reason_codes  # its DOWN vote counted: 2 vs 2
 
@@ -307,3 +319,72 @@ def test_a_decision_carries_the_direction_and_horizon_it_acted_on() -> None:
 def test_conflicting_strategies_lean_nowhere() -> None:
     d = _decide([_proposal("a", Direction.UP), _proposal("b", Direction.DOWN)])
     assert d.direction is None and d.horizon is None
+
+
+# --- news veto (#115, PRD #114) ----------------------------------------------------------------
+
+
+def test_strong_opposing_news_vetoes_an_entry_the_votes_would_allow() -> None:
+    """Benchmark E2 shape: chart and forecast agree, news says the opposite."""
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news(impact="0.8")]))
+    assert d.created.action is DecisionAction.WAIT and _reasons(d) == ["NEWS_VETO"]
+    assert d.intent is None and "na_1" in d.created.evidence_refs
+    assert d.direction is Direction.UP  # the side it refused, for the M07 counterfactual
+
+
+def test_the_veto_needs_impact_at_the_threshold() -> None:
+    at = _decide(evidence=Evidence(forecast=_forecast(), news=[_news(impact="0.6")]))
+    below = _decide(evidence=Evidence(forecast=_forecast(), news=[_news(impact="0.59")]))
+    assert _reasons(at) == ["NEWS_VETO"]
+    assert below.created.action is DecisionAction.ENTER
+
+
+def test_agreeing_neutral_uncited_or_expired_news_never_vetoes() -> None:
+    for news in (
+        _news(Direction.UP, impact="1"),
+        _news(Direction.NEUTRAL, impact="1"),
+        _news(cited=False, impact="1"),
+        _news(impact="1", valid_until=NOW),
+    ):
+        d = _decide(evidence=Evidence(forecast=_forecast(), news=[news]))
+        assert d.created.action is DecisionAction.ENTER, news
+
+
+def test_opposing_items_net_out_before_the_veto() -> None:
+    down = _news(impact="0.8", aid="na_down")
+    up = _news(Direction.UP, impact="0.5", aid="na_up")
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[down, up]))
+    assert d.created.action is DecisionAction.ENTER  # net 0.3 against: below 0.6
+    strong = _news(impact="1", aid="na_strong")
+    d2 = _decide(evidence=Evidence(forecast=_forecast(), news=[down, strong, up]))
+    assert _reasons(d2) == ["NEWS_VETO"]  # net 1.3 against
+
+
+def test_a_news_enhanced_forecast_does_not_silence_the_veto() -> None:
+    enhanced = _forecast(lineage=ForecastLineage.NEWS_ENHANCED)
+    d = _decide(evidence=Evidence(forecast=enhanced, news=[_news(impact="0.9")]))
+    assert _reasons(d) == ["NEWS_VETO"]
+
+
+def test_no_news_means_the_veto_changes_nothing() -> None:
+    assert _decide(evidence=Evidence(forecast=_forecast())).created.action is DecisionAction.ENTER
+
+
+def test_the_veto_never_opens_a_trade() -> None:
+    """Strong news with no chart proposal, or against an empty evidence set, stays WAIT for
+    its usual reason; news alone never enters."""
+    d = _decide(
+        proposals=[],
+        evidence=Evidence(forecast=_forecast(), news=[_news(Direction.UP, impact="1")]),
+    )
+    assert d.created.action is DecisionAction.WAIT and _reasons(d) == ["NO_OPPORTUNITY"]
+
+
+def test_good_news_vetoes_a_sell_entry() -> None:
+    down = _proposal(direction=Direction.DOWN)
+    ev = Evidence(forecast=_forecast(direction=Direction.DOWN),
+                  news=[_news(Direction.UP, impact="0.8")])  # fmt: skip
+    d = _decide([down], ev)
+    assert _reasons(d) == ["NEWS_VETO"] and d.direction is Direction.DOWN
+    agreeing = Evidence(forecast=_forecast(direction=Direction.DOWN), news=[_news(impact="0.8")])
+    assert _decide([down], agreeing).created.action is DecisionAction.ENTER

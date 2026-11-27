@@ -10,6 +10,8 @@ a proposal M06 vetoes or allows, never a broker order. WAIT is the default
 - CONFLICT_STRATEGIES: the proposing strategies disagree.
 - POSITION_OPEN: the cycle already holds a position (`manage` handles it).
 - COOLDOWN: a cycle closed less than COOLDOWN ago.
+- NEWS_VETO: live, cited news nets against the chart side with impact at least
+  NEWS_VETO_IMPACT (#115). It can only block; with no usable news it does nothing.
 - CONFLICT_EVIDENCE: opposing votes >= agreeing votes (the chart counts as one).
 - EV_UNKNOWN: no usable probability for the trade, or a cost input / the ATR missing.
 - EV_NOT_POSITIVE: EV after spread and round-trip commission is <= 0.
@@ -31,6 +33,7 @@ from app.decision.fusion import (
     build,
     expected_value,
     gather,
+    news_veto,
     side_of,
     snapshot_live,
     wait,
@@ -68,6 +71,8 @@ def decide(
         return waiting(WaitReason.POSITION_OPEN)
     if cycle.last_closed_at is not None and ctx.now - cycle.last_closed_at < COOLDOWN:
         return waiting(WaitReason.COOLDOWN)
+    if news_veto(evidence, inp.chart, ctx.now):
+        return waiting(WaitReason.NEWS_VETO)
     agree, against = inp.tally(inp.chart)
     if against >= agree:
         return waiting(WaitReason.CONFLICT_EVIDENCE)
