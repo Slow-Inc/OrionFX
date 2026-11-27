@@ -124,7 +124,9 @@ def triage(answer_path: str, repo: str, issue: str, body_path: str, existing_csv
     except ValueError:
         choice = {}
     labels = []
-    component, role = choice.get("component"), choice.get("role")
+    if not isinstance(choice, dict):
+        choice = {}
+    component, role = str(choice.get("component")), str(choice.get("role"))
     if not existing & COMPONENTS and component in COMPONENTS:
         labels.append(component)
     if not existing & (ROLES | {"wontfix"}) and role in ROLES:
