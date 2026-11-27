@@ -19,7 +19,8 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
     away from. A restored approval that has expired is refused, not silently written.
   - `learning_promotions` is the champion-pointer log; the registry's eligibility
     records stay the authority on what may run. Every change is audited.
-- Drift: `psi` (Population Stability Index) per feature over reference-quantile bins.
+- Drift: `psi` (Population Stability Index) per feature, over per-value bins for a
+  feature declared categorical and reference-quantile bins otherwise.
   PSI > RETRAIN_PSI [PROPOSED], or a feature missing from either window, recommends a
   retrain. That recommendation is an audit entry for the owner; nothing retrains.
 """
@@ -27,7 +28,7 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
 import bisect
 import sqlite3
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Hashable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -326,16 +327,31 @@ class ModelLifecycle:
         audit(self._conn, actor="m07", action=action, detail=detail)
 
 
-def psi(reference: list[Decimal], recent: list[Decimal], *, bins: int = 10) -> Decimal:
-    """Population Stability Index over bins cut at the reference quantiles."""
+def psi(
+    reference: list[Decimal], recent: list[Decimal], *, bins: int = 10, categorical: bool = False
+) -> Decimal:
+    """Population Stability Index. A feature declared `categorical` (a code, a regime)
+    gets one bin per reference value, plus one for values the reference never had: a
+    new code is drift. Otherwise bins are cut at the reference quantiles, and a value
+    filling more than one quantile (a point mass, e.g. a binary or sparse feature's
+    zero) gets a bin of its own instead of sharing one with the values above it. An
+    ordinal feature reaching a new neighbouring value is therefore not alarmed on."""
     if not reference or not recent:
         raise ValueError("PSI needs two non-empty windows")
-    ref = sorted(reference)
-    edges = sorted({ref[i * len(ref) // bins] for i in range(1, bins)})
-    ref_counts = Counter(bisect.bisect_right(edges, x) for x in reference)
-    new_counts = Counter(bisect.bisect_right(edges, x) for x in recent)
+    seen = set(reference)
+    key: Callable[[Decimal], Hashable]
+    if categorical:
+        key = lambda x: x if x in seen else None  # noqa: E731
+    else:
+        ref = sorted(reference)
+        cuts = Counter(ref[i * len(ref) // bins] for i in range(1, bins))
+        edges = sorted(cuts)
+        masses = {c for c, n in cuts.items() if n > 1}
+        key = lambda x: (bisect.bisect_right(edges, x), x in masses)  # noqa: E731
+    ref_counts = Counter(map(key, reference))
+    new_counts = Counter(map(key, recent))
     total = D(0)
-    for b in range(len(edges) + 1):
+    for b in ref_counts.keys() | new_counts.keys():
         e = max(D(ref_counts[b]) / len(reference), PSI_FLOOR)
         r = max(D(new_counts[b]) / len(recent), PSI_FLOOR)
         total += (r - e) * (r / e).ln()
@@ -356,10 +372,13 @@ class DriftReport:
 
 
 def drift_report(
-    reference: dict[str, list[Decimal]], recent: dict[str, list[Decimal]]
+    reference: dict[str, list[Decimal]],
+    recent: dict[str, list[Decimal]],
+    *,
+    categorical: Collection[str] = (),
 ) -> DriftReport:
     both = sorted(set(reference) & set(recent))
-    values = {k: psi(reference[k], recent[k]) for k in both}
+    values = {k: psi(reference[k], recent[k], categorical=k in categorical) for k in both}
     return DriftReport(
         psi=values,
         drifted=[k for k, v in values.items() if v > RETRAIN_PSI],
