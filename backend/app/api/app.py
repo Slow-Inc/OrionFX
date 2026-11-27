@@ -37,6 +37,7 @@ from app.core.contracts import (
     ControlCompleted,
     ControlRequested,
     HealthUpdated,
+    PositionsSnapshot,
     RiskUpdated,
 )
 from app.core.enums import CommandStatus, ControlCommand, ControlState, Mode
@@ -222,9 +223,20 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
         }
 
     @private.get("/api/positions")
-    def positions() -> dict[str, Any]:
-        # The authoritative position read model belongs to M06 (#4 plan order).
-        return {"as_of": clock().isoformat(), "available": False, "items": []}
+    def positions(conn: Db) -> dict[str, Any]:
+        """The bot's own positions from M06's latest `positions.snapshot` (#82)."""
+        latest = Journal(conn).recent(["positions.snapshot"], limit=1)
+        if not latest:
+            return {"as_of": clock().isoformat(), "available": True, "observed_at": None,
+                    "stale": True, "items": []}  # fmt: skip
+        snap = payload_as(latest[0], PositionsSnapshot)
+        return {
+            "as_of": clock().isoformat(),
+            "available": True,
+            "observed_at": snap.observed_at.isoformat(),
+            "stale": clock() - snap.observed_at > ACCOUNT_STALE_AFTER,
+            "items": [p.model_dump(mode="json") for p in snap.items],
+        }
 
     @private.get("/api/cycles")
     def cycles(conn: Db, limit: Limit = 50) -> dict[str, Any]:

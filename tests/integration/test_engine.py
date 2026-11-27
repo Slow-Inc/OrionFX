@@ -770,3 +770,22 @@ def test_a_deposit_is_counted_once(
     for _ in range(5):
         eng.tick()
     assert not eng.control.risk_locked
+
+
+def test_positions_snapshot_lists_the_bots_positions_only(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#82: the dashboard's position list never shows a Manual Position as the bot's."""
+    from app.core.contracts import PositionsSnapshot
+
+    eng = _running(conn, broker, clock)
+    _intent(conn, clock)
+    eng.tick()
+    broker.add_manual_position("XAUUSD", Side.BUY, D("0.50"))
+    clock.advance(120)  # past the snapshot interval
+    eng.tick()
+    (ev,) = Journal(conn).recent(["positions.snapshot"], limit=1)
+    snap = payload_as(ev, PositionsSnapshot)
+    assert [p.position_id for p in snap.items] == _bot_positions(broker)
+    assert snap.items[0].volume == D("0.01") and snap.items[0].side is Side.BUY
+    assert snap.items[0].cycle_id is not None

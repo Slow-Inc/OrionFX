@@ -619,6 +619,7 @@ Example only. UTC timestamps with broker time metadata where needed. `available_
 | `risk.decision` | M06 → M05/07/08 | intent_id, allow/deny, approved bounds, policy version, reasons |
 | `execution.updated` | M06 → M05/07/08 | request_id, state, broker identifiers, actual fill, error |
 | `account.snapshot` | M06 → M05/08 | equity, balance, margin, quote/connection status, account currency |
+| `positions.snapshot` | M06 → M01/08 | the bot's own positions only (ownership-checked): id, side, volume, open price, profit, costs, cycle; observed_at (X01 review, #82) |
 | `cycle.updated` | M06 → M05/07/08 | cycle state, net estimate, target, peak/floor, actual net if closed |
 | `risk.updated` | M06 → M05/08 | DD values, ceilings, lock, reasons, policy version |
 | `control.requested` | M08 → M06 | command_id, command, actor, expected state/config version |

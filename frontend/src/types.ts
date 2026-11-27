@@ -73,10 +73,25 @@ export interface Account {
   stale: boolean;
 }
 
-export interface Unavailable {
+export interface BotPosition {
+  position_id: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  volume: string;
+  open_price: string;
+  profit: string;
+  commission: string;
+  swap: string;
+  cycle_id: string | null;
+}
+
+/** The bot's own positions from M06's latest snapshot (never Manual Positions). */
+export interface Positions {
   as_of: string;
-  available: false;
-  items: never[];
+  available: true;
+  observed_at: string | null;
+  stale: boolean;
+  items: BotPosition[];
 }
 
 export interface Cycle {

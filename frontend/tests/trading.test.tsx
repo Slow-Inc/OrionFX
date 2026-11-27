@@ -72,7 +72,25 @@ function fakeApi(over: Partial<Api> = {}): Api {
   return {
     account: vi.fn(async () => ACCOUNT),
     cycles: vi.fn(async () => ({ as_of: NOW, items: [CYCLE] })),
-    positions: vi.fn(async () => ({ as_of: NOW, available: false as const, items: [] })),
+    positions: vi.fn(async () => ({
+      as_of: NOW,
+      available: true as const,
+      observed_at: NOW,
+      stale: false,
+      items: [
+        {
+          position_id: "p-1",
+          symbol: "XAUUSD",
+          side: "BUY" as const,
+          volume: "0.01",
+          open_price: "2000.00",
+          profit: "-1.25",
+          commission: "-0.04",
+          swap: "0",
+          cycle_id: "cyc-1",
+        },
+      ],
+    })),
     command: vi.fn(async () => ({ command_id: "cmd-1", status: "ACCEPTED" as const })),
     commandStatus: vi.fn(async () => ({ command_id: "cmd-1", status: "ACCEPTED", unresolved: [] })),
     ...over,
@@ -160,11 +178,29 @@ describe("Trading view", () => {
     expect(within(account).getByText("Unknown")).toBeInTheDocument();
   });
 
-  it("says plainly when positions are not available, without fetching a stub", async () => {
-    const api = fakeApi();
-    renderTrading(api);
-    expect(await screen.findByText(/Position list is not available yet/)).toBeInTheDocument();
-    expect(api.positions).not.toHaveBeenCalled();
+  it("lists the bot's positions with signed floating profit and freshness", async () => {
+    renderTrading(fakeApi());
+    const row = await screen.findByRole("row", { name: "Position p-1" });
+    expect(within(row).getByText("BUY")).toBeInTheDocument();
+    expect(within(row).getByText("−1.25")).toBeInTheDocument();
+    expect(within(row).getByText("loss")).toBeInTheDocument();
+  });
+
+  it("says when the bot holds no positions, and marks a stale list", async () => {
+    renderTrading(
+      fakeApi({
+        positions: vi.fn(async () => ({
+          as_of: NOW,
+          available: true as const,
+          observed_at: null,
+          stale: true,
+          items: [],
+        })),
+      }),
+    );
+    const card = await screen.findByRole("region", { name: "Bot positions" });
+    expect(await within(card).findByText("No open bot positions.")).toBeInTheDocument();
+    expect(within(card).getByText("Stale")).toBeInTheDocument();
   });
 
   it("a failed read says so instead of looking like no data", async () => {

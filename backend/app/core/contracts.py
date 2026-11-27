@@ -265,6 +265,25 @@ class AccountSnapshot(ContractModel):
     observed_at: UtcDatetime
 
 
+class BotPosition(ContractModel):
+    """One of the bot's own positions (ownership-checked; never a Manual Position)."""
+
+    position_id: str
+    symbol: str
+    side: Side
+    volume: Lot
+    open_price: Price
+    profit: Money
+    commission: Money
+    swap: Money
+    cycle_id: str | None
+
+
+class PositionsSnapshot(ContractModel):
+    items: list[BotPosition]
+    observed_at: UtcDatetime
+
+
 class CycleUpdated(ContractModel):
     state: CycleState
     target_usd: PositiveMoney
@@ -487,6 +506,7 @@ EVENT_PAYLOADS: dict[str, type[ContractModel]] = {
     "news.assessment": NewsAssessment,
     "prediction.generated": PredictionGenerated,
     "llm.reasoning": LlmReasoning,
+    "positions.snapshot": PositionsSnapshot,
     "decision.created": DecisionCreated,
     "trade.intent": TradeIntent,
     "risk.decision": RiskDecision,

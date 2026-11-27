@@ -8,10 +8,10 @@ import type {
   Cycle,
   Decision,
   Items,
+  Positions,
   Prediction,
   Settings,
   Status,
-  Unavailable,
   UserConfig,
 } from "./types";
 
@@ -99,7 +99,7 @@ export function createApi(opts: ApiOptions) {
     logout: () => call<void>("/api/auth/logout", { method: "POST" }),
     status: () => call<Status>("/api/status"),
     account: () => call<Account>("/api/account"),
-    positions: () => call<Unavailable>("/api/positions"),
+    positions: () => call<Positions>("/api/positions"),
     cycles: (limit = 50) => call<Items<Cycle>>(`/api/cycles?limit=${limit}`),
     predictions: (limit = 50) => call<Items<Prediction>>(`/api/predictions?limit=${limit}`),
     decisions: (limit = 50) => call<Items<Decision>>(`/api/decisions?limit=${limit}`),

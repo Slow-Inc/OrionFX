@@ -168,6 +168,69 @@
       "title": "AccountSnapshotEvent",
       "type": "object"
     },
+    "BotPosition": {
+      "additionalProperties": false,
+      "description": "One of the bot's own positions (ownership-checked; never a Manual Position).",
+      "properties": {
+        "commission": {
+          "title": "Commission",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cycle Id"
+        },
+        "open_price": {
+          "gt": 0,
+          "title": "Open Price",
+          "type": "string"
+        },
+        "position_id": {
+          "title": "Position Id",
+          "type": "string"
+        },
+        "profit": {
+          "title": "Profit",
+          "type": "string"
+        },
+        "side": {
+          "$ref": "#/$defs/Side"
+        },
+        "swap": {
+          "title": "Swap",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "volume": {
+          "gt": 0,
+          "title": "Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "position_id",
+        "symbol",
+        "side",
+        "volume",
+        "open_price",
+        "profit",
+        "commission",
+        "swap",
+        "cycle_id"
+      ],
+      "title": "BotPosition",
+      "type": "object"
+    },
     "CandleClosed": {
       "additionalProperties": false,
       "properties": {
@@ -2598,6 +2661,119 @@
       "title": "ParameterBound",
       "type": "object"
     },
+    "PositionsSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/BotPosition"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "observed_at"
+      ],
+      "title": "PositionsSnapshot",
+      "type": "object"
+    },
+    "PositionsSnapshotEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "title": "Account Id",
+          "type": "string"
+        },
+        "bot_id": {
+          "title": "Bot Id",
+          "type": "string"
+        },
+        "causation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Causation Id"
+        },
+        "correlation_id": {
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cycle Id"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "positions.snapshot",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/PositionsSnapshot"
+        },
+        "recorded_at": {
+          "format": "date-time",
+          "title": "Recorded At",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "occurred_at",
+        "recorded_at",
+        "source",
+        "correlation_id",
+        "account_id",
+        "bot_id",
+        "mode",
+        "payload"
+      ],
+      "title": "PositionsSnapshotEvent",
+      "type": "object"
+    },
     "PredictionGenerated": {
       "additionalProperties": false,
       "properties": {
@@ -3929,6 +4105,7 @@
       "model.approved": "#/$defs/ModelApprovedEvent",
       "model.candidate": "#/$defs/ModelCandidateEvent",
       "news.assessment": "#/$defs/NewsAssessmentEvent",
+      "positions.snapshot": "#/$defs/PositionsSnapshotEvent",
       "prediction.generated": "#/$defs/PredictionGeneratedEvent",
       "risk.decision": "#/$defs/RiskDecisionEvent",
       "risk.updated": "#/$defs/RiskUpdatedEvent",
@@ -3958,6 +4135,9 @@
     },
     {
       "$ref": "#/$defs/LlmReasoningEvent"
+    },
+    {
+      "$ref": "#/$defs/PositionsSnapshotEvent"
     },
     {
       "$ref": "#/$defs/DecisionCreatedEvent"

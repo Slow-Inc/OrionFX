@@ -27,10 +27,12 @@ from decimal import Decimal
 from app.core.config import UserConfig, missing_for_start
 from app.core.contracts import (
     AccountSnapshot,
+    BotPosition,
     ContractModel,
     ControlCompleted,
     ControlRequested,
     ExecutionUpdated,
+    PositionsSnapshot,
     RiskDecision,
     RiskUpdated,
     TradeIntent,
@@ -640,3 +642,21 @@ class Engine:
             ),
             cfg,
         )
+        # Only the bot's own positions, by the same ownership rule M06 acts on.
+        mine = self._owners.bot_positions(a, self._broker.positions())
+        self._emit(
+            "positions.snapshot",
+            PositionsSnapshot(
+                items=[
+                    BotPosition(
+                        position_id=p.position_id, symbol=p.symbol, side=p.side,
+                        volume=p.volume, open_price=p.open_price, profit=p.profit,
+                        commission=p.commission, swap=p.swap,
+                        cycle_id=self._owners.cycle_of(a, p.position_id),
+                    )
+                    for p in mine
+                ],
+                observed_at=now,
+            ),
+            cfg,
+        )  # fmt: skip
