@@ -2,13 +2,12 @@
 AT-13, AT-23, AT-32, AT-34, AT-42). AT-09/AT-10 need MT5 and the EA (#17)."""
 
 import sqlite3
-from collections.abc import Iterator
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
+from tests.integration.conftest import T0, Clock
 
 from app.core.config import TradingConfig, UserConfig
 from app.core.contracts import (
@@ -41,44 +40,11 @@ from app.execution.ownership import OwnershipRegistry
 from app.profit.cycle import CycleBook
 from app.risk.drawdown import DrawdownTracker
 from app.storage.config_store import ConfigStore
-from app.storage.db import connect, migrate
 from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag, set_bool_flag, set_flag
 from app.storage.journal import Journal, payload_as
 from app.storage.lease import LeaseStore
 
 D = Decimal
-T0 = datetime(2026, 1, 5, 10, tzinfo=UTC)
-
-
-class Clock:
-    def __init__(self, broker: FakeBroker) -> None:
-        self.broker = broker
-
-    def __call__(self) -> datetime:
-        return self.broker.now
-
-    def advance(self, seconds: float) -> None:
-        self.broker.now += timedelta(seconds=seconds)
-
-
-@pytest.fixture
-def conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
-    c = connect(tmp_path / "engine.db")
-    migrate(c)
-    yield c
-    c.close()
-
-
-@pytest.fixture
-def broker() -> FakeBroker:
-    b = FakeBroker(balance=D("1000"), now=T0)
-    b.set_quote("XAUUSD", bid=D("2000.00"), ask=D("2000.00"))
-    return b
-
-
-@pytest.fixture
-def clock(broker: FakeBroker) -> Clock:
-    return Clock(broker)
 
 
 def _configure(conn: sqlite3.Connection, **trading: object) -> None:

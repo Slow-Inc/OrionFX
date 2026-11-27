@@ -171,6 +171,15 @@ def _ev(ctx: DecisionContext, p: Decimal | None, costs: Costs | None) -> Decimal
     return (TARGET_ATR * atr * size * (2 * p - 1) - cost).quantize(CENT)
 
 
+def usable_proposals(proposals: list[StrategyProposal], now: datetime) -> list[StrategyProposal]:
+    """Live OPEN proposals with a direction, in a deterministic order."""
+    return sorted(
+        (p for p in proposals if p.action is IntentAction.OPEN
+         and p.direction is not Direction.NEUTRAL and now < p.valid_until),
+        key=lambda p: p.strategy_id,
+    )  # fmt: skip
+
+
 def _side(d: Direction) -> Side:
     if d is Direction.NEUTRAL:
         raise ValueError("a NEUTRAL direction has no side")
@@ -188,11 +197,7 @@ def decide(
     policy_version: str,
 ) -> Decision:
     now = ctx.now
-    usable = sorted(
-        (p for p in proposals if p.action is IntentAction.OPEN
-         and p.direction is not Direction.NEUTRAL and now < p.valid_until),
-        key=lambda p: p.strategy_id,
-    )  # fmt: skip
+    usable = usable_proposals(proposals, now)
     chosen = usable[0] if usable else None
     forecast = _live_forecast(evidence, now)
     v = _votes(evidence, forecast, now)
