@@ -19,13 +19,13 @@ market data (a gap, a weekend) means no label, never a stretched or guessed one.
 """
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
 from app.core.contracts import ContractModel, DecisionCreated, FeatureSnapshot
 from app.core.enums import CycleState, DecisionAction, Direction, Mode, Timeframe
-from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
+from app.core.time import TIMEFRAME_DURATION, Clock, utc_iso, utc_now
 from app.core.types import Dec, UtcDatetime
 from app.learning.moves import bars_closing_at
 from app.market_data.features import feature_key
@@ -110,13 +110,6 @@ def regime_of(snapshot: FeatureSnapshot) -> str:
     return "TREND" if trend == 1 else "RANGE" if rng == 1 else "NEUTRAL"
 
 
-def _utc(t: datetime) -> str:
-    """Stored times are UTC ISO text, compared as strings: queries must be too."""
-    if t.tzinfo is None:
-        raise ValueError("naive datetime: pass an aware UTC time")
-    return t.astimezone(UTC).isoformat()
-
-
 def _direction(x: Decimal) -> Direction:
     return Direction.UP if x > 0 else Direction.DOWN if x < 0 else Direction.NEUTRAL
 
@@ -162,9 +155,9 @@ class ExperienceLog:
                 " ON CONFLICT (decision_id) DO NOTHING",
                 (exp.decision_id, exp.action, exp.strategy_id, exp.direction, exp.cycle_id,
                  exp.mode, exp.policy_version, exp.symbol, exp.snapshot_ref,
-                 exp.as_of.isoformat(), exp.horizon, exp.horizon_bars,
-                 exp.horizon_end.isoformat(), exp.intent_id, exp.regime, body,
-                 self._clock().isoformat()),
+                 utc_iso(exp.as_of), exp.horizon, exp.horizon_bars,
+                 utc_iso(exp.horizon_end), exp.intent_id, exp.regime, body,
+                 utc_iso(self._clock())),
             ).rowcount  # fmt: skip
             if not inserted:
                 (stored,) = self._conn.execute(
@@ -184,7 +177,7 @@ class ExperienceLog:
     def labels(self, *, as_of: datetime) -> dict[str, Label]:
         """Labels already known at `as_of`, by decision id (point-in-time)."""
         rows = self._conn.execute(
-            "SELECT body FROM learning_labels WHERE available_at <= ?", (_utc(as_of),)
+            "SELECT body FROM learning_labels WHERE available_at <= ?", (utc_iso(as_of),)
         ).fetchall()
         return {(lab := Label.model_validate_json(r[0])).decision_id: lab for r in rows}
 
@@ -198,7 +191,7 @@ class ExperienceLog:
             " JOIN learning_labels l ON l.decision_id = e.decision_id"
             " WHERE l.available_at <= ? AND (? IS NULL OR e.regime = ?)"
             " ORDER BY e.as_of, e.rowid",
-            (_utc(as_of), regime, regime),
+            (utc_iso(as_of), regime, regime),
         ).fetchall()
         return [(Experience.model_validate_json(e), Label.model_validate_json(lab))
                 for e, lab in rows]  # fmt: skip
@@ -220,7 +213,7 @@ class ExperienceLog:
         row = self._conn.execute(
             "SELECT final_net, closed_at FROM cycles WHERE cycle_id = ? AND state = ?"
             " AND final_net IS NOT NULL AND closed_at <= ?",
-            (cycle_id, CycleState.CLOSED, now.isoformat()),
+            (cycle_id, CycleState.CLOSED, utc_iso(now)),
         ).fetchone()
         if row is None:
             return None
@@ -253,7 +246,7 @@ class ExperienceLog:
                 " (SELECT 1 FROM learning_labels l WHERE l.decision_id = e.decision_id)"
                 " AND (e.intent_id IS NOT NULL OR e.horizon_end <= ?)"
                 " ORDER BY e.as_of, e.rowid",
-                (now.isoformat(),),
+                (utc_iso(now),),
             ).fetchall()
             for (body,) in rows:
                 exp = Experience.model_validate_json(body)
@@ -270,8 +263,8 @@ class ExperienceLog:
                     " available_at, body, labeled_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
                     " ON CONFLICT (decision_id, kind) DO NOTHING",
                     (label.decision_id, label.kind, str(label.value), label.direction,
-                     label.available_at.isoformat(), label.model_dump_json(),
-                     self._clock().isoformat()),
+                     utc_iso(label.available_at), label.model_dump_json(),
+                     utc_iso(self._clock())),
                 ).rowcount  # fmt: skip
                 if inserted:
                     new.append(label)

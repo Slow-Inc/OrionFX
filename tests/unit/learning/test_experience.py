@@ -4,7 +4,7 @@ fill, anything else is labelled only by the market's move over exactly its horiz
 
 import sqlite3
 from collections.abc import Iterator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -204,6 +204,27 @@ def test_a_filled_entry_is_labelled_from_its_cycle_close(
     (label,) = log.label_due(now=closed)
     assert label.kind is LabelKind.REALIZED and label.value == D("12.40")
     assert label.available_at == closed and "cycle:cyc_1" in label.source_refs
+
+
+def test_a_non_utc_now_does_not_see_a_cycle_closed_after_it(
+    conn: sqlite3.Connection, log: ExperienceLog
+) -> None:
+    _enter(log)
+    _fill(conn)
+    closed = T0 + timedelta(hours=3)
+    _close_cycle(conn, "12.40", closed)
+    before = (closed - timedelta(minutes=1)).astimezone(timezone(timedelta(hours=2)))
+    assert log.label_due(now=before) == []  # its text sorts after the UTC close
+
+
+def test_a_non_utc_now_still_labels_a_due_experience(
+    log: ExperienceLog, candles: CandleStore
+) -> None:
+    _record(log)
+    _bars(candles, (T0 - timedelta(hours=1), "2000"), (T0, "2004.50"))
+    later = (T0 + timedelta(hours=2)).astimezone(timezone(timedelta(hours=-5)))
+    (label,) = log.label_due(now=later)  # its text sorts before the UTC horizon end
+    assert label.value == D("4.50")
 
 
 def test_a_refused_or_unfilled_entry_never_gets_a_pnl_label(
