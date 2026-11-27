@@ -218,3 +218,21 @@ def test_m07_promotes_to_live_only_with_a_qualification_x02_issued_for_that_mode
     real = store.evaluate(_two(store)).qualification_ref
     life.promote("xgb-dir", "1", live_qualification_ref=real, **args)  # type: ignore[arg-type]
     assert life.champion("xgb-dir") == "1"
+
+
+def test_a_subject_cannot_borrow_another_subjects_evidence(store: EvidenceStore) -> None:
+    """#126 (BLK-05): a one-hour run of an untested model plus another model's good runs
+    must not qualify either; readiness is judged per subject."""
+    store.save_policy(CERTIFIED)
+    tiny = _run(store, "TREND", trades=1, days=1, subject="model:untested@1")
+    r = store.evaluate([*_two(store), tiny])
+    assert r.verdict is Verdict.NOT_READY and "NO_COMMON_SUBJECT" in r.reasons
+    shared = store.record_run(ValidationRun(
+        kind="replay", subject_refs=[MODEL, "model:other@1"], config={}, regimes=["RANGE"],
+        window_start=T0 + 40 * DAY, window_end=T0 + 80 * DAY, trades=120,
+        metrics={"expectancy": Metric(D("1.2"), 120), "profit_factor": Metric(D("1.5"), 120)},
+    ))  # fmt: skip
+    ok = store.evaluate([_run(store, "TREND"), shared])
+    assert ok.verdict is Verdict.READY and ok.qualification_ref is not None
+    assert store.verify_live_qualification(ok.qualification_ref, MODEL)
+    assert not store.verify_live_qualification(ok.qualification_ref, "model:other@1")
