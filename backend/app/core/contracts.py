@@ -117,6 +117,11 @@ class FeatureSnapshot(ContractModel):
             raise ValueError("need as_of <= available_at <= valid_until")
         return self
 
+    @property
+    def ref(self) -> str:
+        """`{feature_schema}@{as_of}`: how other modules cite this snapshot."""
+        return f"{self.feature_schema}@{self.as_of.isoformat()}"
+
 
 # --- M03 news & LLM --------------------------------------------------------
 

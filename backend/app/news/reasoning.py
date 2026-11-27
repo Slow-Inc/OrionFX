@@ -156,8 +156,6 @@ def reason(
         prompt_version=REASONING_PROMPT_VERSION,
         provider=provider.provider_id,
         valid_until=min(expiries),
-        feature_snapshot_ref=None
-        if snap is None
-        else f"{snap.feature_schema}@{snap.as_of.isoformat()}",
+        feature_snapshot_ref=None if snap is None else snap.ref,
     )
     return ReasoningResult(reasoning, health(HealthStatus.OK, None, now))
