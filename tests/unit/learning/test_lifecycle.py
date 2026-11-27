@@ -61,10 +61,16 @@ def _model(version: str, sha: str, modes: list[Mode] | None = None) -> ModelCard
     )  # fmt: skip
 
 
+def _x02(ref: str, subject: str) -> bool:
+    """Stands in for X02's verifier: one real qualification, for xgb-dir@1 only."""
+    return ref == "x02:live-qualification:r7" and subject == "model:xgb-dir@1"
+
+
 @pytest.fixture
 def life(conn: sqlite3.Connection) -> ModelLifecycle:
     reg = ArtifactRegistry(conn, clock=lambda: T0)
-    lc = ModelLifecycle(conn, reg, DatasetStore(conn), clock=lambda: T0 + DAY)
+    lc = ModelLifecycle(conn, reg, DatasetStore(conn), clock=lambda: T0 + DAY,
+                        live_verifier=_x02)  # fmt: skip
     lc.datasets.save(_dataset())
     return lc
 
@@ -245,7 +251,7 @@ def test_unsupported_modes_are_refused_by_the_lifecycle(life: ModelLifecycle) ->
     with pytest.raises(LifecycleRefused, match="support"):
         life.promote("xgb-dir", "1", modes=[Mode.LIVE], evidence_refs=["e"], policy_ref="p",
                      approved_by="owner", approval_ref="a",
-                     live_qualification_ref="x02:live-qualification:r1")  # fmt: skip
+                     live_qualification_ref="x02:live-qualification:r7")  # fmt: skip
 
 
 def test_a_second_rollback_never_restores_the_version_just_rolled_away(
@@ -282,3 +288,22 @@ def test_a_missing_feature_counts_as_drift() -> None:
     ref = [D(x) for x in range(20)]
     report = drift_report({"rsi": ref, "adx": ref}, {"adx": ref})
     assert report.missing == ["rsi"] and report.retrain_recommended
+
+
+def test_live_is_refused_without_the_x02_verifier_or_for_another_model(
+    conn: sqlite3.Connection,
+) -> None:
+    reg = ArtifactRegistry(conn, clock=lambda: T0)
+    bare = ModelLifecycle(conn, reg, DatasetStore(conn), clock=lambda: T0 + DAY)
+    bare.datasets.save(_dataset())
+    bare.propose_candidate(_model("1", "1"), dataset_refs=["xau-h1@1"])
+    live = {"modes": [Mode.LIVE], "evidence_refs": ["e"], "policy_ref": "p",
+            "approved_by": "owner", "approval_ref": "a",
+            "live_qualification_ref": "x02:live-qualification:r7"}  # fmt: skip
+    with pytest.raises(LifecycleRefused, match="verifier"):
+        bare.promote("xgb-dir", "1", **live)  # type: ignore[arg-type]
+    wired = ModelLifecycle(conn, reg, DatasetStore(conn), clock=lambda: T0 + DAY,
+                           live_verifier=_x02)  # fmt: skip
+    wired.propose_candidate(_model("2", "2"), dataset_refs=["xau-h1@1"])
+    with pytest.raises(LifecycleRefused, match="not issued"):
+        wired.promote("xgb-dir", "2", **live)  # type: ignore[arg-type]  # r7 is for v1 only
