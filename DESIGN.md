@@ -1,16 +1,25 @@
 ---
-status: not-yet-designed
+status: drafted (M01 PRD #72)
 owner: M01 Web Dashboard PRD
-stack_proposed: React, TypeScript, Tailwind CSS, Lightweight Charts   # master plan §5.2 [PROPOSED]
-tokens: {}   # filled when the M01 PRD fixes the visual system
+stack: Bun, Vite, React, TypeScript, plain CSS variables   # PRD-01 #72 (Tailwind dropped: fewer deps)
+tokens: frontend/src/styles.css   # :root variables, light + dark
 ---
 
 <!-- lang:en -->
 # Design System
 
-> The "how" behind `PRODUCT.md`'s "why". **No visual system has been decided yet** — tokens,
-> typography and components are owned by the M01 Web Dashboard PRD (`docs/prd/PRD-01-web-dashboard.md`, not yet written).
-> Until then, only the constraints below are binding.
+> The "how" behind `PRODUCT.md`'s "why". The visual system is drafted by the M01 Web
+> Dashboard PRD (#72); tokens live in `frontend/src/styles.css`.
+
+## Tokens (drafted)
+
+- **Palette:** neutral surfaces, one accent (`--accent`), `--ok`, `--warn`, `--danger`;
+  light and dark follow `prefers-color-scheme`. `--danger` is reserved for Emergency Stop
+  and the risk lock.
+- **Type:** the system UI font, 16px base, tabular numbers for money.
+- **Shape:** 8px radius, 12px spacing unit, pills for status.
+- **States:** Live / Stale / Disconnected / Connecting on the status bar; every panel shows
+  its `as of` time.
 
 ## Binding constraints (from PRODUCT.md and the master plan)
 
@@ -29,9 +38,18 @@ tokens: {}   # filled when the M01 PRD fixes the visual system
 <!-- lang:th -->
 # Design System
 
-> ไฟล์นี้คือ "ทำอย่างไร" ของ "ทำไม" ใน `PRODUCT.md` **ตอนนี้ยังไม่ได้ตัดสินใจเรื่องหน้าตา** —
-> token ตัวอักษร และ component เป็นของ PRD ของ M01 Web Dashboard (`docs/prd/PRD-01-web-dashboard.md` ยังไม่ได้เขียน)
-> ระหว่างนี้ มีผลบังคับแค่ข้อจำกัดด้านล่าง
+> ไฟล์นี้คือ "ทำอย่างไร" ของ "ทำไม" ใน `PRODUCT.md` ระบบหน้าตาร่างไว้แล้วใน PRD ของ M01 Web
+> Dashboard (#72) และ token อยู่ที่ `frontend/src/styles.css`
+
+## Token (ฉบับร่าง)
+
+- **ชุดสี:** พื้นผิวโทนกลาง สีเน้นหนึ่งสี (`--accent`) และ `--ok`, `--warn`, `--danger`
+  ใช้ทั้งแบบสว่างและมืดตาม `prefers-color-scheme` โดย `--danger` สงวนไว้สำหรับ Emergency Stop
+  และ risk lock เท่านั้น
+- **ตัวอักษร:** ใช้ฟอนต์ UI ของระบบ ขนาดพื้นฐาน 16px และใช้ตัวเลขความกว้างเท่ากันสำหรับตัวเลขเงิน
+- **รูปทรง:** มุมโค้ง 8px หน่วยระยะห่าง 12px และใช้ pill แสดงสถานะ
+- **สถานะ:** แถบสถานะแสดง Live / Stale / Disconnected / Connecting และทุก panel แสดงเวลา
+  `as of` ของตัวเอง
 
 ## ข้อจำกัดที่บังคับใช้ (จาก PRODUCT.md และ master plan)
 

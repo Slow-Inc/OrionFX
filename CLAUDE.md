@@ -51,7 +51,9 @@ Planned code layout: master plan §7.1 (`backend/` Python/FastAPI, `frontend/` R
 
 ## Commands
 
-Backend (Python 3.13, `uv`): `uv sync` · `uv run ruff check .` · `uv run ruff format --check .` · `uv run mypy` · `uv run pytest`. These four are `.claude/t4.json` `"verify"` and the CI `lint`/`typecheck`/`test` jobs. After a contract change in `backend/app/core/`: `uv run python scripts/gen_schemas.py` (a test fails if `docs/contracts/` is stale). Run the API locally: `uv run python -m app.api set-password` once, then `uv run python -m app.api serve` (binds the configured host, 127.0.0.1 by default). Frontend commands land with M01.
+Backend (Python 3.13, `uv`): `uv sync` · `uv run ruff check .` · `uv run ruff format --check .` · `uv run mypy` · `uv run pytest`. These four are `.claude/t4.json` `"verify"` and the CI `lint`/`typecheck`/`test` jobs. After a contract change in `backend/app/core/`: `uv run python scripts/gen_schemas.py` (a test fails if `docs/contracts/` is stale). Run the API locally: `uv run python -m app.api set-password` once, then `uv run python -m app.api serve` (binds the configured host, 127.0.0.1 by default).
+
+Frontend (`frontend/`, Bun): `bun install` · `bun run lint` · `bun run typecheck` · `bun run test` · `bun run build`; `bun run dev` serves on :5173 and proxies `/api` and `/ws` to the API on :8000. Not yet in CI (needs an owner-reviewed workflow change).
 
 Tooling notes (Windows, checked 2026-11-27): in git-bash `gh` resolves to `/c/Program Files/GitHub CLI/gh` and `python -c` runs; `bun` is at `~/.bun/bin/bun`. Bun for the frontend; `uv` + ruff + mypy (strict) + pytest for the backend.
 
