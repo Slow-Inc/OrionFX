@@ -48,7 +48,12 @@ def _prediction(i: str) -> PredictionGenerated:
 SNAPSHOT = FeatureSnapshot(
     symbol="XAUUSD",
     feature_schema="m02.features.v1",
-    values={"H1.direction_10.direction": D(1), "mtf.aligned": D(1), "M5.sma_20.sma": D(2000)},
+    values={
+        "H1.direction_10.direction": D(1),
+        "mtf.aligned": D(1),
+        "M5.sma_20.sma": D(2000),
+        "H1.bar_shape.direction": D(-1),
+    },
     quality=DataQuality.OK,
     as_of=T0,
     available_at=T0 + timedelta(seconds=1),
@@ -102,7 +107,7 @@ def test_invented_citations_are_rejected() -> None:
         [_assessment("a1")], [_prediction("p1")], None, FakeProvider([bad, bad]), now=NOW
     )
     assert result.reasoning is None and result.health.status is HealthStatus.DEGRADED
-    assert "p404" in (result.health.detail or "")
+    assert "not given" in (result.health.detail or "")
 
 
 def test_provider_failure_degrades_without_blocking() -> None:
@@ -122,3 +127,64 @@ def test_a_stale_snapshot_is_not_used() -> None:
     result = reason([_assessment("a1")], [], stale, provider, now=NOW)
     assert "H1.direction_10.direction" not in provider.prompts[0]
     assert result.reasoning is not None
+
+
+# --- review findings ------------------------------------------------------------------------------
+
+
+def test_a_snapshot_not_yet_available_is_not_used() -> None:
+    future = SNAPSHOT.model_copy(update={"available_at": NOW + timedelta(minutes=2)})
+    provider = FakeProvider([_answer(cited_prediction_ids=[])])
+    result = reason([_assessment("a1")], [], future, provider, now=NOW)
+    assert "H1.direction_10.direction" not in provider.prompts[0]
+    assert result.reasoning is not None and result.reasoning.feature_snapshot_ref is None
+
+
+def test_a_snapshot_of_another_schema_is_not_used() -> None:
+    other = SNAPSHOT.model_copy(update={"feature_schema": "m02.features.v2"})
+    provider = FakeProvider([_answer(cited_prediction_ids=[])])
+    reason([_assessment("a1")], [], other, provider, now=NOW)
+    assert "mtf.aligned" not in provider.prompts[0]
+
+
+def test_forecasts_on_stale_data_are_left_out() -> None:
+    stale = _prediction("p1").model_copy(update={"data_quality": DataQuality.STALE})
+    provider = FakeProvider([_answer(cited_prediction_ids=[])])
+    reason([_assessment("a1")], [stale], None, provider, now=NOW)
+    assert "p1" not in provider.prompts[0]
+
+
+def test_single_candle_direction_is_not_a_chart_summary() -> None:
+    provider = FakeProvider([_answer()])
+    reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, provider, now=NOW)
+    assert "bar_shape" not in provider.prompts[0]
+
+
+def test_duplicate_citations_are_collapsed_and_the_snapshot_is_recorded() -> None:
+    answer = _answer(cited_assessment_ids=["a1", "a1"], cited_prediction_ids=["p1", "p1"])
+    r = reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, FakeProvider([answer]), now=NOW)
+    assert r.reasoning is not None
+    assert r.reasoning.news_assessment_ids == ["a1"] and r.reasoning.prediction_ids == ["p1"]
+    assert r.reasoning.feature_snapshot_ref == f"m02.features.v1@{T0.isoformat()}"
+
+
+def test_invented_ids_never_reach_health_detail() -> None:
+    bad = _answer(cited_prediction_ids=["<" + "x" * 5000 + ">"])
+    result = reason(
+        [_assessment("a1")], [_prediction("p1")], None, FakeProvider([bad, bad]), now=NOW
+    )
+    assert "xxxx" not in (result.health.detail or "")
+
+
+class _Boom:
+    provider_id = "real"
+    model = "m"
+
+    def complete(self, prompt: str, *, timeout_s: float) -> str:
+        raise ConnectionResetError("socket closed by https://api.example/?key=sk-secret")
+
+
+def test_any_adapter_exception_degrades_instead_of_crashing() -> None:
+    result = reason([_assessment("a1")], [], None, _Boom(), now=NOW)
+    assert result.reasoning is None and result.health.status is HealthStatus.DEGRADED
+    assert "sk-secret" not in (result.health.detail or "")

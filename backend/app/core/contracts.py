@@ -141,6 +141,8 @@ class LlmReasoning(ContractModel):
     prompt_version: str
     provider: str
     valid_until: UtcDatetime
+    feature_snapshot_ref: str | None = None
+    """`{feature_schema}@{as_of}` of the chart summary used, if any (auditability)."""
 
 
 # --- M04 prediction --------------------------------------------------------

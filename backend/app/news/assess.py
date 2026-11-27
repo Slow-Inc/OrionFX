@@ -22,15 +22,15 @@ from pydantic import Field
 from app.core.contracts import Confidence, ContractModel, HealthUpdated, NewsAssessment
 from app.core.enums import Direction, HealthStatus
 from app.core.ids import new_id
+from app.core.time import live
 from app.core.types import Probability
 from app.news.injection import PROMPT_VERSION, build_prompt, injection_flags
-from app.news.llm_call import TIMEOUT_S, ask, load_json
+from app.news.llm_call import NO_PROVIDER, TIMEOUT_S, ask, health, load_json
 from app.news.provider import Provider
 from app.news.sources import NewsItem
 
 __all__ = ["ANSWER_FORMAT", "PROMPT_VERSION", "AssessmentResult", "assess_news"]
 
-COMPONENT = "M03"
 CONFLICT_CONFIDENCE_CAP = Decimal("0.3")  # [PROPOSED]
 SEMANTICS = "uncalibrated LLM confidence in the news-implied XAUUSD direction"
 ANSWER_FORMAT = (
@@ -63,7 +63,7 @@ def _parse(text: str, given: set[str]) -> _Answer:
     answer = _Answer.model_validate(load_json(text))
     unknown = (set(answer.cited_ids) | set(answer.item_directions)) - given
     if unknown:
-        raise ValueError(f"mentions items it was not given: {sorted(unknown)}")
+        raise ValueError(f"mentions {len(unknown)} item id(s) it was not given")
     return answer
 
 
@@ -74,7 +74,7 @@ def assess_news(
     now: datetime,
     timeout_s: float = TIMEOUT_S,
 ) -> AssessmentResult:
-    known = [i for i in items if i.fetched_at <= now < i.valid_until]  # no look-ahead
+    known = [i for i in items if live(i.fetched_at, i.valid_until, now)]  # no look-ahead
     excluded = tuple(i.item_id for i in known if injection_flags(f"{i.title}\n{i.body}"))
     usable = [i for i in known if i.item_id not in excluded]
     pid = None if provider is None else provider.provider_id
@@ -82,15 +82,15 @@ def assess_news(
     def done(
         status: HealthStatus, detail: str | None, assessment: NewsAssessment | None = None
     ) -> AssessmentResult:
-        health = HealthUpdated(
-            component=COMPONENT, status=status, last_heartbeat=now, detail=detail
-        )
         return AssessmentResult(
-            assessment=assessment, health=health, excluded=excluded, provider=pid
+            assessment=assessment,
+            health=health(status, detail, now),
+            excluded=excluded,
+            provider=pid,
         )
 
     if provider is None:
-        return done(HealthStatus.DOWN, "no LLM provider configured")
+        return done(HealthStatus.DOWN, NO_PROVIDER)
     if not usable:
         if excluded:
             return done(HealthStatus.DEGRADED, f"all {len(excluded)} items flagged as injection")

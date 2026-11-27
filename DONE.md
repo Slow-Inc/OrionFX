@@ -6,6 +6,18 @@
 
 ---
 
+## M03 slice C — LLM reasoning stage and shared bounded LLM call (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/40-m03-reasoning`)
+
+**Goal:** an evidence-linked `llm.reasoning` combining news, forecasts and the chart summary, with the same safe failure behaviour as assessment (PRD-03 #37, slice #40; LLM-04).
+
+**Shipped:** `backend/app/news/reasoning.py` (`reason`, `ReasoningResult`); `llm_call.py` (`ask`, `health`, `load_json`, `COMPONENT`, `NO_PROVIDER`) shared by assessment and reasoning; `core.time.live`; M02 `SUMMARY_KEYS`; `LlmReasoning.feature_snapshot_ref`.
+
+**Validation:** `uv run pytest` → 470 passed, 1 skipped (written first). 15 mutation probes caught.
+
+**Review fixes:** no look-ahead on the snapshot (`available_at`); schema-checked snapshot; stale-data forecasts excluded; chart summary from M02's published keys (single-candle direction excluded); duplicate citations collapsed; snapshot used is recorded; invented ids reported as a count only; any adapter exception degrades (type name only).
+
+---
+
 ## M03 slice B — provider port, untrusted-content policy, news assessment, degraded mode (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/39-m03-assessment`)
 
 **Goal:** turn news into an evidence-linked `news.assessment` without giving the model any power, and wait safely when it fails (PRD-03 #37, slice #39; LLM-01/03/04/05).

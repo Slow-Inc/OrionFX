@@ -1,24 +1,40 @@
-"""One bounded, validated LLM call shared by every M03 stage (#39, #40).
+"""What every M03 LLM stage shares (#39, #40): one bounded, validated call, the
+component's health report, and the no-provider message.
 
 The answer is parsed by the caller's `parse` (JSON numbers as Decimal, one code
-fence allowed, deep nesting refused). A provider failure or an invalid answer is
-retried once; after that the call returns no value and a detail that names the
-problem but never the provider's raw error text, which may carry request data.
+fence allowed, deep nesting refused). Any failure, from the provider or from
+the answer, is retried once; after that the call returns no value and a detail
+that names the kind of problem but never the provider's raw error text (it may
+carry request data) nor long model output. Catching every exception from the
+adapter is deliberate: a real transport error must degrade to WAIT, never crash
+the cycle.
 """
 
 import json
 import re
 from collections.abc import Callable
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from pydantic import ValidationError
 
-from app.news.provider import Provider, ProviderError
+from app.core.contracts import HealthUpdated
+from app.core.enums import HealthStatus
+from app.news.provider import Provider
 
+__all__ = ["COMPONENT", "NO_PROVIDER", "TIMEOUT_S", "ask", "health", "load_json"]
+
+COMPONENT = "M03"
+NO_PROVIDER = "no LLM provider configured"
 TIMEOUT_S = 20.0  # [PROPOSED]
 ATTEMPTS = 2  # one retry [PROPOSED]
+DETAIL_MAX = 160
 _FENCE = re.compile(r"^\s*```(?:json)?\s*\n(.*)\n\s*```\s*$", re.DOTALL)
+
+
+def health(status: HealthStatus, detail: str | None, now: datetime) -> HealthUpdated:
+    return HealthUpdated(component=COMPONENT, status=status, last_heartbeat=now, detail=detail)
 
 
 def load_json(text: str) -> Any:
@@ -30,11 +46,13 @@ def load_json(text: str) -> Any:
         raise ValueError("answer nested too deeply") from None
 
 
-def describe(exc: Exception) -> str:
+def _describe(exc: Exception) -> str:
     if isinstance(exc, ValidationError):
         err = exc.errors(include_input=False)[0]
-        return f"{'.'.join(str(p) for p in err['loc']) or 'answer'}: {err['msg']}"
-    return (str(exc).splitlines() or [type(exc).__name__])[0]
+        text = f"{'.'.join(str(p) for p in err['loc']) or 'answer'}: {err['msg']}"
+    else:
+        text = (str(exc).splitlines() or [type(exc).__name__])[0]
+    return text[:DETAIL_MAX]
 
 
 def ask[T](
@@ -44,9 +62,12 @@ def ask[T](
     detail = ""
     for _ in range(ATTEMPTS):
         try:
-            return parse(provider.complete(prompt, timeout_s=timeout_s)), ""
-        except ProviderError as exc:
-            detail = f"provider {type(exc).__name__}"  # never the raw error text
+            text = provider.complete(prompt, timeout_s=timeout_s)
+        except Exception as exc:  # any adapter failure degrades; never echo its text
+            detail = f"provider {type(exc).__name__}"
+            continue
+        try:
+            return parse(text), ""
         except (ValueError, ValidationError) as exc:  # JSON errors are ValueErrors
-            detail = f"invalid answer: {describe(exc)}"
+            detail = f"invalid answer: {_describe(exc)}"
     return None, f"failed after {ATTEMPTS} attempts: {detail}"

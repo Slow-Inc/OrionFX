@@ -1,14 +1,17 @@
 """LLM reasoning stage (#40; LLM-04: link news and charts with structured, explained
 output; never control execution).
 
-Inputs are internal, already-validated contracts: news assessments (M03 slice B),
-forecasts (M04) and a feature snapshot (M02), referenced by id. Only summary
-features (directions, alignment, regime flags) go into the prompt, and only when
-the snapshot is usable (not STALE or MISSING). It runs only when at least one
-unexpired assessment exists. The answer must cite only the assessment and
-prediction ids it was given; the result's validity ends with the earliest
-expiry among what it relied on. Failures degrade exactly as in assessment: no
-reasoning, a health status, WAIT. Nothing here can reach the broker.
+Inputs are internal, already-validated contracts referenced by id: news
+assessments (M03 slice B), forecasts (M04) and an M02 feature snapshot. Only
+inputs known at `now` and not expired are used (no look-ahead); forecasts and
+the snapshot also need usable data quality. From the snapshot, only the keys M02
+publishes as its chart summary (`SUMMARY_KEYS`) go into the prompt, and only for
+the schema version this stage was written against. It runs only when at least
+one usable assessment exists. The answer may cite only the ids it was given;
+duplicates are dropped; the result records the snapshot it used and expires with
+the earliest input it relied on. Failures degrade exactly as in assessment
+(shared `ask`): no reasoning, a health status, WAIT. Nothing here reaches the
+broker.
 """
 
 from collections.abc import Sequence
@@ -28,14 +31,16 @@ from app.core.contracts import (
 )
 from app.core.enums import DataQuality, Direction, HealthStatus
 from app.core.ids import new_id
+from app.core.time import live
 from app.core.types import Probability
-from app.news.llm_call import TIMEOUT_S, ask, load_json
+from app.market_data.features import FEATURE_SCHEMA, SUMMARY_KEYS
+from app.news.llm_call import NO_PROVIDER, TIMEOUT_S, ask, health, load_json
 from app.news.provider import Provider
 
-COMPONENT = "M03"
+__all__ = ["REASONING_PROMPT_VERSION", "ReasoningResult", "reason"]
+
 REASONING_PROMPT_VERSION = "m03.reason.v1"
 SEMANTICS = "uncalibrated LLM confidence in the combined XAUUSD direction"
-SUMMARY_SUFFIXES = (".direction", ".aligned", ".trend", ".range", ".volatile", ".structure")
 USABLE = (DataQuality.OK, DataQuality.DEGRADED)
 ANSWER_FORMAT = (
     '{"direction": "UP"|"DOWN"|"NEUTRAL", "confidence": 0..1,\n'
@@ -58,14 +63,15 @@ class ReasoningResult:
     health: HealthUpdated
 
 
-def _summary(snapshot: FeatureSnapshot | None, now: datetime) -> dict[str, str]:
-    if snapshot is None or snapshot.quality not in USABLE or snapshot.valid_until <= now:
-        return {}
-    return {
-        k: str(v)
-        for k, v in sorted(snapshot.values.items())
-        if v is not None and k.endswith(SUMMARY_SUFFIXES)
-    }
+def _usable_snapshot(snapshot: FeatureSnapshot | None, now: datetime) -> FeatureSnapshot | None:
+    if (
+        snapshot is None
+        or snapshot.feature_schema != FEATURE_SCHEMA
+        or snapshot.quality not in USABLE
+        or not live(snapshot.available_at, snapshot.valid_until, now)
+    ):
+        return None
+    return snapshot
 
 
 def _prompt(
@@ -104,21 +110,28 @@ def reason(
     now: datetime,
     timeout_s: float = TIMEOUT_S,
 ) -> ReasoningResult:
-    def done(
-        status: HealthStatus, detail: str | None, r: LlmReasoning | None = None
-    ) -> ReasoningResult:
-        health = HealthUpdated(
-            component=COMPONENT, status=status, last_heartbeat=now, detail=detail
-        )
-        return ReasoningResult(reasoning=r, health=health)
-
     if provider is None:
-        return done(HealthStatus.DOWN, "no LLM provider configured")
-    news = [a for a in assessments if a.available_at <= now < a.valid_until]
+        return ReasoningResult(None, health(HealthStatus.DOWN, NO_PROVIDER, now))
+    news = [a for a in assessments if live(a.available_at, a.valid_until, now)]
     if not news:
-        return done(HealthStatus.OK, "no news assessment to reason about")
-    forecasts = [p for p in predictions if p.generated_at <= now < p.valid_until]
-    features = _summary(snapshot, now)
+        return ReasoningResult(
+            None, health(HealthStatus.OK, "no news assessment to reason about", now)
+        )
+    forecasts = [
+        p
+        for p in predictions
+        if live(p.generated_at, p.valid_until, now) and p.data_quality in USABLE
+    ]
+    snap = _usable_snapshot(snapshot, now)
+    features = (
+        {}
+        if snap is None
+        else {
+            k: str(v) for k, v in sorted(snap.values.items()) if k in SUMMARY_KEYS and v is not None
+        }
+    )
+    if not features:
+        snap = None  # nothing from it was used
     a_ids = {a.assessment_id for a in news}
     p_ids = {p.prediction_id for p in forecasts}
 
@@ -128,28 +141,30 @@ def reason(
             set(answer.cited_prediction_ids) - p_ids
         )
         if unknown:
-            raise ValueError(f"cites ids it was not given: {sorted(unknown)}")
+            raise ValueError(f"cites {len(unknown)} id(s) it was not given")
         return answer
 
     answer, detail = ask(provider, _prompt(news, forecasts, features), parse, timeout_s=timeout_s)
     if answer is None:
-        return done(HealthStatus.DEGRADED, detail)
-    expiries = [a.valid_until for a in news if a.assessment_id in answer.cited_assessment_ids]
-    expiries += [p.valid_until for p in forecasts if p.prediction_id in answer.cited_prediction_ids]
-    if features and snapshot is not None:
-        expiries.append(snapshot.valid_until)
-    return done(
-        HealthStatus.OK,
-        None,
-        LlmReasoning(
-            reasoning_id=new_id("reason"),
-            news_assessment_ids=answer.cited_assessment_ids,
-            prediction_ids=answer.cited_prediction_ids,
-            direction=answer.direction,
-            score=Confidence(value=answer.confidence, semantics=SEMANTICS),
-            rationale=answer.rationale,
-            prompt_version=REASONING_PROMPT_VERSION,
-            provider=provider.provider_id,
-            valid_until=min(expiries),
-        ),
+        return ReasoningResult(None, health(HealthStatus.DEGRADED, detail, now))
+    cited_a = list(dict.fromkeys(answer.cited_assessment_ids))
+    cited_p = list(dict.fromkeys(answer.cited_prediction_ids))
+    expiries = [a.valid_until for a in news if a.assessment_id in cited_a]
+    expiries += [p.valid_until for p in forecasts if p.prediction_id in cited_p]
+    if snap is not None:
+        expiries.append(snap.valid_until)
+    reasoning = LlmReasoning(
+        reasoning_id=new_id("reason"),
+        news_assessment_ids=cited_a,
+        prediction_ids=cited_p,
+        direction=answer.direction,
+        score=Confidence(value=answer.confidence, semantics=SEMANTICS),
+        rationale=answer.rationale,
+        prompt_version=REASONING_PROMPT_VERSION,
+        provider=provider.provider_id,
+        valid_until=min(expiries),
+        feature_snapshot_ref=None
+        if snap is None
+        else f"{snap.feature_schema}@{snap.as_of.isoformat()}",
     )
+    return ReasoningResult(reasoning, health(HealthStatus.OK, None, now))
