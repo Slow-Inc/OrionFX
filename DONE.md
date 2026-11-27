@@ -6,6 +6,21 @@
 
 ---
 
+## CI: Dependabot PRs pass the T4 guards (2026-11-27, subagent review: correctness + security + simpler-alternative, simplify n-a, branch `ci/93-dependabot-guards`)
+
+**Goal:** a Dependabot PR (e.g. #3) can go green and be merged by the agent under `requireGreenCI` (#93).
+
+**Shipped:**
+- `guards` skips only `check-gate-ledger` and `check-issue-ref` while Dependabot both opened the PR (`pull_request.user.login`) and triggered the run (`github.actor`). A person pushing to the branch makes both checks bind again.
+- Every other check and job still runs. Owner approved the approach in session.
+
+**Review fixes:**
+- Self-caught before review: the first draft used `!env.X`; `env` values are strings, so `!'false'` is false and both checks would have been skipped on every PR (fail-open). Now `env.X != 'true'` (fail-closed).
+- Subagent nit: the comment states the re-run and `@dependabot rebase` cases.
+
+**Validation:**
+- This PR's own CI must show both checks running (non-Dependabot path); PR #3 after `@dependabot rebase` must show them skipped and the job green.
+
 ## X01c slice B: decisions carry what they bet on (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/90-decision-direction`)
 
 **Goal:** M07 learns from what M05 decided, not from what the loop guesses (PRD-X01c #88, slice #90; LRN-02).

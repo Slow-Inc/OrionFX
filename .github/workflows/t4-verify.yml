@@ -34,6 +34,14 @@ permissions:
 jobs:
   guards:
     runs-on: ubuntu-latest
+    env:
+      # A Dependabot PR carries no T4-Gates trailer and no issue reference, and
+      # `@dependabot rebase` would drop any added by hand (#93). Both process checks are
+      # skipped only while Dependabot both opened the PR and triggered this run: once a
+      # person pushes to the branch, the actor changes and they bind again. Every other
+      # check and job still runs. A re-run keeps the original actor; a later
+      # `@dependabot rebase` restores the skip but discards any non-Dependabot commits.
+      DEPENDABOT_ONLY: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,10 +53,12 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
       - run: sh .githooks/check-tree-budget
       - name: check-gate-ledger
+        if: env.DEPENDABOT_ONLY != 'true'  # env values are strings
         run: sh .githooks/check-gate-ledger
         env:
           BASE_REF: origin/${{ github.base_ref }}
       - name: check-issue-ref
+        if: env.DEPENDABOT_ONLY != 'true'  # env values are strings
         run: PR_BODY="$(gh pr view "${{ github.event.number }}" --json body -q .body)" sh .githooks/check-issue-ref
         env:
           BASE_REF: origin/${{ github.base_ref }}
