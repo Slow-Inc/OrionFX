@@ -124,6 +124,29 @@ Rules, adopted from mip-research (PRD #120):
 5. **Turn a result into a claim** only through a new protocol version. The owner certifies any change to targets or thresholds; the agent may propose them, with evidence.
 6. **Record the outcome either way.** Failures are evidence too, and wrong numbers go to errata.
 
+## 8a. Research backlog (ordered; each item is an arm, never a shortcut)
+
+Source: `docs/research/2026-11-28-m04-quant-upgrade-proposals.md`.
+
+**Governing rule.** Every item below is an **arm** ablated against the V1 baseline on the same folds and seeds, under one pre-registered protocol version.
+- **Shared budget.** All arms share the protocol's single iteration budget. Horizon, time decay, feature set and label type each count as configs.
+- **One winner.** Only one winner per protocol version reaches the single-use holdout.
+- **Baseline first.** Nothing here runs before the baseline exists (#127 → #130 → #132).
+
+| Pri | Item | Where | Status |
+|---|---|---|---|
+| 0 | **EV and the label price the same event.** EV assumes a symmetric ±`TARGET_ATR`·ATR_M15 bet (`fusion.expected_value`). Triple-barrier barriers, the treatment of FLAT, the horizon and any meta-label P(win) must match it, or EV must change with them. | #129 | [planned] |
+| 1 | **Session and liquidity features** from the gold bars: distance to the previous session's high and low, the London/NY volatility ratio, spread anomalies. | #129 | [planned] |
+| 2 | **Uniqueness weights and time decay.** Pre-register whether claim metrics are weighted. Time decay is a hyperparameter inside the budget. | #130 | [planned] |
+| 3 | **Horizon M15–H1 as configs.** Watch label overlap. | #130/#132 | [planned] |
+| 4 | **Volatility-model WAIT gate.** Block-only, following the `NEWS_VETO` pattern. New evidence contract. Baseline is persistence plus the M02 regime rule. | #139 | [planned] |
+| 5 | **Meta-labeling arm.** Predictor-port contract change. Needs an evaluation path for strategy eligibility over history (the same seam as #127). The dataset pins the strategy rule hash. | #140 | [planned] |
+| 6 | **Cross-market data-only symbols** (XAGUSD and a USD proxy). Schema bump, never tradable, one session schedule per symbol. Admitted only with a live source. Measure the skew between the training feed and the serving feed. | #141 | [planned] |
+| 7 | Yields, VIX and the pre-event countdown. Need point-in-time sources. | after #41 / OD-14 | [blocked] |
+| 8 | Chart+News fusion and regime-specific ensembles, from Shadow data. | after #17, #41 | [blocked] |
+| — | **Model input to M06 trailing, TP or SL.** An owner decision, never a backlog item ("risk is independent of AI"). | owner | [not planned] |
+| — | Deep learning or transformers on raw OHLCV. Deferred. | — | [not planned] |
+
 ## 9. Who decides what
 
 | Decision | Owner | Agent |

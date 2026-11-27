@@ -7,5 +7,6 @@ add new) · `ARCHIVED` = superseded · `TEMPLATE`.
 
 | File | Status | What it is |
 |------|--------|-----------|
+| `2026-11-28-m04-quant-upgrade-proposals.md` | SNAPSHOT | Five external model-upgrade proposals (cross-market, meta-labeling, volatility model, weighting/horizon, Shadow data), each evaluated as an ablation arm under one protocol budget. Found that EV and the labels must price the same symmetric ATR_M15 event. Rejected any M06 model input as an owner decision. #120 |
 | `2026-11-28-m04-dataset-training-plan.md` | SNAPSHOT | M04 training plan, reviewed against the master plan and the code: triple-barrier per direction (meta-labeling later), one stationary transform path for train and inference, Dukascopy backfill through the same recorder, embargo, a holdout locked before training, and no LLM re-interpretation of past news. All numbers `[PROPOSED]`; nothing trained — #48 |
 | `2026-11-27-m03-llm-provider-opencode-go.md` (+ `m03-llm-eval/`) | SNAPSHOT | OpenCode Go endpoint/allowance, external benchmarks, M03 model benchmark v1 + v2 (191 graded cases, blind second labels, end-to-end through M05); recommends `qwen3.8-flash` (fallback `deepseek-v4.1-flash`) — #97, PRD #98 |
