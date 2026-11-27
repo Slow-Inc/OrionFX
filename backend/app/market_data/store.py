@@ -74,3 +74,14 @@ class CandleStore:
             ),
         ).fetchall()
         return [CandleClosed.model_validate_json(r[0]) for r in reversed(rows)]
+
+    def bar_at(
+        self, symbol: str, timeframe: Timeframe, open_time: datetime, *, as_of: datetime
+    ) -> CandleClosed | None:
+        """The bar opening at `open_time`, if it was available at `as_of`."""
+        row = self.conn.execute(
+            "SELECT body FROM candles WHERE dataset_version = ? AND symbol = ?"
+            " AND timeframe = ? AND open_time = ? AND available_at <= ?",
+            (self.dataset_version, symbol, timeframe.value, _ts(open_time), _ts(as_of)),
+        ).fetchone()
+        return None if row is None else CandleClosed.model_validate_json(row[0])

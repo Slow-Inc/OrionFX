@@ -6,6 +6,52 @@
 
 ---
 
+## M07 slice A: experience log and point-in-time outcome labels (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/59-m07-experience`)
+
+**Goal:** turn every decision, WAIT included, into an experience with honest, point-in-time outcome labels (PRD-07 #58, slice #59; LRN-02/06, AT-15).
+
+**Shipped:**
+- `migrations/0007_learning.sql`:
+  - `learning_experiences` and `learning_labels`, both append-only.
+  - A trigger that freezes `final_net` once a cycle is CLOSED.
+- `backend/app/learning/experience.py`:
+  - `ExperienceLog` with `record`, `experiences`, `labels(as_of)` and `label_due(now)`.
+  - `vector_of` and `regime_of`.
+  - The `Experience` and `Label` contracts.
+- `CandleStore.bar_at`.
+
+**Behaviour:**
+- REALIZED labels:
+  - Only for an experience whose intent actually filled, meaning an OPEN execution with filled volume > 0.
+  - Value: the cycle's final realized net, known at the cycle's close.
+- MARKET_MOVE labels:
+  - For everything else, including refused or unfilled ENTERs.
+  - Value: the move from the bar closing at `as_of` to the bar closing exactly at the horizon end.
+  - Known when that bar became available.
+- A gap or missing data means no label.
+
+**Validation:**
+- `uv run pytest`: all pass, with 15 learning tests.
+- 9 mutation probes: 6 caught, 3 equivalent (redundant horizon fast path, open cycles never have `closed_at`, a race prevented by `BEGIN IMMEDIATE`).
+
+**Review fixes:**
+- A refused or unfilled ENTER no longer gets a P&L label, because REALIZED now needs fill evidence.
+- Labels use bars at exactly the horizon boundaries, never a stretched horizon over a gap.
+- Labelling is bounded:
+  - SQL filters on `horizon_end`.
+  - Two `bar_at` lookups replace a full history load.
+  - The scan runs inside the transaction, with ON CONFLICT DO NOTHING.
+- `final_net` is frozen after close, so `available_at` is honest.
+- `regime_of` reads the technique's own trend/range flags, adding NEUTRAL for ADX 20–25.
+- Feature keys now come from `feature_key`, not M05 constants.
+- `Label` is a contract with a stored body and a `labels(as_of)` reader.
+- Candle refs come from `CandleStore.event_id`.
+- The text says "final realized net", per the glossary.
+
+**Skipped:** reading cycles through `CycleBook`. Its constructor needs an `AccountInfo` the read never uses; the raw read uses `CycleState.CLOSED`.
+
+---
+
 ## M05 slice C — exits, bounded adds, recovery as opportunity, trace and replay (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/54-m05-exits`)
 
 **Goal:** manage a cycle that holds the bot's basket, and make every decision reproducible from stored inputs (PRD-05 #51, slice #54; DEC-05/06/07, UST-12, AT-14, AT-41, AT-42).
