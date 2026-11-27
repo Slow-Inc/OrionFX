@@ -241,6 +241,7 @@ def test_unknown_command_404(client: TestClient) -> None:
 def test_status_reports_not_ready_and_stale_honestly(client: TestClient) -> None:
     headers = _login(client)
     s = client.get("/api/status", headers=headers).json()
+    assert s["risk"] is None  # no DD reading yet: shown as unknown, never as 0
     assert s["control_state"] == "STOPPED"
     assert s["missing_for_start"]
     assert "as_of" in s
@@ -315,4 +316,9 @@ def test_status_risk_lock_follows_newest_event(client: TestClient, db: Path) -> 
             **common,  # type: ignore[arg-type]
         )
     )
-    assert client.get("/api/status", headers=headers).json()["risk_locked"] is False
+    body = client.get("/api/status", headers=headers).json()
+    assert body["risk_locked"] is False
+    # the Account DD is reported apart from any cycle figure, with the time it was observed
+    assert body["risk"]["epoch_dd_percent"] == "0"
+    assert body["risk"]["epoch_ceiling_percent"] == "20"
+    assert body["risk"]["observed_at"] is not None

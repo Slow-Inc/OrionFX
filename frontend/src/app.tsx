@@ -35,7 +35,7 @@ export interface AppContextValue {
   refresh: () => void;
 }
 
-const AppContext = createContext<AppContextValue | null>(null);
+export const AppContext = createContext<AppContextValue | null>(null);
 
 export function useApp(): AppContextValue {
   const ctx = useContext(AppContext);

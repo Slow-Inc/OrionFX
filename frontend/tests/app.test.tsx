@@ -19,10 +19,24 @@ const STATUS: Status = {
   live_allowed: false,
   health: {},
   latest_seq: 3,
+  risk: null,
 };
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
+}
+
+/** A fake API: the status for /api/status, an empty but well-formed answer elsewhere. */
+function server(url: string): Response {
+  if (url.endsWith("/api/auth/login")) return json(200, { token: "t", expires_at: "x" });
+  if (url.includes("/api/status")) return json(200, STATUS);
+  return json(200, {
+    as_of: STATUS.as_of,
+    items: [],
+    available: false,
+    snapshot: null,
+    stale: true,
+  });
 }
 
 class QuietSocket implements SocketLike {
@@ -35,11 +49,7 @@ class QuietSocket implements SocketLike {
 
 describe("app shell", () => {
   it("signs in, then shows the status bar with mode, bot state and the risk lock", async () => {
-    const fetch = vi.fn(async (url: string) =>
-      url.endsWith("/api/auth/login")
-        ? json(200, { token: "t", expires_at: "x" })
-        : json(200, STATUS),
-    ) as unknown as typeof globalThis.fetch;
+    const fetch = vi.fn(async (url: string) => server(url)) as unknown as typeof globalThis.fetch;
     render(<App fetch={fetch} socket={() => new QuietSocket()} wsUrl="ws://x" />);
     await userEvent.type(screen.getByLabelText("Password"), "pw");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -79,11 +89,7 @@ describe("app shell", () => {
 
 describe("sign out", () => {
   it("says you signed out, not that the session ended", async () => {
-    const fetch = vi.fn(async (url: string) =>
-      url.endsWith("/api/auth/login")
-        ? json(200, { token: "t", expires_at: "x" })
-        : json(200, STATUS),
-    ) as unknown as typeof globalThis.fetch;
+    const fetch = vi.fn(async (url: string) => server(url)) as unknown as typeof globalThis.fetch;
     render(<App fetch={fetch} socket={() => new QuietSocket()} wsUrl="ws://x" />);
     await userEvent.type(screen.getByLabelText("Password"), "pw");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));

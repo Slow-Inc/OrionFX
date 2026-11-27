@@ -1,5 +1,6 @@
 // Route views. Trading (#74), Insights, History and Settings (#75) replace these.
 import type { Route } from "./app";
+import { TradingView } from "./trading";
 
 function NotYet({ name }: { name: string }) {
   return (
@@ -11,7 +12,7 @@ function NotYet({ name }: { name: string }) {
 }
 
 export const VIEWS: Record<Route, () => React.ReactElement> = {
-  trading: () => <NotYet name="Trading" />,
+  trading: TradingView,
   insights: () => <NotYet name="AI Insights" />,
   history: () => <NotYet name="History" />,
   settings: () => <NotYet name="Settings" />,

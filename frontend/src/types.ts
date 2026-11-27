@@ -42,6 +42,19 @@ export interface Status {
   live_allowed: boolean;
   health: Record<string, HealthBeat>;
   latest_seq: number;
+  /** M06's latest Account DD reading; null until one exists (unknown, never 0). */
+  risk: Risk | null;
+}
+
+export interface Risk {
+  epoch_dd_percent: string | null;
+  lifetime_dd_percent: string | null;
+  epoch_ceiling_percent: string;
+  lifetime_ceiling_percent: string;
+  risk_locked: boolean;
+  reason_codes: string[];
+  policy_version: string;
+  observed_at: string;
 }
 
 export interface AccountSnapshot {
