@@ -240,11 +240,10 @@ class Executor:
                 )
             return None  # too early to tell: stays unresolved, dispatch stays blocked
         filled = sum((d.volume for d in deals), Decimal(0))
-        priced = [d for d in deals if d.price is not None]
+        priced = [(d.volume, d.price) for d in deals if d.price is not None]
+        priced_volume = sum((v for v, _ in priced), Decimal(0))
         vwap = (
-            sum((d.volume * d.price for d in priced if d.price is not None), Decimal(0)) / filled
-            if filled and priced
-            else None
+            sum((v * p for v, p in priced), Decimal(0)) / priced_volume if priced_volume else None
         )
         position_id = deals[0].position_id
         state = (

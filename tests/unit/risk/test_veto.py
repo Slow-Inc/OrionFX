@@ -292,3 +292,26 @@ def test_partial_close_must_respect_lot_rules() -> None:
 
 def test_spec_for_another_symbol_is_missing() -> None:
     assert "SPEC_MISSING" in _deny(_intent(), _ctx(spec=replace(SPEC, symbol="EURUSD")))
+
+
+@pytest.mark.parametrize(
+    ("bid", "ask"),
+    [("2000.20", "2000.00"), ("0", "2000.00"), ("-1", "2000.00")],
+)
+def test_a_crossed_or_non_positive_quote_denies_entries(bid: str, ask: str) -> None:
+    """#121 (a) / MAJ-06.7: ask < bid passed the spread check (negative spread)."""
+    quote = Quote("XAUUSD", D(bid), D(ask), NOW)
+    assert "QUOTE_INVALID" in _deny(_intent(), _ctx(quote=quote))
+
+
+def test_a_crossed_quote_never_blocks_an_exit() -> None:
+    crossed = Quote("XAUUSD", D("2000.20"), D("2000.00"), NOW)
+    ctx = _ctx(quote=crossed, bot_positions=[_pos("0.01")])
+    d = evaluate(_intent(action="CLOSE_ALL", side=None, requested_lot=None), ctx)
+    assert d.verdict is Verdict.ALLOW
+
+
+def test_negative_equity_is_already_denied_by_the_margin_check() -> None:
+    """#121 (e): refuted. free_margin <= equity < 0 is below any floor of equity x 50%."""
+    broke = replace(ACCOUNT, balance=D(-100), equity=D(-100), free_margin=D(-100))
+    assert "MARGIN_INSUFFICIENT" in _deny(_intent(), _ctx(account=broke))
