@@ -6,6 +6,41 @@
 
 ---
 
+## M05 slice C — exits, bounded adds, recovery as opportunity, trace and replay (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/54-m05-exits`)
+
+**Goal:** manage a cycle that holds the bot's basket, and make every decision reproducible from stored inputs (PRD-05 #51, slice #54; DEC-05/06/07, UST-12, AT-14, AT-41, AT-42).
+
+**Shipped:**
+- `backend/app/decision/fusion.py`: the shared core, covering gather, votes, EV, build/wait, events, `Costs`, `CycleView.pending` and `Evidence`.
+- `manage.py`:
+  - EXIT CLOSE_ALL when the evidence reverses.
+  - ADD only as a positive-EV opportunity, at the initial lot and below the cap. A losing cycle gives RECOVERY_OPPORTUNITY, refused in Live. An unknown Cycle Net fails closed.
+  - Otherwise WAIT HOLD.
+- `trace.py`: a nested `DecisionTrace` with `capture` and `replay`.
+- `decide.py` is now a thin policy on top of fusion.
+- Tests:
+  - `tests/support/{decision,engine}.py` hold the shared builders; tests no longer import each other.
+  - The integration fixtures live in `tests/integration/conftest.py`.
+  - New `tests/integration/test_decision_to_engine.py`.
+
+**Validation:**
+- `uv run pytest`: all pass.
+- M05 → journal → M06 → fake broker works end to end: ENTER is allowed and opens a position, a republish is ignored, and CLOSE_ALL closes the basket.
+- Mutation probes: 23 on manage/trace/pending, all caught.
+
+**Review fixes:**
+- Repeats across ticks are refused by pending intent action (OPEN/ADD/CLOSE_ALL), so floating Cycle Net or spread no longer slips a duplicate ADD/EXIT through. Cycle Net and lots are out of the decision id.
+- Live forecast and news can call an exit on a stale snapshot; only the stale chart vote is dropped.
+- The trace is nested. `max_positions` is required whenever there is a held basket, there is no `or 1` fallback, and a 0 cap is accepted. A test checks that every input field is captured.
+- `CYCLE_PNL_UNKNOWN` is renamed `CYCLE_NET_UNKNOWN` to match the glossary.
+- The docstring no longer claims that M06 refuses a same-lot Live recovery add.
+
+**Not done:**
+- Whether M06 should also refuse a same-lot Live recovery add is an owner decision. It is a ledger row.
+- CAT-R02-* conditional recovery variants stay planned.
+
+---
+
 ## M05 slice B — fusion, EV after costs, WAIT rules, decisions and intents (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/53-m05-decide`)
 
 **Goal:** turn proposals and evidence into one explainable ENTER or WAIT, never trading on stale, conflicting or non-positive-EV evidence (PRD-05 #51, slice #53; DEC-01/02/04/05, AT-14/18/19/34).

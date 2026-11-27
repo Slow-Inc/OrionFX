@@ -2,22 +2,33 @@
 AT-13, AT-23, AT-32, AT-34, AT-42). AT-09/AT-10 need MT5 and the EA (#17)."""
 
 import sqlite3
-from collections.abc import Iterator
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
+from tests.support.engine import (
+    SETTINGS,
+    T0,
+    Clock,
+    _bot_positions,
+    _closed_cycle,
+    _command,
+    _completed,
+    _configure,
+    _decision,
+    _engine,
+    _intent,
+    _last_cycle,
+    _price,
+    _running,
+)
 
-from app.core.config import TradingConfig, UserConfig
 from app.core.contracts import (
     ControlCompleted,
     ControlRequested,
-    CycleUpdated,
     ExecutionUpdated,
     RiskDecision,
-    TradeIntent,
 )
 from app.core.enums import (
     CloseReason,
@@ -33,180 +44,18 @@ from app.core.enums import (
     Verdict,
 )
 from app.core.events import make_event
-from app.engine.engine import Engine, EngineSettings, LeaseLost
+from app.engine.engine import Engine, LeaseLost
 from app.execution.broker import BOT_MAGIC
 from app.execution.fake_broker import FakeBroker, Outcome
 from app.execution.ledger import ExecutionLedger
 from app.execution.ownership import OwnershipRegistry
 from app.profit.cycle import CycleBook
 from app.risk.drawdown import DrawdownTracker
-from app.storage.config_store import ConfigStore
-from app.storage.db import connect, migrate
 from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag, set_bool_flag, set_flag
 from app.storage.journal import Journal, payload_as
 from app.storage.lease import LeaseStore
 
 D = Decimal
-T0 = datetime(2026, 1, 5, 10, tzinfo=UTC)
-
-
-class Clock:
-    def __init__(self, broker: FakeBroker) -> None:
-        self.broker = broker
-
-    def __call__(self) -> datetime:
-        return self.broker.now
-
-    def advance(self, seconds: float) -> None:
-        self.broker.now += timedelta(seconds=seconds)
-
-
-@pytest.fixture
-def conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
-    c = connect(tmp_path / "engine.db")
-    migrate(c)
-    yield c
-    c.close()
-
-
-@pytest.fixture
-def broker() -> FakeBroker:
-    b = FakeBroker(balance=D("1000"), now=T0)
-    b.set_quote("XAUUSD", bid=D("2000.00"), ask=D("2000.00"))
-    return b
-
-
-@pytest.fixture
-def clock(broker: FakeBroker) -> Clock:
-    return Clock(broker)
-
-
-def _configure(conn: sqlite3.Connection, **trading: object) -> None:
-    base: dict[str, object] = {
-        "initial_lot": D("0.01"),
-        "profit_target_usd": D("10"),
-        "max_drawdown_percent": D("20"),
-        "strategies_enabled": ["trend"],
-    }
-    base.update(trading)
-    store = ConfigStore(conn)
-    version, _ = store.current()
-    store.update(
-        UserConfig(trading=TradingConfig.model_validate(base)), expected_version=version, actor="t"
-    )
-
-
-def _engine(
-    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock, holder: str = "engine-a"
-) -> Engine:
-    return Engine(conn, broker, settings=EngineSettings(holder=holder), clock=clock)
-
-
-SETTINGS = EngineSettings()
-
-
-def _command(conn: sqlite3.Connection, command: ControlCommand) -> str:
-    cid = f"cmd-{command}-{Journal(conn).latest_seq()}"
-    Journal(conn).append(
-        make_event(
-            "control.requested",
-            source="M08",
-            payload=ControlRequested(command_id=cid, command=command, actor="owner"),
-            account_id=SETTINGS.account_id,
-            bot_id=SETTINGS.bot_id,
-            mode=Mode.DEMO,
-        )
-    )
-    return cid
-
-
-_n = 0
-
-
-def _intent(
-    conn: sqlite3.Connection,
-    clock: Clock,
-    *,
-    action: IntentAction = IntentAction.OPEN,
-    lot: str | None = "0.01",
-    side: Side | None = Side.BUY,
-    strategy: str = "trend",
-    symbol: str = "XAUUSD",
-    mode: Mode = Mode.DEMO,
-    refs: list[str] | None = None,
-) -> str:
-    global _n
-    _n += 1
-    iid = f"intent-{_n}"
-    Journal(conn).append(
-        make_event(
-            "trade.intent",
-            source="M05",
-            payload=TradeIntent(
-                intent_id=iid,
-                decision_id=f"dec-{_n}",
-                action=action,
-                side=side,
-                symbol=symbol,
-                requested_lot=None if lot is None else D(lot),
-                strategy_id=strategy,
-                cycle_id=None,
-                mode=mode,
-                expected_value_usd=None,
-                prediction_ids=[],
-                position_refs=refs or [],
-                valid_until=clock() + timedelta(seconds=30),
-            ),
-            account_id=SETTINGS.account_id,
-            bot_id=SETTINGS.bot_id,
-            mode=mode,
-        )
-    )
-    return iid
-
-
-def _completed(conn: sqlite3.Connection, command_id: str) -> ControlCompleted:
-    found = Journal(conn).find("control.completed", "command_id", command_id)
-    assert found is not None, f"no control.completed for {command_id}"
-    return payload_as(found, ControlCompleted)
-
-
-def _decision(conn: sqlite3.Connection, intent_id: str) -> RiskDecision:
-    found = Journal(conn).find("risk.decision", "intent_id", intent_id)
-    assert found is not None, f"no risk.decision for {intent_id}"
-    return payload_as(found, RiskDecision)
-
-
-def _last_cycle(conn: sqlite3.Connection) -> CycleUpdated:
-    (ev,) = Journal(conn).recent(["cycle.updated"], limit=1)
-    return payload_as(ev, CycleUpdated)
-
-
-def _closed_cycle(conn: sqlite3.Connection) -> CycleUpdated:
-    """The newest cycle.updated that reports CLOSED."""
-    for ev in Journal(conn).recent(["cycle.updated"], limit=20):
-        upd = payload_as(ev, CycleUpdated)
-        if upd.state is CycleState.CLOSED:
-            return upd
-    raise AssertionError("no CLOSED cycle.updated")
-
-
-def _running(conn: sqlite3.Connection, broker: FakeBroker, clock: Clock) -> Engine:
-    _configure(conn)
-    eng = _engine(conn, broker, clock)
-    assert eng.start()
-    cid = _command(conn, ControlCommand.START)
-    eng.tick()
-    assert _completed(conn, cid).resulting_state is ControlState.RUNNING
-    return eng
-
-
-def _bot_positions(broker: FakeBroker) -> list[str]:
-    return [p.position_id for p in broker.positions() if p.magic == BOT_MAGIC]
-
-
-def _price(broker: FakeBroker, price: str) -> None:
-    broker.set_quote("XAUUSD", bid=D(price), ask=D(price))
 
 
 # --- start, lease, restart -------------------------------------------------------------------
