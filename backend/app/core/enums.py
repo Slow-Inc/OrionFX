@@ -183,3 +183,11 @@ class QualityFlag(StrEnum):
     STALE = "STALE"
     MISSING_INPUT = "MISSING_INPUT"
     TICK_COUNT_NOT_TRADED_VOLUME = "TICK_COUNT_NOT_TRADED_VOLUME"
+
+
+class EventImpact(StrEnum):
+    """Economic-calendar impact of an event."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
