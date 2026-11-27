@@ -121,6 +121,10 @@ class ExperienceLog:
         self._candles = candles
         self._clock = clock
 
+    @property
+    def candles(self) -> CandleStore:
+        return self._candles
+
     # --- recording ---------------------------------------------------------------------
 
     def record(
