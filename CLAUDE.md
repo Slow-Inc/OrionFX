@@ -121,6 +121,7 @@ Single-context; the glossary is `UBIQUITOUS_LANGUAGE.md` (read it wherever a ski
 ## Pointers
 
 - `docs/agents/workflow.md` — grill → PRD → issues → TDD; auto-triggered skills
+- `docs/agents/opencode-setup.md` — step-by-step OpenCode Go setup (App, OIDC service accounts, workflows, skills, verify, merge rule, troubleshooting)
 - `docs/agents/training-loop.md` — the M04 training loop: data → labels → training → evaluation tiers → claim protocol → autonomous Shadow/Demo promotion and rollback; built vs planned
 - `docs/agents/domain.md` — how to read CONTEXT / glossary / ADRs / master plan
 - `docs/adr/README.md` — decisions; `docs/reports/README.md` — records
