@@ -7,7 +7,8 @@
 # APPROVE or REQUEST_CHANGES) on the head SHA, with inline comments on the exact
 # diff lines. The step posts with an OpenCode GitHub App installation token,
 # so the review shows as the OpenCode app bot. The job's own GITHUB_TOKEN is
-# read-only.
+# read-only. Every script that holds a token runs from the PR's BASE revision
+# (_trusted), never from the PR head, because the repo is public.
 #
 # Model auth: Console service account "OrionFX PR Review" (OIDC, pinned to repo
 # ID 1473623856, pull_request runs only, permission Models: Request). No repo
@@ -45,6 +46,27 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - name: Checkout trusted tooling (PR base revision)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: _trusted-base
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: Select trusted tooling
+        # Scripts that hold a token (the shared action, app-token.sh, post.py)
+        # run only from the base revision, never from the PR head. Fallback to
+        # the head copy happens only while the base has no tooling yet (the PR
+        # that introduces it).
+        run: |
+          set -euo pipefail
+          base=_trusted-base/.github
+          if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ]; then
+            cp -r "$base" _trusted
+          else
+            echo "::warning::The base revision has no OpenCode tooling yet (bootstrap); using the PR head copy."
+            cp -r .github _trusted
+          fi
       - name: Gather context
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,7 +99,7 @@ jobs:
           2. At the very end, one fenced code block whose info string is exactly "json opencode-inline", holding a JSON array with one entry per finding that points at a line added or kept in the diff: {"path": "<file path as in the diff>", "line": <line number in the new version of the file>, "body": "[severity] finding. Why. Suggested fix."}. At most 15 entries. Findings that cannot be tied to a diff line stay only in the summary. Use [] if there are none.
           EOF
       - name: Run OpenCode
-        uses: ./.github/actions/opencode-run
+        uses: ./_trusted/actions/opencode-run
         with:
           client-id: sk_dcae4ec7-d3b6-4328-92a0-b14ae60dfad8  # "OrionFX PR Review"; not a secret
           prompt-file: .git/opencode-ctx/prompt.md
@@ -89,8 +111,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          GH_TOKEN=$(bash .github/opencode/app-token.sh)
+          GH_TOKEN=$(bash _trusted/opencode/app-token.sh)
           echo "::add-mask::$GH_TOKEN"
           export GH_TOKEN
           trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
-          python3 -I .github/opencode/post.py review "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA"
+          python3 -I _trusted/opencode/post.py review "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA"

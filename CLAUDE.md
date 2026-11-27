@@ -66,7 +66,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 
 - **Claude hooks** (`.claude/settings.json`, marker `.claude/t4.json`): session-start injects `.claude/hooks/t4-directive.md` (a short directive to route through `using-t4`; the plugin, if installed, supplies the same); per-turn reminder; `PreToolUse` gate **blocks `gh pr create` with no referenced issue and dangerous git** (`reset --hard`, force-push, `clean -f`, `branch -D`). Binds Claude only.
 - **git pre-push** (`.githooks/`): issue reference, tree budget, `T4-Gates:` trailer. Binds anyone who enabled `core.hooksPath`.
-- **CI** (`t4-verify.yml`): `guards`, `lint`, `typecheck`, `test`, `frontend`; plus the OpenCode workflows (below). **Not required checks** — Slow-Inc is on the free plan and private repos can't enforce rulesets. `requireGreenCI: true` makes the agent's `gh pr merge` wait for green CI; **a human merging on the web is not blocked by anything.**
+- **CI** (`t4-verify.yml`): `guards`, `lint`, `typecheck`, `test`, `frontend`; plus the OpenCode workflows (below). **Not required checks (yet)** — the repo is **public** (verified 2026-11-28), so rulesets and required status checks *are* enforceable; none is configured today, which is an owner decision (ledger). `requireGreenCI: true` makes the agent's `gh pr merge` wait for green CI; **a human merging on the web is not blocked by anything.**
 - **OpenCode (advisory, read-only; full table in `docs/agents/workflow.md` → OpenCode):** five workflows share `.github/actions/opencode-run`:
   - `opencode-review` (every collaborator PR) posts ONE `COMMENT` review plus inline comments, using the repo skills in `.opencode/skills/`;
   - `opencode-ask` handles `/oc <question>` and `/opencode <question>` comments by collaborators, answer-only;
@@ -74,7 +74,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
   - `opencode-triage` labels new trusted issues and asks for a missing EN/TH part;
   - `opencode-dispatch` runs an ad-hoc read-only prompt.
 
-  **OpenCode never changes code.** No job has `contents: write`. The model runs with a deny-by-default tool policy: read, glob, grep and list in the checkout, plus the skill tool. It has no shell, no edit, no web, and no GitHub token. Trusted steps do all posting, as the OpenCode GitHub App (`opencode-agent[bot]`). Each step mints a short-lived App installation token by OIDC and revokes it after posting; the job `GITHUB_TOKEN` is read-only. `/oc` refuses change requests and says Claude is the developer.
+  **OpenCode never changes code.** No job has `contents: write`. The model runs with a deny-by-default tool policy: read, glob, grep and list in the checkout, plus the skill tool. It has no shell, no edit, no web, and no GitHub token. Trusted steps do all posting, as the OpenCode GitHub App (`opencode-agent[bot]`). Each step mints a short-lived App installation token by OIDC and revokes it after posting; the job `GITHUB_TOKEN` is read-only. On PR events, every token-holding script (shared action, `app-token.sh`, `post.py`) runs from the PR's **base** revision, never the head. The App installation itself has `contents: write` on all org repos. That is broader than needed; narrowing the repo selection is an owner step in the ledger. `/oc` refuses change requests and says Claude is the developer.
 
   **Before merge** the agent waits for the `review` check, reads the OpenCode review on the current head SHA, and fixes each valid finding or replies explaining why not. The review is advisory and does **not** replace the T4 gates.
 
@@ -90,7 +90,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 - Local `verify` is **armed** (ruff + format + mypy + pytest; backend only); `t4-gate` runs it before `gh pr merge`.
 - `.claude/hooks/` holds only the 16 files the wired hooks reach (dependency closure checked 2026-11-27); the unwired `clink`/canary/debt/receipt scripts and the unread `using-t4.snapshot.md` were left out. The scripts are vendored from `xeno-skills` — fix bugs upstream, not here.
 - **Known upstream defects (vendored, not patched here):** `.githooks/check-gate-ledger` reads the **oldest** `T4-Gates:` trailer on the branch (`git log … | tail -n 1`), so put the trailer on the first commit correctly; `t4-gate`'s `mcp__github__merge_pull_request` path skips the `requireGreenCI` check (no GitHub MCP server is configured here, so the path is unreachable today); `gh pr merge --squash <n>` (flag before the number) is not parsed as PR `<n>` — write `gh pr merge <n> --squash`.
-- **Secret scanning / push protection: unavailable** (GitHub 422 on this private free-plan repo). Nothing server-side stops a committed secret — keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
+- **Secret scanning / push protection: available but OFF** (the repo is public; `security_and_analysis` shows both disabled on 2026-11-28 — an owner decision, see the ledger). Until enabled, nothing server-side stops a committed secret — keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
 
 ## Training-loop research autonomy (owner grant, 2026-11-28)
 

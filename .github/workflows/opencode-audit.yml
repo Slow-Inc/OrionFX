@@ -26,6 +26,9 @@ permissions: {}
 
 jobs:
   audit:
+    # Only from main: token-holding scripts must be main's, and the Automation
+    # service account accepts main only.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # GITHUB_TOKEN is read-only; the issue is filed with the OpenCode App token.

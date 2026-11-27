@@ -30,11 +30,29 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Sign in to OpenCode
+    # Install first, with no OpenCode key anywhere in the job yet, so npm
+    # lifecycle scripts never see it.
+    - name: Install OpenCode
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm install -g --no-fund --no-audit opencode-ai@1.19.6
+        opencode --version
+    # Sign in and run in ONE step: the 1-hour key lives only in this step's
+    # process env (never GITHUB_ENV), so no later step ever sees it.
+    - name: Sign in to OpenCode and run
       shell: bash
       env:
         AUDIENCE: https://opencode.ai/console
         CLIENT_ID: ${{ inputs.client-id }}
+        MODEL: ${{ inputs.model }}
+        PROMPT_FILE: ${{ inputs.prompt-file }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        OPENCODE_CONFIG_CONTENT: >-
+          {"permission": {"*": "deny", "read": "allow", "glob": "allow",
+          "grep": "allow", "list": "allow", "skill": "allow",
+          "external_directory": "deny"}}
       run: |
         set -euo pipefail
         if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
@@ -49,38 +67,21 @@ runs:
           -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
           -d client_id="$CLIENT_ID" \
           -d subject_token="$oidc" | jq -r .access_token)
+        unset oidc
         if [ -z "$token" ] || [ "$token" = "null" ]; then
           echo "::error::OpenCode Console token exchange returned no access token (client $CLIENT_ID)."
           exit 1
         fi
         echo "::add-mask::$token"
-        echo "OPENCODE_API_KEY=$token" >> "$GITHUB_ENV"
-    - name: Install OpenCode
-      shell: bash
-      run: |
-        set -euo pipefail
-        npm install -g --no-fund --no-audit opencode-ai@1.19.6
-        opencode --version
-    - name: Run OpenCode
-      shell: bash
-      env:
-        MODEL: ${{ inputs.model }}
-        PROMPT_FILE: ${{ inputs.prompt-file }}
-        OUTPUT_FILE: ${{ inputs.output-file }}
-        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
-        OPENCODE_CONFIG_CONTENT: >-
-          {"permission": {"*": "deny", "read": "allow", "glob": "allow",
-          "grep": "allow", "list": "allow", "skill": "allow",
-          "external_directory": "deny"}}
-      run: |
-        set -euo pipefail
+        export OPENCODE_API_KEY="$token"
+        unset token
         events="$RUNNER_TEMP/opencode-events.jsonl"
         status=0
         timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
           opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
           < /dev/null > "$events" || status=$?
         extract=0
-        python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE" || extract=$?
+        env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE" || extract=$?
         if [ "$status" -ne 0 ]; then
           echo "::error::OpenCode exited with status $status (124 = timed out after ${TIMEOUT_MINUTES}m)."
         fi

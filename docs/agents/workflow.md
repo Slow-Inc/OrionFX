@@ -34,9 +34,13 @@ OpenCode is a second, advisory reviewer and assistant. It **never changes code**
 
 Every job runs the shared action `.github/actions/opencode-run` with the same three-step pattern:
 
-1. **Sign in.** Exchange the job's GitHub OIDC token for a 1-hour OpenCode key, with no repo secret. The step fails fast if the exchange returns nothing.
-2. **Run.** Run the pinned CLI (`opencode-ai@1.19.6`) with a deny-by-default tool policy: only `read`, `glob`, `grep` and `list` inside the checkout, plus the `skill` tool. It has no bash, no edit, no web and no reads outside the checkout. The model never gets a GitHub token, and no tool lets it read its env.
+1. **Install** the pinned CLI (`opencode-ai@1.19.6`) before any key exists in the job, so npm install scripts never see one.
+2. **Sign in and run in one step.** Exchange the job's GitHub OIDC token for a 1-hour OpenCode key, with no repo secret. The step fails fast if the exchange returns nothing. The key lives only in that step's process env, never in `GITHUB_ENV`. Then run the CLI with a deny-by-default tool policy: only `read`, `glob`, `grep` and `list` inside the checkout, plus the `skill` tool. It has no bash, no edit, no web and no reads outside the checkout. The model never gets a GitHub token, and no tool lets it read its env.
 3. **Post.** A trusted workflow step posts the answer **as the OpenCode GitHub App** (`opencode-agent[bot]`). The step gets an App installation token through a second OIDC exchange (audience `opencode-github-action`, separate from the Console model sign-in), uses it for that one POST, and then revokes it. The job's own `GITHUB_TOKEN` is read-only. The App token is broader than the job token (it carries the App's installation permissions), so it lives only in the trusted posting step and never reaches the model.
+
+**OpenCode App installation (read from GitHub on 2026-11-28):** `opencode-agent`, repository selection **all**. Permissions: `contents: write`, `issues: write`, `pull_requests: write`, `actions: read`, `metadata: read`. Events: issues, issue_comment, pull_request, pull_request_review, pull_request_review_comment, workflow_job, workflow_run. `contents: write` is broader than we use. Our scripts only POST reviews, comments, issues and labels. The App publisher sets the permissions, so an installer cannot narrow them. The owner can narrow the repository selection (see the ledger).
+
+**Trusted tooling runs from the base revision.** The repo is public, so on PR events (`opencode-review`, and `/oc` on review comments) every script that holds a token runs from the PR's **base** revision, checked out separately into `_trusted/` and never taken from the PR head. That covers the shared action (Console key), `app-token.sh` and `post.py` (App token). The PR head is used only as data for the model. Audit, triage and dispatch run only from `main`. Limit: on a `pull_request` event the workflow file itself still comes from the PR head. This guard therefore stops a modified poster in an ordinary PR, but it does not stop a collaborator who rewrites the workflow. The collaborator-only and same-repo guards cover that case.
 
 Each job's context is pre-fetched into `.git/opencode-ctx/`. The model is set in one place, the `model` default in that action (`opencode-go/deepseek-v4.1-flash`).
 
@@ -65,7 +69,7 @@ The review is advisory evidence. It does not replace `/code-review`, `/scrutiniz
 
 ### Honest limits
 
-- It is not a required check (free plan). A green check can still carry findings, so read the review. A **skipped** check means no review ran. Fork PRs are skipped by the `if:`, and could not mint an OIDC token anyway.
+- It is not a required check (none is configured yet; the public repo could enforce one — owner decision). A green check can still carry findings, so read the review. A **skipped** check means no review ran. Fork PRs are skipped by the `if:`, and could not mint an OIDC token anyway.
 - The repo is **public**. Text in issues, PR bodies and comments may come from anyone, and can bias **what the answer says**. It cannot give the model new tools. The no-exfiltration claim is scoped to that case: an outsider's text cannot make the model read secrets or reach the network. A collaborator who edits the workflow or the shared action in a PR can, as with any workflow.
 - The skills and the shared action are read from the PR head, so a collaborator PR can change its own reviewer. That is no escalation, because such a PR could edit the workflow anyway.
 - **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28; that run hung for 18 minutes). Billing goes to the owner's Go plan. Every workflow has a hard `timeout-minutes`.

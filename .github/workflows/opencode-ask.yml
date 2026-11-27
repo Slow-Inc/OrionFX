@@ -44,6 +44,27 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - name: Checkout trusted tooling (PR base, or main)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          path: _trusted-base
+          sparse-checkout: .github
+          persist-credentials: false
+      - name: Select trusted tooling
+        # Scripts that hold a token (the shared action, app-token.sh, post.py)
+        # run only from the base revision, never from the PR head. Fallback to
+        # the head copy happens only while the base has no tooling yet (the PR
+        # that introduces it).
+        run: |
+          set -euo pipefail
+          base=_trusted-base/.github
+          if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ]; then
+            cp -r "$base" _trusted
+          else
+            echo "::warning::The base revision has no OpenCode tooling yet (bootstrap); using the PR head copy."
+            cp -r .github _trusted
+          fi
       - name: Gather context
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,7 +96,7 @@ jobs:
           Answer in the language of the question, concisely, citing files as path:line. Your final answer is posted verbatim as the reply.
           EOF
       - name: Run OpenCode
-        uses: ./.github/actions/opencode-run
+        uses: ./_trusted/actions/opencode-run
         with:
           # issue_comment -> "OrionFX Automation" (main); review comment -> "OrionFX PR Review". Not secrets.
           client-id: ${{ github.event_name == 'issue_comment' && 'sk_a7b3d9af-0863-4e01-8a87-02901ef4c78e' || 'sk_dcae4ec7-d3b6-4328-92a0-b14ae60dfad8' }}
@@ -89,7 +110,7 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
-          GH_TOKEN=$(bash .github/opencode/app-token.sh)
+          GH_TOKEN=$(bash _trusted/opencode/app-token.sh)
           echo "::add-mask::$GH_TOKEN"
           export GH_TOKEN
           trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
