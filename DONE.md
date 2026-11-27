@@ -37,7 +37,7 @@
 - The monkeypatched test was replaced by behaviour tests.
 
 **Validation:**
-- Backend verify green; 18 worker tests; mutation probes 20/20 caught.
+- Backend verify green; 18 worker tests; mutation probes 16/16 caught (one target removed with the dead heartbeat code).
 - Live on OpenCode Go with `qwen3.8-flash` and a temporary DB:
   - war news was assessed UP and the reasoning was UP;
   - evidence read at the tick start was empty, because the answer did not exist yet.
