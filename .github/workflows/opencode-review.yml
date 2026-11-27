@@ -115,7 +115,7 @@ jobs:
             "todowrite": "allow", "todoread": "allow",
             "external_directory": "deny"}}
         with:
-          model: opencode-go/deepseek-v4-pro
+          model: opencode-go/deepseek-v4.1-flash
           runtime: v1
           use-github-token: true
           timeout-minutes: 12
