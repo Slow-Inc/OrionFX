@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from app.core.config import LlmConfig, UserConfig
 from app.news.openai_compat import OpenAICompatibleProvider, provider_from_config
-from app.news.provider import Provider, ProviderError, ProviderTimeout
+from app.news.provider import Provider, ProviderError, ProviderRateLimited, ProviderTimeout
 
 BASE = "https://llm.example/inference/go/openai/v1"
 KEY = "sk-test-secret-123"
@@ -193,3 +193,93 @@ def test_separate_adapters_use_separate_sessions() -> None:
     _provider(handler).complete("a", timeout_s=30)
     _provider(handler).complete("a", timeout_s=30)
     assert len(set(sessions)) == 2
+
+
+class Clock:
+    """A fake monotonic clock the adapter reads and the fake sleep advances."""
+
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        self.t += s
+
+
+def _timed(handler, clock: Clock) -> OpenAICompatibleProvider:  # type: ignore[no-untyped-def]
+    return OpenAICompatibleProvider(
+        base_url=BASE, model="m", api_key_ref="env:LLM_KEY", env=ENV,
+        transport=httpx.MockTransport(handler), sleep=clock.sleep, clock=clock,
+    )  # fmt: skip
+
+
+def test_the_retry_after_a_wait_gets_only_the_time_left() -> None:
+    clock = Clock()
+    timeouts: list[float] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        timeouts.append(req.extensions["timeout"]["read"])
+        if len(timeouts) == 1:
+            clock.t += 25  # the refusal itself took 25 s
+            return httpx.Response(429, headers={"Retry-After": "2"})
+        return _ok()
+
+    _timed(handler, clock).complete("x", timeout_s=30)
+    assert timeouts == [30.0, pytest.approx(3.0)]
+
+
+def test_a_trickling_answer_cannot_outlive_the_timeout() -> None:
+    """httpx timeouts are per read; the adapter bounds the whole call."""
+    clock = Clock()
+
+    def chunks():  # type: ignore[no-untyped-def]
+        for part in (b'{"choices": [{"message": ', b'{"content": "late"}}]}'):
+            clock.t += 20
+            yield part
+
+    with pytest.raises(ProviderTimeout):
+        _timed(lambda r: httpx.Response(200, content=chunks()), clock).complete("x", timeout_s=30)
+
+
+@pytest.mark.parametrize("headers", [{}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}])
+def test_a_rate_limit_without_a_usable_wait_fails_at_once(headers: dict[str, str]) -> None:
+    slept: list[float] = []
+    p = _provider(lambda r: httpx.Response(429, headers=headers), sleeps=slept)
+    with pytest.raises(ProviderRateLimited):
+        p.complete("x", timeout_s=30)
+    assert slept == []
+
+
+def test_a_redirect_is_not_followed_with_the_key() -> None:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        return httpx.Response(307, headers={"Location": "https://elsewhere.example/steal"})
+
+    with pytest.raises(ProviderError, match="HTTP 307"):
+        _provider(handler).complete("x", timeout_s=30)
+    assert seen == [f"{BASE}/chat/completions"]
+
+
+def test_the_allowance_is_only_the_last_successful_call() -> None:
+    answers = iter([_ok(allowance=0.5), httpx.Response(500)])
+    p = _provider(lambda r: next(answers))
+    p.complete("x", timeout_s=30)
+    assert p.last_allowance == Decimal("0.5")
+    with pytest.raises(ProviderError):
+        p.complete("x", timeout_s=30)
+    assert p.last_allowance is None
+    no_usage = httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    q = _provider(lambda r: no_usage)
+    q.complete("x", timeout_s=30)
+    assert q.last_allowance is None
+
+
+def test_the_adapter_closes_its_connections() -> None:
+    with _provider(lambda r: _ok()) as p:
+        p.complete("x", timeout_s=30)
+    with pytest.raises(RuntimeError):
+        p.complete("x", timeout_s=30)  # httpx refuses a closed client

@@ -45,7 +45,10 @@ decision) · ⛔ blocked (needs an external resource) · 🔴 **UNTRACKED** (MD-
 | M08 System Core (PRD #7): storage/journal/config/lease/backup (#8), API/auth/WS (#9) | ✅ | — | Done |
 | M06 Risk & Execution (PRD #12): broker port + fake broker (#13), risk veto + DD (#14), cycle/target/trailing/close (#15), engine loop (#16) | ✅ | — | Done against the fake broker |
 | M06 slice E: real MT5 adapter + MQL5 Execution EA, broker-side Emergency SL (AT-09, AT-10) | ⛔ | Needs an MT5 terminal + demo account | #17 — not done; engine runs only against the fake broker |
-| M03 slice D: real LLM provider + news/calendar adapters | ⛔ | Needs provider/news API keys | #41 — not done; M03 runs on fakes |
+| M03 live LLM provider (PRD #98): reasoning prompt v2 (#99 ✅), OpenAI-compatible adapter for OpenCode Go (#100 ✅), off-tick news worker (#101) | 🟢 | — | #101 next; benchmark + model choice in #97 (docs PR pending) |
+| M03 adapter hardening: `api_key_ref` can name any `env:` secret and `base_url` any https host (owner-only) | 🔴 | Owner decision | Found in #100 security review (needs the owner's own session, so not a vulnerability); optional fix: allowlist key names such as `env:LLM_*` |
+| M03 news half: licensed news/calendar source | ⛔ | OD-06 licensed source | #41 — not done; M03 news runs on fakes |
+| M05 voting: LLM news can never block an entry (chart + agreeing forecast = 2 votes, news = 1, reasoning counted as restating) | 🔴 | Owner decision (risk policy; may need a Change Request) | Measured end-to-end in #97: with chart+forecast wrong and news right, M05 still entered in 114/114 cases; LLM acts only on exits (M1 exit 90–93%) |
 | M04 slice C: trained XGBoost/LightGBM artifacts + adapters | ⛔ | Needs training data and trained models | #48 — not done; M04 has the baseline and ensemble only |
 | Open decisions & safety TBDs | 🔴 | Owner decisions | `docs/plans/master_planV1.1.md` §13 |
 | Same-lot recovery ADD on a losing cycle in Live: only M05 refuses it (M06 veto refuses size-ups only) | 🔴 | Owner decision (RSK-06 scope) | Decide whether M06 should also deny it; then a veto rule + test (found in #54 review) |

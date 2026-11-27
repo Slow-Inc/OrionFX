@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from app.core.contracts import HealthUpdated
 from app.core.enums import HealthStatus
-from app.news.provider import Provider
+from app.news.provider import Provider, ProviderRateLimited
 
 __all__ = ["COMPONENT", "NO_PROVIDER", "TIMEOUT_S", "ask", "health", "load_json"]
 
@@ -63,6 +63,8 @@ def ask[T](
     for _ in range(ATTEMPTS):
         try:
             text = provider.complete(prompt, timeout_s=timeout_s)
+        except ProviderRateLimited:  # an immediate retry is refused again: stop here
+            return None, "provider rate limited"
         except Exception as exc:  # any adapter failure degrades; never echo its text
             detail = f"provider {type(exc).__name__}"
             continue

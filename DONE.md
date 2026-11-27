@@ -6,6 +6,27 @@
 
 ---
 
+## M03 OpenAI-compatible provider adapter for OpenCode Go (2026-11-27, /tdd + /security-review + review subagent (code-review + simplify + scrutinize lens), branch `feat/100-openai-provider`)
+
+**Goal:** a real provider behind M03's `Provider` port, configured from Settings, with the key resolved only at call time (#100, PRD #98).
+
+**Shipped:**
+- `app.news.openai_compat.OpenAICompatibleProvider`: chat completions with one user message and no tools; `Authorization: Bearer` from the `env:` SecretRef; `x-opencode-session` per adapter; optional `reasoning_effort`.
+- `timeout_s` bounds the whole call (streamed body, checked against a deadline).
+- One `Retry-After` wait on 429 when it fits; otherwise `ProviderRateLimited`, which `ask()` no longer retries at once.
+- Every failure is `ProviderError`/`ProviderTimeout` with fixed text (no body, no account id, no key).
+- `last_allowance` per call; `close()`/context manager; `provider_from_config`.
+- `LlmConfig.base_url` (https only) and `reasoning_effort`; Settings inputs for both.
+
+**Review fixes:** per-read httpx timeout could be outrun by a trickling body (now a total deadline); stacked retries hammered a rate limit (new `ProviderRateLimited`); unclosed client; stale `last_allowance` after a failure; added tests for 429 without/with HTTP-date `Retry-After`, redirects not followed, deadline passed to the retry.
+- Security review: no high-confidence vulnerability. Owner-only hardening (allowlist `api_key_ref` names) recorded in the ledger.
+
+**Validation:**
+- Backend verify and frontend lint/typecheck/test/build green. Mutation probes 15/15 caught.
+- Live: `assess_news` via the adapter on OpenCode Go returned valid assessments (qwen3.8-flash CPI -> DOWN; deepseek-v4.1-flash Fed cut -> UP).
+
+---
+
 ## M03 reasoning prompt v2: chart features are not citable (2026-11-27, /tdd + review subagent (code-review + scrutinize lens), simplify inline, security-review n-a, branch `fix/99-reason-prompt`)
 
 **Goal:** stop real models citing chart feature keys as ids, which invalidated whole reasoning answers (#99, PRD #98).
