@@ -3,28 +3,16 @@ a clock driven by it."""
 
 import sqlite3
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from tests.support.engine import T0, Clock
 
 from app.execution.fake_broker import FakeBroker
 from app.storage.db import connect, migrate
 
 D = Decimal
-T0 = datetime(2026, 1, 5, 10, tzinfo=UTC)
-
-
-class Clock:
-    def __init__(self, broker: FakeBroker) -> None:
-        self.broker = broker
-
-    def __call__(self) -> datetime:
-        return self.broker.now
-
-    def advance(self, seconds: float) -> None:
-        self.broker.now += timedelta(seconds=seconds)
 
 
 @pytest.fixture

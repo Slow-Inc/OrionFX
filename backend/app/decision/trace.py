@@ -1,10 +1,11 @@
 """Decision trace and replay (#54; DEC-07, UST-03; AT-14: "rationale reproducible from
 stored inputs").
 
-A `DecisionTrace` holds every input `decide`/`manage` read, as one JSON-serialisable
-contract. Stored with the decision, it lets an auditor rebuild the same decision
-(same id, same reasons, same intent) later. `replay` re-runs the pure functions; it
-reads no clock, no store and no broker.
+A `DecisionTrace` holds every input `decide`/`manage` read, nested the same way the
+inputs are, as one JSON-serialisable contract. Stored with the decision, it lets an
+auditor rebuild the same decision (same id, reasons and intent) later. `replay`
+re-runs the pure policies; it reads no clock, no store and no broker. A test checks
+that every input field is captured, so a new field cannot be silently dropped.
 """
 
 from pydantic import Field
@@ -17,22 +18,15 @@ from app.core.contracts import (
     PredictionGenerated,
     StrategyProposal,
 )
-from app.core.enums import Mode, Side
+from app.core.enums import IntentAction, Mode, Side
 from app.core.types import Dec, UtcDatetime
 from app.decision.context import DecisionContext
-from app.decision.decide import Costs, CycleView, Decision, Evidence, decide
+from app.decision.decide import decide
+from app.decision.fusion import Costs, CycleView, Decision, Evidence
 from app.decision.manage import Held, manage
 
 
-class HeldTrace(ContractModel):
-    side: Side
-    lots: Dec
-    positions: int
-    cycle_net_usd: Dec | None
-    position_refs: list[str]
-
-
-class DecisionTrace(ContractModel):
+class ContextTrace(ContractModel):
     now: UtcDatetime
     mode: Mode
     snapshot: FeatureSnapshot
@@ -40,20 +34,49 @@ class DecisionTrace(ContractModel):
     spread: Dec | None
     initial_lot: Dec
     allowed: list[str]
-    proposals: list[StrategyProposal]
+
+
+class EvidenceTrace(ContractModel):
     forecast: PredictionGenerated | None
     news: list[NewsAssessment]
     reasoning: LlmReasoning | None
+
+
+class CycleTrace(ContractModel):
     cycle_id: str | None
     open_positions: int
     last_closed_at: UtcDatetime | None
-    pending_decisions: list[str]
-    contract_size: Dec | None
-    commission_per_lot: Dec | None
+    pending: list[IntentAction]
+
+
+class CostsTrace(ContractModel):
+    contract_size: Dec
+    commission_per_lot: Dec
+
+
+class HeldTrace(ContractModel):
+    side: Side
+    positions: int
+    cycle_net_usd: Dec | None
+    position_refs: list[str]
+
+
+class ManageTrace(ContractModel):
+    """Present iff the decision came from `manage`; `max_positions` is then required."""
+
+    held: HeldTrace
+    max_positions: int = Field(ge=0)
+
+
+class DecisionTrace(ContractModel):
+    ctx: ContextTrace
+    proposals: list[StrategyProposal]
+    evidence: EvidenceTrace
+    cycle: CycleTrace
+    costs: CostsTrace | None
     symbol: str
     policy_version: str
-    held: HeldTrace | None = None
-    max_positions: int | None = Field(default=None, gt=0)
+    manage: ManageTrace | None = None
 
     @classmethod
     def capture(
@@ -66,46 +89,42 @@ class DecisionTrace(ContractModel):
         costs: Costs | None,
         symbol: str,
         policy_version: str,
-        held: Held | None,
-        max_positions: int | None,
+        held: Held | None = None,
+        max_positions: int | None = None,
     ) -> "DecisionTrace":
+        if (held is None) != (max_positions is None):
+            raise ValueError("held and max_positions go together (manage) or not at all")
+        managed = None
+        if held is not None and max_positions is not None:
+            managed = ManageTrace(held=HeldTrace(**vars(held)), max_positions=max_positions)
         return cls(
-            now=ctx.now, mode=ctx.mode, snapshot=ctx.snapshot, price=ctx.price,
-            spread=ctx.spread, initial_lot=ctx.initial_lot, allowed=sorted(ctx.allowed),
-            proposals=proposals, forecast=evidence.forecast, news=evidence.news,
-            reasoning=evidence.reasoning, cycle_id=cycle.cycle_id,
-            open_positions=cycle.open_positions, last_closed_at=cycle.last_closed_at,
-            pending_decisions=sorted(cycle.pending_decisions),
-            contract_size=costs.contract_size if costs else None,
-            commission_per_lot=costs.commission_per_lot if costs else None,
-            symbol=symbol, policy_version=policy_version,
-            held=None if held is None else HeldTrace(
-                side=held.side, lots=held.lots, positions=held.positions,
-                cycle_net_usd=held.cycle_net_usd, position_refs=held.position_refs,
-            ),
-            max_positions=max_positions,
+            ctx=ContextTrace(now=ctx.now, mode=ctx.mode, snapshot=ctx.snapshot, price=ctx.price,
+                             spread=ctx.spread, initial_lot=ctx.initial_lot,
+                             allowed=sorted(ctx.allowed)),
+            proposals=proposals,
+            evidence=EvidenceTrace(forecast=evidence.forecast, news=evidence.news,
+                                   reasoning=evidence.reasoning),
+            cycle=CycleTrace(cycle_id=cycle.cycle_id, open_positions=cycle.open_positions,
+                             last_closed_at=cycle.last_closed_at, pending=sorted(cycle.pending)),
+            costs=None if costs is None else CostsTrace(**vars(costs)),
+            symbol=symbol, policy_version=policy_version, manage=managed,
         )  # fmt: skip
 
 
-def _costs(t: DecisionTrace) -> Costs | None:
-    if t.contract_size is None or t.commission_per_lot is None:
-        return None
-    return Costs(t.contract_size, t.commission_per_lot)
-
-
 def replay(t: DecisionTrace) -> Decision:
-    ctx = DecisionContext(now=t.now, mode=t.mode, snapshot=t.snapshot, price=t.price,
-                          spread=t.spread, initial_lot=t.initial_lot,
-                          allowed=frozenset(t.allowed))  # fmt: skip
-    evidence = Evidence(forecast=t.forecast, news=t.news, reasoning=t.reasoning)
-    cycle = CycleView(t.cycle_id, t.open_positions, t.last_closed_at,
-                      frozenset(t.pending_decisions))  # fmt: skip
-    costs = _costs(t)
-    if t.held is None:
+    c = t.ctx
+    ctx = DecisionContext(now=c.now, mode=c.mode, snapshot=c.snapshot, price=c.price,
+                          spread=c.spread, initial_lot=c.initial_lot,
+                          allowed=frozenset(c.allowed))  # fmt: skip
+    evidence = Evidence(t.evidence.forecast, t.evidence.news, t.evidence.reasoning)
+    cy = t.cycle
+    cycle = CycleView(cy.cycle_id, cy.open_positions, cy.last_closed_at, frozenset(cy.pending))
+    costs = None if t.costs is None else Costs(t.costs.contract_size, t.costs.commission_per_lot)
+    if t.manage is None:
         return decide(ctx, t.proposals, evidence, cycle=cycle, costs=costs, symbol=t.symbol,
                       policy_version=t.policy_version)  # fmt: skip
-    h = t.held
-    held = Held(h.side, h.lots, h.positions, h.cycle_net_usd, h.position_refs)
+    h = t.manage.held
+    held = Held(h.side, h.positions, h.cycle_net_usd, h.position_refs)
     return manage(ctx, t.proposals, evidence, cycle=cycle, held=held,
-                  max_positions=t.max_positions or 1, costs=costs, symbol=t.symbol,
+                  max_positions=t.manage.max_positions, costs=costs, symbol=t.symbol,
                   policy_version=t.policy_version)  # fmt: skip

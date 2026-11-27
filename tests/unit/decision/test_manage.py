@@ -6,7 +6,7 @@ cycle in Live."""
 from dataclasses import replace
 from decimal import Decimal
 
-from tests.unit.decision.test_decide import (
+from tests.support.decision import (
     COSTS,
     CYCLE,
     NOW,
@@ -18,12 +18,13 @@ from tests.unit.decision.test_decide import (
 )
 
 from app.core.enums import DecisionAction, Direction, IntentAction, Mode, Side
-from app.decision.decide import Evidence, decide
+from app.decision.decide import decide
+from app.decision.fusion import Evidence
 from app.decision.manage import Held, manage
 from app.decision.trace import DecisionTrace, replay
 
 D = Decimal
-HELD = Held(side=Side.BUY, lots=D("0.01"), positions=1, cycle_net_usd=D("2.50"),
+HELD = Held(side=Side.BUY, positions=1, cycle_net_usd=D("2.50"),
             position_refs=["pos-1"])  # fmt: skip
 OPEN = replace(CYCLE, open_positions=1)
 
@@ -97,9 +98,9 @@ def test_recovery_on_a_losing_cycle_is_an_opportunity_outside_live_only() -> Non
     assert live.created.action is DecisionAction.WAIT and "NO_LIVE_RECOVERY" in _reasons(live)
 
 
-def test_unknown_cycle_pnl_fails_closed_for_adding() -> None:
+def test_unknown_cycle_net_fails_closed_for_adding() -> None:
     d = _manage(held=replace(HELD, cycle_net_usd=None))
-    assert "CYCLE_PNL_UNKNOWN" in _reasons(d)
+    assert "CYCLE_NET_UNKNOWN" in _reasons(d)
 
 
 def test_opposite_proposal_without_enough_evidence_holds() -> None:
@@ -125,7 +126,7 @@ def test_an_entry_decision_replays_from_its_stored_trace() -> None:
     ev = Evidence(forecast=_forecast(), news=[_news()], reasoning=_reasoning(Direction.UP, []))
     args = {"cycle": CYCLE, "costs": COSTS, "symbol": "XAUUSD", "policy_version": "p1"}
     original = decide(_ctx(), [_proposal()], ev, **args)  # type: ignore[arg-type]
-    trace = DecisionTrace.capture(_ctx(), [_proposal()], ev, held=None, max_positions=None, **args)  # type: ignore[arg-type]
+    trace = DecisionTrace.capture(_ctx(), [_proposal()], ev, **args)  # type: ignore[arg-type]
     stored = trace.model_dump_json()
     again = replay(DecisionTrace.model_validate_json(stored))
     assert again.created == original.created and again.intent == original.intent
@@ -147,9 +148,64 @@ def test_add_rules_mirror_entry_rules() -> None:
     # chart agrees with the position but a forecast opposes it: 1 vs 1 -> no exit, no add
     split = _manage(evidence=Evidence(forecast=_forecast(direction=Direction.DOWN)))
     assert "CONFLICT_EVIDENCE" in _reasons(split)
-    first = _manage()
-    pending = replace(OPEN, pending_decisions=frozenset({first.created.decision_id}))
+    pending = replace(OPEN, pending=frozenset({IntentAction.ADD}))
     again = manage(_ctx(), [_proposal()], Evidence(forecast=_forecast()), cycle=pending,
                    held=HELD, max_positions=3, costs=COSTS, symbol="XAUUSD",
                    policy_version="p1")  # fmt: skip
     assert "DUPLICATE" in _reasons(again) and again.intent is None
+
+
+# --- review fixes ---
+
+
+def test_no_second_exit_while_one_is_pending() -> None:
+    down = Direction.DOWN
+    ev = Evidence(forecast=_forecast(direction=down), news=[_news(down)])
+    pending = replace(OPEN, pending=frozenset({IntentAction.CLOSE_ALL}))
+    d = manage(_ctx(), [], ev, cycle=pending, held=HELD, max_positions=3, costs=COSTS,
+               symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert "EXIT_PENDING" in _reasons(d) and d.intent is None
+
+
+def test_a_floating_cycle_net_does_not_change_the_decision_id() -> None:
+    a = _manage()
+    b = _manage(held=replace(HELD, cycle_net_usd=D("2.47")))
+    assert a.created.decision_id == b.created.decision_id
+
+
+def test_live_evidence_can_still_exit_on_a_stale_snapshot() -> None:
+    down = Direction.DOWN
+    ev = Evidence(forecast=_forecast(direction=down), news=[_news(down)])
+    stale = _ctx(now=NOW.replace(minute=30))
+    fresh_forecast = ev.forecast.model_copy(update={"valid_until": NOW.replace(hour=13)})  # type: ignore[union-attr]
+    fresh_news = ev.news[0].model_copy(update={"valid_until": NOW.replace(hour=13)})
+    live_ev = Evidence(forecast=fresh_forecast, news=[fresh_news])
+    assert _manage([_proposal()], live_ev, ctx=stale).created.action is DecisionAction.EXIT
+    # forecast DOWN alone vs a stale chart UP: the chart is dropped, so 1 vs 0 still exits
+    live_up = _proposal().model_copy(update={"valid_until": NOW.replace(hour=13)})
+    d = _manage([live_up], Evidence(forecast=fresh_forecast), ctx=stale)
+    assert d.created.action is DecisionAction.EXIT
+
+
+def test_trace_needs_held_and_cap_together_and_accepts_a_zero_cap() -> None:
+    import pytest
+
+    args = {"cycle": OPEN, "costs": COSTS, "symbol": "XAUUSD", "policy_version": "p1"}
+    with pytest.raises(ValueError):
+        DecisionTrace.capture(_ctx(), [], Evidence(), held=HELD, **args)  # type: ignore[arg-type]
+    t = DecisionTrace.capture(_ctx(), [_proposal()], Evidence(forecast=_forecast()), held=HELD,
+                              max_positions=0, **args)  # type: ignore[arg-type]  # fmt: skip
+    assert "CAP_REACHED" in _reasons(replay(DecisionTrace.model_validate_json(t.model_dump_json())))
+
+
+def test_the_trace_captures_every_input_field() -> None:
+    from dataclasses import fields
+
+    from app.decision.context import DecisionContext
+    from app.decision.fusion import Costs, CycleView
+    from app.decision.trace import ContextTrace, CostsTrace, CycleTrace, EvidenceTrace, HeldTrace
+
+    pairs = [(DecisionContext, ContextTrace), (Evidence, EvidenceTrace), (CycleView, CycleTrace),
+             (Costs, CostsTrace), (Held, HeldTrace)]  # fmt: skip
+    for source, trace in pairs:
+        assert {f.name for f in fields(source)} == set(trace.model_fields), source

@@ -6,9 +6,10 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
-from tests.integration.conftest import Clock
-from tests.integration.test_engine import (
+from tests.support.decision import COSTS, CYCLE, _ctx, _forecast, _news, _proposal
+from tests.support.engine import (
     SETTINGS,
+    Clock,
     _bot_positions,
     _command,
     _completed,
@@ -16,10 +17,10 @@ from tests.integration.test_engine import (
     _decision,
     _engine,
 )
-from tests.unit.decision.test_decide import COSTS, CYCLE, _ctx, _forecast, _news, _proposal
 
 from app.core.enums import ControlCommand, ControlState, Direction, Mode, Side, Verdict
-from app.decision.decide import Decision, Evidence, decide, to_events
+from app.decision.decide import decide
+from app.decision.fusion import Decision, Evidence, to_events
 from app.decision.manage import Held, manage
 from app.engine.engine import Engine
 from app.execution.fake_broker import FakeBroker
@@ -76,7 +77,7 @@ def test_decisions_are_vetted_and_executed_by_m06(
     down = Direction.DOWN
     news = _news(down).model_copy(update={"available_at": now, "valid_until": until})
     turned = Evidence(forecast=forecast.model_copy(update={"direction": down}), news=[news])
-    held = Held(Side.BUY, D("0.01"), 1, D(0), _bot_positions(broker))
+    held = Held(Side.BUY, 1, D(0), _bot_positions(broker))
     exit_ = manage(ctx, [], turned, cycle=replace(cycle, open_positions=1), held=held,
                    max_positions=3, costs=COSTS, symbol="XAUUSD", policy_version="p1")  # fmt: skip
     assert exit_.intent is not None

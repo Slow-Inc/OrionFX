@@ -44,6 +44,7 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 | M06 Risk & Execution (PRD #12): broker port + fake broker (#13), risk veto + DD (#14), cycle/target/trailing/close (#15), engine loop (#16) | ✅ | — | Done against the fake broker |
 | M06 slice E: real MT5 adapter + MQL5 Execution EA, broker-side Emergency SL (AT-09, AT-10) | 🟡 | Needs an MT5 terminal + demo account | #17 — not done; engine runs only against the fake broker |
 | Open decisions & safety TBDs | 🔴 | Owner decisions | `docs/plans/master_planV1.1.md` §13 |
+| Same-lot recovery ADD on a losing cycle in Live: only M05 refuses it (M06 veto refuses size-ups only) | 🔴 | Owner decision (RSK-06 scope) | Decide whether M06 should also deny it; then a veto rule + test (found in #54 review) |
 
 ---
 
