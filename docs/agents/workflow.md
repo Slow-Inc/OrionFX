@@ -32,7 +32,7 @@ Hard ordering: **PRD → issues → PR**. Never open a PR without a referenced i
 
 `.github/workflows/opencode-review.yml` runs an AI review on every PR and posts one `COMMENT` review from `opencode-agent[bot]`. Before `gh pr merge`:
 
-1. Wait for the `review` check to finish (`gh pr checks <n> --watch`).
+1. Wait for the `review / opencode-review` check to finish (`gh pr checks <n> --watch`).
 2. Read the OpenCode review (`gh pr view <n> --comments`, or `gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`). It must be on the current head SHA (`commit_id`); after a new push, wait for the new one.
 3. For each finding: fix it if it is valid, or reply on the PR saying why not.
 
