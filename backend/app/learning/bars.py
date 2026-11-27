@@ -14,7 +14,10 @@ Nothing here trains, and nothing here feeds trading: these rows are learning dat
   end bar gives no label, never a stretched one (such rows, mostly next to weekends, are
   re-checked each pass; there are only a few per week). No neutral threshold is applied:
   that is a training choice.
-Both tables are append-only (migration 0011). The first writer of a bar wins: if a
+- A prediction row is what one loaded M04 model said about one recorded bar (#109),
+  made at that bar's close. It is learning data only, never `prediction.generated`, so
+  it never reaches trading. Its outcome is the bar's label for the model's horizon.
+All three tables are append-only (migrations 0011, 0012). The first writer of a bar wins: if a
 LIVE and a BACKFILL recorder both reach it, its provenance is whichever wrote first.
 """
 
@@ -23,14 +26,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
-from app.core.contracts import ContractModel, FeatureSnapshot
+from app.core.contracts import ContractModel, FeatureSnapshot, PredictionGenerated
 from app.core.enums import Mode, Timeframe
 from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.core.types import Dec, UtcDatetime
 from app.market_data.store import CandleStore
 from app.storage.db import transaction
 
-__all__ = ["BarLog", "BarOutcome", "Horizon", "Provenance", "SnapshotRow"]
+__all__ = ["BarLog", "BarOutcome", "Horizon", "Provenance", "RecordedPrediction", "SnapshotRow"]
 
 
 class Provenance(StrEnum):
@@ -70,6 +73,12 @@ class SnapshotRow:
     dataset_version: str
 
 
+@dataclass(frozen=True, slots=True)
+class RecordedPrediction:
+    as_of: datetime
+    prediction: PredictionGenerated
+
+
 def _ts(t: datetime) -> str:
     return t.isoformat()
 
@@ -100,6 +109,21 @@ class BarLog:
                  dataset_version, provenance.value, None if mode is None else mode.value,
                  snapshot.quality.value, _ts(snapshot.available_at),
                  snapshot.model_dump_json(), _ts(self._clock())),
+            ).rowcount)  # fmt: skip
+
+    def record_prediction(
+        self, p: PredictionGenerated, snapshot: FeatureSnapshot, *, dataset_version: str
+    ) -> bool:
+        """Store what a model said about this bar; False if already recorded."""
+        with transaction(self._conn):
+            return bool(self._conn.execute(
+                "INSERT INTO learning_predictions (symbol, as_of, feature_schema,"
+                " dataset_version, model_id, model_version, horizon, horizon_bars, direction,"
+                " body, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT DO NOTHING",
+                (snapshot.symbol, _ts(snapshot.as_of), snapshot.feature_schema, dataset_version,
+                 p.model_id, p.model_version, p.horizon.value, p.horizon_bars,
+                 p.direction.value, p.model_dump_json(), _ts(self._clock())),
             ).rowcount)  # fmt: skip
 
     def label_due(
@@ -198,3 +222,43 @@ class BarLog:
             (symbol, horizon.timeframe.value, horizon.bars, _ts(start), _ts(end)),
         ).fetchall()
         return [BarOutcome.model_validate_json(b) for (b,) in rows]
+
+    def predictions(
+        self, symbol: str, model_id: str, *, start: datetime, end: datetime
+    ) -> list[RecordedPrediction]:
+        """Recorded predictions of `model_id` with `start <= as_of < end`, oldest first."""
+        rows = self._conn.execute(
+            "SELECT as_of, body FROM learning_predictions WHERE symbol = ? AND model_id = ?"
+            " AND as_of >= ? AND as_of < ? ORDER BY as_of, model_version, dataset_version",
+            (symbol, model_id, _ts(start), _ts(end)),
+        ).fetchall()
+        return [
+            RecordedPrediction(
+                datetime.fromisoformat(a), PredictionGenerated.model_validate_json(b)
+            )
+            for a, b in rows
+        ]
+
+    def prediction_outcomes(
+        self, symbol: str, model_id: str, *, start: datetime, end: datetime
+    ) -> list[tuple[RecordedPrediction, BarOutcome | None]]:
+        """Each recorded prediction with its bar's outcome over the model's own horizon
+        (None until that outcome is known, or if the bar has no label)."""
+        rows = self._conn.execute(
+            "SELECT p.as_of, p.body, o.body FROM learning_predictions p"
+            " LEFT JOIN learning_outcomes o ON o.symbol = p.symbol AND o.as_of = p.as_of"
+            " AND o.horizon = p.horizon AND o.horizon_bars = p.horizon_bars"
+            " AND o.dataset_version = p.dataset_version"
+            " WHERE p.symbol = ? AND p.model_id = ? AND p.as_of >= ? AND p.as_of < ?"
+            " ORDER BY p.as_of, p.model_version, p.dataset_version",
+            (symbol, model_id, _ts(start), _ts(end)),
+        ).fetchall()
+        return [
+            (
+                RecordedPrediction(
+                    datetime.fromisoformat(a), PredictionGenerated.model_validate_json(pb)
+                ),
+                None if ob is None else BarOutcome.model_validate_json(ob),
+            )
+            for a, pb, ob in rows
+        ]

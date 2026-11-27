@@ -6,6 +6,12 @@ bars (of every configured timeframe) available at that bar's close, records it i
 M07 `BarLog`, then labels every recorded bar whose horizons have ended. The same code
 back-fills historical candles: construct it with `Provenance.BACKFILL` and run `tick()`.
 
+Given loaded M04 predictors, it also records what each one said about every newly
+recorded bar, made at that bar's close (#109). A refused prediction (e.g. not enough
+history for the model's features) is skipped. A model added later predicts only the
+bars recorded after it was added. These are learning rows: they are never journaled as
+`prediction.generated` and never reach trading.
+
 A bar is tagged LIVE only when it is recorded within `LIVE_WITHIN` of becoming
 available (the bot saw it as it happened); bars caught up after downtime, and every bar
 of a back-fill, are BACKFILL and carry no account mode. Each pass reads only bars that
@@ -24,7 +30,7 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from app.core.contracts import HealthUpdated
+from app.core.contracts import FeatureSnapshot, HealthUpdated
 from app.core.enums import HealthStatus, Mode, Timeframe
 from app.core.events import make_event
 from app.core.ids import stable_id
@@ -32,6 +38,7 @@ from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.learning.bars import BarLog, Horizon, Provenance
 from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, build_feature_snapshot
 from app.market_data.store import CandleStore
+from app.prediction.engine import LoadedPredictor, Refused, predict
 from app.storage.config_store import ConfigStore
 from app.storage.db import transaction
 from app.storage.journal import Journal
@@ -60,6 +67,7 @@ class MarketRecorder:
         context_timeframes: Sequence[Timeframe],
         horizons: Sequence[Horizon],
         provenance: Provenance = Provenance.LIVE,
+        predictors: Sequence[LoadedPredictor] = (),
         clock: Clock = utc_now,
         account_id: str = "local-account",
         bot_id: str = "bot-1",
@@ -74,6 +82,7 @@ class MarketRecorder:
                 raise ValueError(f"horizon {h.timeframe.value} does not line up with "
                                  f"{timeframe.value} bars")  # fmt: skip
         self._provenance, self._clock = provenance, clock
+        self._predictors = list(predictors)
         self._account_id, self._bot_id = account_id, bot_id
         self._log = BarLog(conn, clock=clock)
         self._retry_at: datetime | None = None
@@ -113,9 +122,21 @@ class MarketRecorder:
             }
             snapshot = build_feature_snapshot(self._symbol, known, bar.available_at)
             live = self._provenance is Provenance.LIVE and bar.available_at >= live_after
-            self._log.record(snapshot, timeframe=tf,
-                             provenance=Provenance.LIVE if live else Provenance.BACKFILL,
-                             mode=mode if live else None, dataset_version=version)  # fmt: skip
+            recorded = self._log.record(
+                snapshot, timeframe=tf,
+                provenance=Provenance.LIVE if live else Provenance.BACKFILL,
+                mode=mode if live else None, dataset_version=version,
+            )  # fmt: skip
+            if recorded:
+                self._predict(snapshot, version)
+
+    def _predict(self, snapshot: FeatureSnapshot, version: str) -> None:
+        for loaded in self._predictors:
+            try:
+                p = predict(loaded, snapshot, now=snapshot.available_at)
+            except Refused:
+                continue  # this model cannot speak to this bar: nothing to record
+            self._log.record_prediction(p, snapshot, dataset_version=version)
 
     def _mode(self) -> Mode | None:
         if self._provenance is not Provenance.LIVE:
