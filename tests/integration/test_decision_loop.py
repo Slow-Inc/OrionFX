@@ -489,3 +489,14 @@ def test_a_positions_snapshot_from_the_future_is_not_trusted(
         account_id="local-account", bot_id="bot-1", mode=Mode.DEMO,
     ))  # fmt: skip
     assert loop.tick() is None and _decisions(conn) == 0
+
+
+def test_the_experience_records_what_the_decision_acted_on(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    bars, loop, eng = _setup(conn, broker, clock)
+    _at(broker, eng, bars[100])
+    d = loop.tick()
+    assert d is not None and d.direction is Direction.UP
+    (exp,) = loop.experiences.experiences()
+    assert exp.direction is d.direction and exp.horizon is d.horizon is M15

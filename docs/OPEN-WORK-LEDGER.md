@@ -53,7 +53,7 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 | M06 exits (CLOSE/CLOSE_ALL) ignore `intent.cycle_id`; a stale exit from cycle A could close cycle B's basket | ✅ | — | #89: exit must name the open cycle and closes only that cycle's positions |
 | Bot Positions left from a closed cycle while the next cycle is open are closed only by M06's own close workflows (emergency/unresolved retry); the loop refuses to decide around them | 🔴 | M06 slice / owner decision | Decide whether M06 should sweep such leftovers automatically (found in #89 simplify) |
 | M06 state read from the journal is "latest by seq", not as-of `now`; replay on a reused database can see the future | 🔴 | X02/M08 slice | Replay on a fresh database, or read state as-of the replay clock (found in #84 scrutiny) |
-| The loop recomputes the experience's direction and horizon instead of `Decision` carrying what it acted on | 🔴 | M05 slice | Put direction and horizon on `Decision` (found in #84 simplify) |
+| The loop recomputes the experience's direction and horizon instead of `Decision` carrying what it acted on | ✅ | — | #90: `Decision.direction`/`horizon` set once in fusion; EXIT bets against the held side |
 | No expression index for `intent_id` lookups on `risk.decision` | 🔴 | M08 slice | Add an index if journal growth makes `find`/`unanswered` slow (found in #84 review) |
 | `available_at` on `LlmReasoning` (no look-ahead guard for reasoning) | ✅ | — | #83: required, stamped after the answer returns, judged by `live()` in fusion |
 | `StrategyProposal` has no availability time; fusion checks only its expiry | 🔴 | Contract change (X01) | Add `available_at` if proposals are ever built ahead of `now` (found in #83 review; pre-existing) |

@@ -294,3 +294,16 @@ def test_reasoning_available_exactly_at_now_is_used() -> None:
     d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()], reasoning=at_now))
     assert "rs_1" in d.created.evidence_refs
     assert "CONFLICT_EVIDENCE" in d.created.reason_codes  # its DOWN vote counted: 2 vs 2
+
+
+def test_a_decision_carries_the_direction_and_horizon_it_acted_on() -> None:
+    """#90: M07 learns from what was decided, not from what the loop guesses."""
+    d = _decide([_proposal(direction=Direction.UP)])
+    assert d.direction is Direction.UP and d.horizon is Timeframe.H1
+    nothing = _decide([])
+    assert nothing.direction is None and nothing.horizon is None
+
+
+def test_conflicting_strategies_lean_nowhere() -> None:
+    d = _decide([_proposal("a", Direction.UP), _proposal("b", Direction.DOWN)])
+    assert d.direction is None and d.horizon is None

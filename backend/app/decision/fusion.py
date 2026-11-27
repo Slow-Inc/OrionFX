@@ -48,6 +48,7 @@ from app.core.enums import (
     IntentAction,
     Mode,
     Side,
+    Timeframe,
     WaitReason,
 )
 from app.core.events import EventEnvelope, make_event
@@ -102,6 +103,11 @@ class Decision:
     now: datetime
     mode: Mode
     cycle_id: str | None
+    direction: Direction | None = None
+    """The side it bet on: the agreed chart side when entering, the held side when
+    holding or adding, against the held side for an EXIT; None when it leaned nowhere."""
+    horizon: Timeframe | None = None
+    """The horizon of a usable proposal on that side, if any."""
 
 
 @dataclass(frozen=True)
@@ -116,6 +122,9 @@ class Inputs:
     """Evidence votes, without the chart."""
     evidence_refs: list[str]
     basis: list[object]
+    leaning: Direction | None = None
+    """The side a decision leans to before its action: the held basket's when managing,
+    else the side the chart proposals agree on (None when they conflict or are absent)."""
 
     def tally(self, direction: Direction, *, with_chart: bool = True) -> tuple[int, int]:
         """(support, against) for `direction`."""
@@ -199,6 +208,7 @@ def gather(
     costs: Costs | None,
     symbol: str,
     policy_version: str,
+    held: Side | None = None,
 ) -> Inputs:
     usable = usable_proposals(proposals, ctx.now)
     directions = {p.direction for p in usable}
@@ -209,14 +219,16 @@ def gather(
     cost_basis = None if costs is None else [costs.contract_size, costs.commission_per_lot]
     basis: list[object] = [evidence_refs, cycle.cycle_id, ctx.mode, symbol, policy_version,
                            ctx.initial_lot, ctx.spread, cost_basis]  # fmt: skip
+    chart = next(iter(directions)) if len(directions) == 1 else None
     return Inputs(
         usable=usable,
         chosen=usable[0] if usable else None,
-        chart=next(iter(directions)) if len(directions) == 1 else None,
+        chart=chart,
         forecast=forecast,
         votes=votes,
         evidence_refs=evidence_refs,
         basis=basis,
+        leaning=direction_of(held) if held else chart,
     )
 
 
@@ -289,7 +301,14 @@ def build(
             prediction_ids=[inp.forecast.prediction_id] if inp.forecast else [],
             position_refs=order.position_refs, valid_until=min(bounds),
         )  # fmt: skip
-    return Decision(created, intent, ctx.now, ctx.mode, cycle.cycle_id)
+    # what M07 scores: an EXIT bets against the held side; the horizon is that of a
+    # proposal on the same side, if any (never an opposing proposal's)
+    direction = inp.leaning
+    if action is DecisionAction.EXIT and direction is not None:
+        direction = Direction.DOWN if direction is Direction.UP else Direction.UP
+    same_side = [p for p in inp.usable if p.direction is direction]
+    horizon = same_side[0].horizon if direction is not None and same_side else None
+    return Decision(created, intent, ctx.now, ctx.mode, cycle.cycle_id, direction, horizon)
 
 
 def wait(

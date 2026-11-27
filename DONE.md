@@ -6,6 +6,27 @@
 
 ---
 
+## X01c slice B: decisions carry what they bet on (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/90-decision-direction`)
+
+**Goal:** M07 learns from what M05 decided, not from what the loop guesses (PRD-X01c #88, slice #90; LRN-02).
+
+**Shipped:**
+- `Decision.direction` and `Decision.horizon` are set once in `fusion.build`, from `Inputs.leaning` (the held side when managing, else the side the chart proposals agree on).
+  - An EXIT bets *against* the held side.
+  - Conflicting strategies lean nowhere.
+  - A horizon is taken only from a proposal on the same side.
+- The runtime loop and the replay both read these fields and no longer recompute them.
+
+**Review fixes:**
+- code-review: an EXIT scored as leaning to the held side, so a good exit counted as wrong; a horizon was borrowed from an opposing proposal; a direction was picked alphabetically on conflict; the test didn't assert actions.
+- simplify: `leaning` moved into `Inputs` (one source, not three call sites); the replay no longer recomputes the horizon.
+
+**Validation:**
+- Backend verify green.
+- Mutation probes: all caught.
+
+---
+
 ## X01c slice A: an exit closes only the cycle it names (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/89-exit-cycle-guard`)
 
 **Goal:** a late exit decided for an old cycle never closes the new cycle's positions, and risk can still always be reduced (PRD-X01c #88, slice #89).

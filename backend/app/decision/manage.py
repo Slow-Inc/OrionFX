@@ -68,15 +68,16 @@ def manage(
     policy_version: str,
 ) -> Decision:
     inp = gather(ctx, proposals, evidence, cycle=cycle, costs=costs, symbol=symbol,
-                 policy_version=policy_version)  # fmt: skip
+                 policy_version=policy_version, held=held.side)  # fmt: skip
     extra: list[object] = [held.side, held.positions, held.position_refs]
+
+    held_dir = direction_of(held.side)
 
     def waiting(reason: WaitReason, **more: object) -> Decision:
         return wait(ctx, cycle, inp, reason, symbol=symbol, policy_version=policy_version,
                     extra_basis=extra, **more)  # type: ignore[arg-type]  # fmt: skip
 
     fresh = snapshot_live(ctx)
-    held_dir = direction_of(held.side)
     support, against = inp.tally(held_dir, with_chart=fresh)
     if against > support:
         if IntentAction.CLOSE_ALL in cycle.pending:
