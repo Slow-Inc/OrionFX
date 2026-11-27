@@ -59,17 +59,26 @@ class CandleStore:
                 raise CandleConflict(f"{key} is stored with different content")
 
     def bars(
-        self, symbol: str, timeframe: Timeframe, *, as_of: datetime, limit: int | None = None
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        *,
+        as_of: datetime,
+        limit: int | None = None,
+        after: datetime | None = None,
     ) -> list[CandleClosed]:
-        """Bars available at `as_of`, oldest first (the newest `limit` if given)."""
+        """Bars available at `as_of` (and, given `after`, only those that became available
+        after it), oldest first (the newest `limit` if given)."""
         rows = self.conn.execute(
             "SELECT body FROM candles WHERE dataset_version = ? AND symbol = ?"
-            " AND timeframe = ? AND available_at <= ? ORDER BY available_at DESC LIMIT ?",
+            " AND timeframe = ? AND available_at <= ? AND available_at > ?"
+            " ORDER BY available_at DESC LIMIT ?",
             (
                 self.dataset_version,
                 symbol,
                 timeframe.value,
                 _ts(as_of),
+                "" if after is None else _ts(after),
                 -1 if limit is None else limit,
             ),
         ).fetchall()
