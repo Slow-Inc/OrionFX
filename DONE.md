@@ -6,6 +6,26 @@
 
 ---
 
+## M03 LLM provider research + model benchmark v1/v2 (2026-11-27, research + live benchmark, no product code, branch `docs/97-m03-llm-benchmark`)
+
+**Goal:** record why OpenCode Go and which model, so the choice can be audited and re-run, and measure how well an LLM works inside OrionFX (#97, for PRD #98 / #41).
+
+**Shipped:**
+- `docs/research/2026-11-27-m03-llm-provider-opencode-go.md`: endpoint, Go allowance, price table, external benchmarks, benchmark v1 and v2, end-to-end results, the M05 voting finding, limits.
+- `docs/research/m03-llm-eval/` (v1) and `v2/`: case set (191 cases, blind second labels), pre-registered decision rule, scripts, raw results (workspace ids redacted).
+
+**Result (v2, 185 non-disputed cases):**
+- Pre-registered pick: `qwen3.8-flash` (xhigh); fallback `deepseek-v4.1-flash` (max).
+- Direction accuracy is about 96% for every cheap model, and premium models are no better.
+- End to end, the LLM exits a wrong-side hold 90–93% of the time but can never block a wrong entry (M05 voting; owner decision).
+- The run found 3 software defects, which became PRD #98.
+
+**Validation:**
+- Live calls on OpenCode Go with the developer's key from `.env`, never printed or committed.
+- Usage meters ended at 41% of the 5-hour window, 16% weekly and 8% monthly.
+
+---
+
 ## M03 OpenAI-compatible provider adapter for OpenCode Go (2026-11-27, /tdd + /security-review + review subagent (code-review + simplify + scrutinize lens), branch `feat/100-openai-provider`)
 
 **Goal:** a real provider behind M03's `Provider` port, configured from Settings, with the key resolved only at call time (#100, PRD #98).

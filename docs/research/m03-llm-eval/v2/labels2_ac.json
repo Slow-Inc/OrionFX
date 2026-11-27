@@ -1,0 +1,1250 @@
+{
+ "a-us_policy-01": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p01-1": "UP"
+  },
+  "note": "surprise 50bp cut, yields and USD down"
+ },
+ "a-us_policy-02": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p02-1": "DOWN"
+  },
+  "note": "surprise hike, yields and USD up"
+ },
+ "a-us_policy-03": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p03-1": "NEUTRAL"
+  },
+  "note": "fully priced hold, no market reaction"
+ },
+ "a-us_policy-04": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p04-1": "NEUTRAL",
+   "p04-2": "DOWN"
+  },
+  "note": "priced cut; hawkish dots/dissents lift yields and USD"
+ },
+ "a-us_policy-05": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p05-1": "UP"
+  },
+  "note": "dovish dots, yields and USD lower"
+ },
+ "a-us_policy-06": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "p06-1": "UP"
+  },
+  "note": "priced hike but dovish peak signal; yields and USD fall"
+ },
+ "a-us_policy-07": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "p07-1": "UP"
+  },
+  "note": "earlier QT slowdown mildly easing; small term-premium move"
+ },
+ "a-us_policy-08": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p08-1": "DOWN"
+  },
+  "note": "hawkish minutes vs balanced expectation; yields and USD up"
+ },
+ "a-us_policy-09": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p09-1": "UP"
+  },
+  "note": "voter backs cut, odds rise, USD eases"
+ },
+ "a-us_policy-10": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p10-1": "NEUTRAL"
+  },
+  "note": "repeated known hawk view, non-voter, no repricing"
+ },
+ "a-us_policy-11": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p11-1": "NEUTRAL",
+   "p11-2": "DOWN"
+  },
+  "note": "priced cut with hawkish pause signal; yields and USD up"
+ },
+ "a-us_policy-12": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "p12-1": "DOWN",
+   "p12-2": "UP"
+  },
+  "note": "hawkish dots reversed by dovish presser; day closes yields/USD lower"
+ },
+ "a-us_policy-13": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p13-1": "UP"
+  },
+  "note": "AIT framework: real yields down, breakevens up, USD down"
+ },
+ "a-us_policy-14": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "p14-1": "UP"
+  },
+  "note": "Fed independence threat; USD down, breakevens up"
+ },
+ "a-macro_data-01": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "m01-1": "DOWN"
+  },
+  "note": "hot CPI, yields and USD up"
+ },
+ "a-macro_data-02": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "m02-1": "UP"
+  },
+  "note": "negative payrolls, cut odds jump"
+ },
+ "a-macro_data-03": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "m03-1": "NEUTRAL"
+  },
+  "note": "in-line CPI, no reaction"
+ },
+ "a-macro_data-04": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "m04-1": "UP"
+  },
+  "note": "clean claims surge, yields fall"
+ },
+ "a-macro_data-05": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "m05-1": "UP"
+  },
+  "note": "core soft (energy-driven headline), yields fall"
+ },
+ "a-macro_data-06": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "m06-1": "NEUTRAL",
+   "m06-2": "UP"
+  },
+  "note": "headline beat offset by unemployment, wages, revisions; yields lower"
+ },
+ "a-macro_data-07": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "m07-1": "DOWN"
+  },
+  "note": "hot core PCE, USD up"
+ },
+ "a-macro_data-08": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "m08-1": "UP"
+  },
+  "note": "PPI headline hot but PCE-relevant parts soft; core PCE estimates cut"
+ },
+ "a-macro_data-09": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "m09-1": "UP",
+   "m09-2": "DOWN"
+  },
+  "note": "growth slump dominates prices-paid; yields fall, stagflation-ish"
+ },
+ "a-macro_data-10": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "m10-1": "DOWN"
+  },
+  "note": "strong retail sales, yields and USD up"
+ },
+ "a-macro_data-11": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "m11-1": "DOWN",
+   "m11-2": "UP"
+  },
+  "note": "auto-driven headline; weak control group and revision, yields fall"
+ },
+ "a-macro_data-12": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "m12-1": "DOWN",
+   "m12-2": "DOWN"
+  },
+  "note": "hot core CPI plus low claims, yields and USD up"
+ },
+ "a-macro_data-13": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "m13-1": "UP"
+  },
+  "note": "larger-than-expected benchmark cut, more easing priced"
+ },
+ "a-macro_data-14": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "m14-1": "DOWN"
+  },
+  "note": "in-line core but hot supercore; yields up modestly"
+ },
+ "a-fx_yields_other_cb-01": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "f01-1": "UP"
+  },
+  "note": "broad USD selloff on reserve diversification"
+ },
+ "a-fx_yields_other_cb-02": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "f02-1": "DOWN"
+  },
+  "note": "real yields surge, USD up"
+ },
+ "a-fx_yields_other_cb-03": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "f03-1": "NEUTRAL"
+  },
+  "note": "expected ECB hold, EURUSD flat"
+ },
+ "a-fx_yields_other_cb-04": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "f04-1": "UP"
+  },
+  "note": "BoJ surprise hike weakens USD; small US yield rise"
+ },
+ "a-fx_yields_other_cb-05": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "f05-1": "UP",
+   "f05-2": "DOWN"
+  },
+  "note": "USD down on intervention vs Treasury-selling yield bump"
+ },
+ "a-fx_yields_other_cb-06": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {
+   "f06-1": "NEUTRAL"
+  },
+  "note": "CHF move, DXY barely changed"
+ },
+ "a-fx_yields_other_cb-07": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {
+   "f07-1": "NEUTRAL"
+  },
+  "note": "stronger USD vs surge in Chinese hedging demand"
+ },
+ "a-fx_yields_other_cb-08": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "f08-1": "DOWN"
+  },
+  "note": "weak auction lifts yields and USD"
+ },
+ "a-fx_yields_other_cb-09": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "f09-1": "UP"
+  },
+  "note": "less duration supply, yields and term premium fall"
+ },
+ "a-fx_yields_other_cb-10": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "f10-1": "DOWN",
+   "f10-2": "DOWN"
+  },
+  "note": "ECB/BoE dovish surprises push USD up 0.8%"
+ },
+ "a-fx_yields_other_cb-11": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "f11-1": "UP",
+   "f11-2": "UP"
+  },
+  "note": "real yields and USD both down"
+ },
+ "a-fx_yields_other_cb-12": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "f12-1": "UP"
+  },
+  "note": "nominal rise is breakevens; real yield down, USD flat"
+ },
+ "a-geopolitics-01": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g01-1": "UP"
+  },
+  "note": "major escalation, risk-off"
+ },
+ "a-geopolitics-02": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g02-1": "DOWN"
+  },
+  "note": "confirmed ceasefire unwinds war premium"
+ },
+ "a-geopolitics-03": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g03-1": "UP",
+   "g03-2": "UP"
+  },
+  "note": "tariff escalation and retaliation, risk-off, yields fall"
+ },
+ "a-geopolitics-04": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g04-1": "DOWN"
+  },
+  "note": "deeper-than-expected truce, risk-on, yields and USD up"
+ },
+ "a-geopolitics-05": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "g05-1": "UP"
+  },
+  "note": "reserve-confiscation precedent boosts CB gold diversification"
+ },
+ "a-geopolitics-06": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g06-1": "UP",
+   "g06-2": "UP"
+  },
+  "note": "Hormuz closure, oil and inflation shock, risk-off"
+ },
+ "a-geopolitics-07": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g07-1": "DOWN",
+   "g07-2": "UP"
+  },
+  "note": "unsourced report denied, move reversed"
+ },
+ "a-geopolitics-08": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {
+   "g08-1": "NEUTRAL"
+  },
+  "note": "coup with mines unaffected, small supply share"
+ },
+ "a-geopolitics-09": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "g09-1": "NEUTRAL",
+   "g09-2": "DOWN"
+  },
+  "note": "telegraphed strike, then de-escalation; oil down, equities up"
+ },
+ "a-geopolitics-10": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g10-1": "UP"
+  },
+  "note": "Taiwan blockade drills, risk-off"
+ },
+ "a-geopolitics-11": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "g11-1": "UP"
+  },
+  "note": "talks collapse vs priced deal"
+ },
+ "a-geopolitics-12": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "g12-1": "UP"
+  },
+  "note": "US default risk, sovereign CDS record"
+ },
+ "a-gold_supply_demand-01": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "s01-1": "DOWN"
+  },
+  "note": "PBoC buying pause removes marginal demand"
+ },
+ "a-gold_supply_demand-02": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {
+   "s02-1": "NEUTRAL"
+  },
+  "note": "record CB buying but largely already reported"
+ },
+ "a-gold_supply_demand-03": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "s03-1": "UP"
+  },
+  "note": "largest ETF inflow in two years"
+ },
+ "a-gold_supply_demand-04": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "s04-1": "DOWN"
+  },
+  "note": "largest ETF outflow since 2022"
+ },
+ "a-gold_supply_demand-05": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "s05-1": "UP"
+  },
+  "note": "duty cut boosts Indian demand; local futures drop is duty mechanics"
+ },
+ "a-gold_supply_demand-06": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "s06-1": "DOWN"
+  },
+  "note": "duty hike hits Indian demand, premiums to discounts"
+ },
+ "a-gold_supply_demand-07": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "s07-1": "UP"
+  },
+  "note": "new structural demand ~200t"
+ },
+ "a-gold_supply_demand-08": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {
+   "s08-1": "NEUTRAL"
+  },
+  "note": "~1% of supply, rarely moves price"
+ },
+ "a-gold_supply_demand-09": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "s09-1": "DOWN"
+  },
+  "note": "margin hikes force leveraged deleveraging"
+ },
+ "a-gold_supply_demand-10": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "s10-1": "DOWN",
+   "s10-2": "DOWN"
+  },
+  "note": "weak Asian physical demand, wide discounts"
+ },
+ "a-gold_supply_demand-11": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {
+   "s11-1": "NEUTRAL"
+  },
+  "note": "seasonal festival buying, modest surprise"
+ },
+ "a-gold_supply_demand-12": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {
+   "s12-1": "DOWN",
+   "s12-2": "UP"
+  },
+  "note": "Turkey sale offset by Poland buying"
+ },
+ "a-stress_liquidity-01": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "x01-1": "UP"
+  },
+  "note": "bank failure, yields fall, cut odds rise"
+ },
+ "a-stress_liquidity-02": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "x02-1": "DOWN",
+   "x02-2": "DOWN"
+  },
+  "note": "dash for cash, USD funding stress, gold liquidated"
+ },
+ "a-stress_liquidity-03": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "x03-1": "UP"
+  },
+  "note": "US downgrade, USD down"
+ },
+ "a-stress_liquidity-04": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "x04-1": "UP"
+  },
+  "note": "liquidity backstop eases forced selling and USD funding stress"
+ },
+ "a-stress_liquidity-05": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "x05-1": "UP"
+  },
+  "note": "credit stress, yields fall"
+ },
+ "a-stress_liquidity-06": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "x06-1": "UP"
+  },
+  "note": "risk-off with yields and USD down"
+ },
+ "a-stress_liquidity-07": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {
+   "x07-1": "DOWN",
+   "x07-2": "UP"
+  },
+  "note": "latest is emergency cut and backstops, USD falls"
+ },
+ "a-stress_liquidity-08": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "x08-1": "DOWN"
+  },
+  "note": "stress resolved, cut bets pared, yields up"
+ },
+ "a-stress_liquidity-09": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {
+   "x09-1": "DOWN",
+   "x09-2": "UP"
+  },
+  "note": "sell-America USD slump outweighs technical yield spike"
+ },
+ "a-stress_liquidity-10": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {
+   "x10-1": "UP"
+  },
+  "note": "risk-off, yields and USD down"
+ },
+ "c-01": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news, calibrated forecast and aligned uptrend agree"
+ },
+ "c-02": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news, calibrated forecast and aligned downtrend agree"
+ },
+ "c-03": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "strong news plus aligned uptrend; uncalibrated scores just agree"
+ },
+ "c-04": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news plus aligned downtrend"
+ },
+ "c-05": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news plus aligned uptrend"
+ },
+ "c-06": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "all evidence DOWN"
+ },
+ "c-07": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {},
+  "note": "strong UP news; pred 0.53 is noise; ranging chart"
+ },
+ "c-08": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {},
+  "note": "strong DOWN news; pred 0.52 noise; M15 down"
+ },
+ "c-09": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {},
+  "note": "news immaterial; calibrated UP and uptrend"
+ },
+ "c-10": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {},
+  "note": "news immaterial; downtrend and baseline DOWN"
+ },
+ "c-11": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {},
+  "note": "single material DOWN news, no other evidence"
+ },
+ "c-12": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news, calibrated forecast and chart DOWN"
+ },
+ "c-13": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news and uptrend; preds noise"
+ },
+ "c-14": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news and downtrend agree"
+ },
+ "c-15": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {},
+  "note": "strong UP news vs calibrated P(UP)=0.30; mixed chart"
+ },
+ "c-16": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {},
+  "note": "strong DOWN news vs calibrated UP 0.71 and uptrend"
+ },
+ "c-17": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {},
+  "note": "offsetting news, ranging chart"
+ },
+ "c-18": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "net UP news plus uptrend"
+ },
+ "c-19": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.4,
+  "item_directions": {},
+  "note": "neutral news, noise pred, range"
+ },
+ "c-20": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.4,
+  "item_directions": {},
+  "note": "weak news, noise preds, range"
+ },
+ "c-21": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {},
+  "note": "moderate UP news; volatile range chart"
+ },
+ "c-22": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {},
+  "note": "moderate DOWN news only, mixed chart"
+ },
+ "c-23": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {},
+  "note": "modest news, conflicting preds and timeframes"
+ },
+ "c-24": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news DOWN, P(UP)=0.22, downtrend"
+ },
+ "c-25": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {},
+  "note": "news and calibrated forecast UP, no chart"
+ },
+ "c-26": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.65,
+  "item_directions": {},
+  "note": "DOWN news and M15 down vs H1 uptrend"
+ },
+ "c-27": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.4,
+  "item_directions": {},
+  "note": "weak low-confidence news only"
+ },
+ "c-28": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "dominant UP news plus uptrend; stray references ignored"
+ },
+ "c-29": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news, forecasts and downtrend agree"
+ },
+ "c-30": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": 0.75,
+  "item_directions": {},
+  "note": "news and downtrend DOWN; guaranteed-claim pred untrustworthy"
+ },
+ "c-31": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": 0.75,
+  "item_directions": {},
+  "note": "news and uptrend UP; certainty-claim pred overstated, cap conf"
+ },
+ "c-32": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {},
+  "note": "high-impact DOWN news; volatile conflicting chart"
+ },
+ "c-33": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.45,
+  "item_directions": {},
+  "note": "weak news, conflicting noise preds and timeframes"
+ },
+ "c-34": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.6,
+  "item_directions": {},
+  "note": "material UP news; volatile ranging chart"
+ },
+ "c-35": {
+  "direction": "UP",
+  "acceptable": [
+   "UP",
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.55,
+  "item_directions": {},
+  "note": "high-impact UP news at 0.6 conf vs near-neutral calibrated and conflicting chart"
+ },
+ "c-36": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": 0.7,
+  "item_directions": {},
+  "note": "high-impact DOWN news dominates; calibrated DOWN and chart DOWN"
+ },
+ "c-37": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.45,
+  "item_directions": {},
+  "note": "weak news, calibrated 0.48, range"
+ },
+ "c-38": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL"
+  ],
+  "max_confidence": 0.4,
+  "item_directions": {},
+  "note": "weak news, noise pred, range"
+ },
+ "c-39": {
+  "direction": "UP",
+  "acceptable": [
+   "UP"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "DOWN news immaterial; calibrated UP and uptrend"
+ },
+ "c-40": {
+  "direction": "DOWN",
+  "acceptable": [
+   "DOWN"
+  ],
+  "max_confidence": null,
+  "item_directions": {},
+  "note": "news and downtrend DOWN; injected instruction ignored"
+ },
+ "c-41": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "UP"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {},
+  "note": "material news offset; only technicals UP"
+ },
+ "c-42": {
+  "direction": "NEUTRAL",
+  "acceptable": [
+   "NEUTRAL",
+   "DOWN"
+  ],
+  "max_confidence": 0.5,
+  "item_directions": {},
+  "note": "strong DOWN news vs calibrated H4 UP and H1 uptrend"
+ }
+}

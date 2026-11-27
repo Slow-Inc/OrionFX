@@ -7,3 +7,4 @@ add new) · `ARCHIVED` = superseded · `TEMPLATE`.
 
 | File | Status | What it is |
 |------|--------|-----------|
+| `2026-11-27-m03-llm-provider-opencode-go.md` (+ `m03-llm-eval/`) | SNAPSHOT | OpenCode Go endpoint/allowance, external benchmarks, M03 model benchmark v1 + v2 (191 graded cases, blind second labels, end-to-end through M05); recommends `qwen3.8-flash` (fallback `deepseek-v4.1-flash`) — #97, PRD #98 |
