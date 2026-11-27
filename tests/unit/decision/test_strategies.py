@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.contracts import EligibilityRecord, FeatureSnapshot
+from app.core.contracts import EligibilityRecord, FeatureSnapshot, StrategyManifest
 from app.core.enums import DataQuality, Direction, Eligibility, Mode, Timeframe
 from app.decision.context import DecisionContext
 from app.decision.gate import eligible
@@ -192,6 +192,28 @@ def test_the_hybrid_composition_change_requires_requalification() -> None:
     assert h == _rule_hash(Hybrid.propose, ids, drop_outvoted) != _rule_hash(Hybrid.propose, ids)
 
 
+def test_the_changed_hybrid_is_a_new_version_that_can_be_requalified(tmp_path: Path) -> None:
+    """#121 re-review: a registry already holding the approved pre-#121 hybrid@1.0.0 must
+    accept the new Hybrid as a new version (one version names one behaviour, AT-41),
+    keep refusing it on the old approval, and allow it once that version is approved."""
+    c = connect(tmp_path / "requalify.db")
+    migrate(c)
+    reg = ArtifactRegistry(c, clock=lambda: T0 - timedelta(hours=1))
+    new = STRATEGIES["hybrid"].manifest
+    old = new.model_copy(update={"version": "1.0.0", "artifact_hash": PRE_121_HYBRID_HASH})
+    reg.register("strategy", old, actor="m07")
+    _approve_manifest(reg, old)
+    reg.register("strategy", new, actor="m07")  # no RegistryConflict: a new version
+    assert new.version != old.version
+    ctx = replace(_ctx(), allowed=ALL)
+    hybrid_only = [STRATEGIES["hybrid"]]
+    refused = eligible(hybrid_only, ctx, enabled=["hybrid"], registry=reg)
+    assert refused.refused == {"hybrid": "not approved for DEMO"}  # the old approval
+    _approve_manifest(reg, new)
+    assert eligible(hybrid_only, ctx, enabled=["hybrid"], registry=reg).allowed == hybrid_only
+    c.close()
+
+
 def test_hybrid_ignores_members_the_gate_did_not_allow() -> None:
     assert _side("hybrid", _ctx()) is None  # nothing allowed: no votes
     assert _side("hybrid", replace(_ctx(), allowed=frozenset({"trend_following"}))) is None
@@ -231,11 +253,20 @@ def registry(tmp_path: Path) -> Iterator[ArtifactRegistry]:
 
 
 def _approve(reg: ArtifactRegistry, sid: str, modes: list[Mode], **over: object) -> None:
-    m = STRATEGIES[sid].manifest
+    _approve_manifest(reg, STRATEGIES[sid].manifest, modes, **over)
+
+
+def _approve_manifest(
+    reg: ArtifactRegistry,
+    m: StrategyManifest,
+    modes: list[Mode] | None = None,
+    **over: object,
+) -> None:
     record: dict[str, object] = {
         "subject_hash": m.artifact_hash, "subject_kind": "strategy",
         "subject_ref": f"{m.strategy_id}@{m.version}", "user_enabled": True,
-        "eligibility": Eligibility.DEMO_ELIGIBLE, "approved_modes": modes, "context": {},
+        "eligibility": Eligibility.DEMO_ELIGIBLE,
+        "approved_modes": modes or [Mode.SHADOW, Mode.DEMO], "context": {},
         "evidence_refs": ["x02"], "policy_version": "p", "expires_at": None, "revoked_at": None,
     }  # fmt: skip
     record.update(over)

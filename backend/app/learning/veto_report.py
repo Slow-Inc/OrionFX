@@ -1,7 +1,10 @@
 """How the M05 news veto is doing (#116, PRD #114).
 
 Every entry refused with NEWS_VETO is an M07 experience carrying the side it refused
-(the chart side) and, once known, the market's move over its horizon. Per veto:
+(the chart side) and, once known, the market's move over its horizon. An ADD refused
+by the same veto is NEWS_VETO_ADD (#121; the side is the held one) and is reported only
+when asked with `reason=WaitReason.NEWS_VETO_ADD`, never mixed into the entry report.
+Per veto:
 - saved: the market moved against the refused side (the trade would have lost);
 - missed: it moved with the refused side (the trade would have gained);
 - flat: no move; unknown: no label known at `as_of` yet.

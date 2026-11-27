@@ -18,7 +18,9 @@
     refuse same-lot adds is an open question (docs/OPEN-WORK-LEDGER.md);
   - an unknown Cycle Net fails closed, and a pending ADD blocks another (DUPLICATE);
   - the #115 news veto applies (NEWS_VETO_ADD; owner decision MAJ-05.1, #121). It
-    never blocks an exit;
+    never blocks an exit. As in `decide`, it is checked before CONFLICT_EVIDENCE and
+    the EV gates, so it also records ADDs that would not have happened anyway; a
+    veto report's "missed" count is an upper bound for that reason;
   - the chart is every proposal, unlike an entry: a Hybrid majority does not drop its
     outvoted members here, so a split chart stays no vote and an exit never weakens.
     An ADD therefore never rides a Hybrid 2 vs 1 (conservative, #121);

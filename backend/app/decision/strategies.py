@@ -38,6 +38,10 @@ from app.prediction.card import unique_leader
 
 D = Decimal
 VERSION = "1.0.0"
+HYBRID_VERSION = "1.1.0"
+"""1.1.0 (#121): records its composition; its outvoted members are dropped for entries.
+One version names one behaviour (AT-41), so the changed Hybrid is re-qualified under a
+new version; an approval of hybrid@1.0.0 never covers it."""
 H1, M15, M5 = Timeframe.H1, Timeframe.M15, Timeframe.M5
 
 DIR_H1 = feature_key(H1, "CAT-T03-07", "direction")
@@ -118,11 +122,16 @@ def _rule_hash(
 
 
 def _manifest(
-    sid: str, catalog_id: str, tfs: list[Timeframe], artifact_hash: str, refs: list[str]
+    sid: str,
+    catalog_id: str,
+    tfs: list[Timeframe],
+    artifact_hash: str,
+    refs: list[str],
+    version: str = VERSION,
 ) -> StrategyManifest:
     return StrategyManifest(
         strategy_id=sid,
-        version=VERSION,
+        version=version,
         artifact_hash=artifact_hash,
         family="S01",
         catalog_ids=[catalog_id],
@@ -233,12 +242,13 @@ class Hybrid:
         return _proposal(self.manifest, self.horizon, ctx, lead[0], refs, composition)
 
 
+# For an entry only (#121): when a Hybrid proposes, drop its members' proposals on the
+# other side. They would always conflict with the majority, so Hybrid could never win a
+# 2 vs 1. Agreeing members stay (one may match the forecast's horizon). Never used while
+# managing a basket (`fusion.gather` applies it only without a held side): there a split
+# chart must stay no vote, or an exit could weaken. This is a comment, not a docstring,
+# so the Hybrid hash covers only the code that decides behaviour.
 def drop_outvoted(proposals: list[StrategyProposal]) -> list[StrategyProposal]:
-    """For an entry only (#121): when a Hybrid proposes, drop its members' proposals on
-    the other side. They would always conflict with the majority, so Hybrid could never
-    win a 2 vs 1. Agreeing members stay (one may match the forecast's horizon). Never
-    used while managing a basket: there a split chart must stay no vote, or an exit
-    could weaken."""
     kept = proposals
     for h in proposals:
         s = STRATEGIES.get(h.strategy_id)
@@ -248,13 +258,16 @@ def drop_outvoted(proposals: list[StrategyProposal]) -> list[StrategyProposal]:
     return kept
 
 
-# Hybrid's behaviour is its vote and the entry-time dropping rule: both are qualified
+# Hybrid's behaviour is its vote and the entry-time dropping rule: both are hashed. Where
+# the rule applies (entries only, in `fusion.gather`) is decision policy, versioned by
+# `ProtectedPolicy.policy_version`, not by this hash.
 _HYBRID_HASH = _rule_hash(
     Hybrid.propose, tuple(m.manifest.strategy_id for m in _RULES), drop_outvoted
 )
 STRATEGIES: dict[str, RuleStrategy | Hybrid] = {s.manifest.strategy_id: s for s in _RULES}
 STRATEGIES["hybrid"] = Hybrid(
-    _manifest("hybrid", "CAT-S01-06", [H1, M15, M5], _HYBRID_HASH, []), tuple(_RULES)
+    _manifest("hybrid", "CAT-S01-06", [H1, M15, M5], _HYBRID_HASH, [], HYBRID_VERSION),
+    tuple(_RULES),
 )
 
 
