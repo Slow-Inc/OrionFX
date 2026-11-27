@@ -12,28 +12,25 @@ analysis. The answer format the prompt asks for and the model that validates it
 live together here, under one prompt version.
 """
 
-import json
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import Field, ValidationError
+from pydantic import Field
 
 from app.core.contracts import Confidence, ContractModel, HealthUpdated, NewsAssessment
 from app.core.enums import Direction, HealthStatus
 from app.core.ids import new_id
 from app.core.types import Probability
 from app.news.injection import PROMPT_VERSION, build_prompt, injection_flags
-from app.news.provider import Provider, ProviderError
+from app.news.llm_call import TIMEOUT_S, ask, load_json
+from app.news.provider import Provider
 from app.news.sources import NewsItem
 
 __all__ = ["ANSWER_FORMAT", "PROMPT_VERSION", "AssessmentResult", "assess_news"]
 
 COMPONENT = "M03"
-TIMEOUT_S = 20.0  # [PROPOSED]
-ATTEMPTS = 2  # one retry [PROPOSED]
 CONFLICT_CONFIDENCE_CAP = Decimal("0.3")  # [PROPOSED]
 SEMANTICS = "uncalibrated LLM confidence in the news-implied XAUUSD direction"
 ANSWER_FORMAT = (
@@ -41,7 +38,6 @@ ANSWER_FORMAT = (
     ' "cited_ids": [ids you relied on], "item_directions": {id: "UP"|"DOWN"|"NEUTRAL"},\n'
     ' "rationale": "short reason"}'
 )
-_FENCE = re.compile(r"^\s*```(?:json)?\s*\n(.*)\n\s*```\s*$", re.DOTALL)
 
 
 class _Answer(ContractModel):
@@ -64,24 +60,11 @@ class AssessmentResult:
 
 
 def _parse(text: str, given: set[str]) -> _Answer:
-    fenced = _FENCE.match(text)
-    try:
-        # Numbers are parsed as Decimal: model scores never pass through binary floats.
-        data = json.loads(fenced.group(1) if fenced else text, parse_float=Decimal)
-    except RecursionError:
-        raise ValueError("answer nested too deeply") from None
-    answer = _Answer.model_validate(data)
+    answer = _Answer.model_validate(load_json(text))
     unknown = (set(answer.cited_ids) | set(answer.item_directions)) - given
     if unknown:
         raise ValueError(f"mentions items it was not given: {sorted(unknown)}")
     return answer
-
-
-def _describe(exc: Exception) -> str:
-    if isinstance(exc, ValidationError):
-        err = exc.errors(include_input=False)[0]
-        return f"{'.'.join(str(p) for p in err['loc']) or 'answer'}: {err['msg']}"
-    return (str(exc).splitlines() or [type(exc).__name__])[0]
 
 
 def assess_news(
@@ -113,36 +96,32 @@ def assess_news(
             return done(HealthStatus.DEGRADED, f"all {len(excluded)} items flagged as injection")
         return done(HealthStatus.OK, "no usable news")
 
-    prompt = build_prompt(usable, ANSWER_FORMAT)
     given = {i.item_id for i in usable}
-    detail = ""
-    for _ in range(ATTEMPTS):
-        try:
-            answer = _parse(provider.complete(prompt, timeout_s=timeout_s), given)
-        except ProviderError as exc:
-            detail = f"provider {type(exc).__name__}"  # never the raw error text
-            continue
-        except (ValueError, ValidationError) as exc:  # JSON errors are ValueErrors
-            detail = f"invalid answer: {_describe(exc)}"
-            continue
-        cited = [i for i in usable if i.item_id in answer.cited_ids]
-        stances = {answer.item_directions.get(i.item_id) for i in cited} - {
-            None,
-            Direction.NEUTRAL,
-        }
-        conflict = len(stances) > 1
-        confidence = answer.confidence
-        if conflict:
-            confidence = min(confidence, CONFLICT_CONFIDENCE_CAP)
-        assessment = NewsAssessment(
-            assessment_id=new_id("news"),
-            news_ids=[i.item_id for i in cited],
-            source_refs=[i.url for i in cited],
-            direction=Direction.NEUTRAL if conflict else answer.direction,
-            impact=answer.impact,
-            score=Confidence(value=confidence, semantics=SEMANTICS),
-            available_at=now,
-            valid_until=min(i.valid_until for i in cited),
-        )
-        return done(HealthStatus.OK, "conflicting news" if conflict else None, assessment)
-    return done(HealthStatus.DEGRADED, f"failed after {ATTEMPTS} attempts: {detail}")
+    answer, detail = ask(
+        provider,
+        build_prompt(usable, ANSWER_FORMAT),
+        lambda text: _parse(text, given),
+        timeout_s=timeout_s,
+    )
+    if answer is None:
+        return done(HealthStatus.DEGRADED, detail)
+    cited = [i for i in usable if i.item_id in answer.cited_ids]
+    stances = {answer.item_directions.get(i.item_id) for i in cited} - {
+        None,
+        Direction.NEUTRAL,
+    }
+    conflict = len(stances) > 1
+    confidence = answer.confidence
+    if conflict:
+        confidence = min(confidence, CONFLICT_CONFIDENCE_CAP)
+    assessment = NewsAssessment(
+        assessment_id=new_id("news"),
+        news_ids=[i.item_id for i in cited],
+        source_refs=[i.url for i in cited],
+        direction=Direction.NEUTRAL if conflict else answer.direction,
+        impact=answer.impact,
+        score=Confidence(value=confidence, semantics=SEMANTICS),
+        available_at=now,
+        valid_until=min(i.valid_until for i in cited),
+    )
+    return done(HealthStatus.OK, "conflicting news" if conflict else None, assessment)
