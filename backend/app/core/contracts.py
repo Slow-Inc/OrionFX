@@ -5,6 +5,7 @@ derives the expected set from the master plan table and compares.
 """
 
 import hashlib
+from datetime import datetime
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -403,7 +404,8 @@ class StrategyProposal(ContractModel):
     strategy_version: str
     technique_refs: list[str]
     composition_id: str | None
-    decision_id: str
+    decision_id: str | None
+    """None until a decision adopts the proposal."""
     direction: Direction
     action: IntentAction
     horizon: Timeframe
@@ -454,6 +456,11 @@ class EligibilityRecord(ContractModel):
         if self.eligibility is Eligibility.LIVE_ELIGIBLE and not self.evidence_refs:
             raise ValueError("live eligibility needs evidence refs")
         return self
+
+    def approves(self, mode: Mode, now: datetime) -> bool:
+        """The one rule for "approved for this mode at this time"."""
+        unexpired = self.expires_at is None or now < self.expires_at
+        return self.user_enabled and unexpired and mode in self.approved_modes
 
 
 EVENT_PAYLOADS: dict[str, type[ContractModel]] = {
