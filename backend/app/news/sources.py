@@ -25,7 +25,9 @@ from app.core.types import UtcDatetime
 
 
 class NewsItem(ContractModel):
-    item_id: str = Field(min_length=1)
+    item_id: str = Field(pattern=r"^[A-Za-z0-9._:-]{1,128}$")
+    """A safe character set: the id is the only feed value placed in a prompt outside
+    the untrusted blocks."""
     source: str = Field(min_length=1)
     url: str = Field(pattern=r"^https?://")
     title: str = Field(min_length=1)

@@ -6,6 +6,20 @@
 
 ---
 
+## M03 slice B — provider port, untrusted-content policy, news assessment, degraded mode (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/39-m03-assessment`)
+
+**Goal:** turn news into an evidence-linked `news.assessment` without giving the model any power, and wait safely when it fails (PRD-03 #37, slice #39; LLM-01/03/04/05).
+
+**Shipped:** `backend/app/news/provider.py` (`Provider` port with no tools, `FakeProvider`, `ProviderError`/`ProviderTimeout`); `injection.py` (`build_prompt` with untrusted blocks, `injection_flags`); `assess.py` (`assess_news`, `ANSWER_FORMAT`, `AssessmentResult`); safe `NewsItem.item_id` charset.
+
+**Validation:** `uv run pytest` → all pass (64 news tests, written first). 21 mutation probes caught (survivors fixed with per-pattern and unknown-stance tests).
+
+**Review fixes:** item ids cannot carry prompt text; narrow patterns (ordinary financial wording not flagged); any delimiter spelling flagged; no look-ahead (`fetched_at <= now`); nested JSON degrades instead of crashing; provider error text never reaches health; all-injected batch is DEGRADED; fenced JSON accepted; field named in invalid-answer detail; conflict judged on cited items; answer format and validator in one place.
+
+**Not done:** real LLM provider adapters (#41, no API key). CAT-A02-01/02 stay blocked.
+
+---
+
 ## M03 slice A — news sources, provenance, cache, dedup, schedule (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/38-m03-news-sources`)
 
 **Goal:** honest news input: provenance on every item, repeats never counted as independent evidence, fetching on a calendar/event schedule (PRD-03 #37, slice #38; LLM-02/03/05).
