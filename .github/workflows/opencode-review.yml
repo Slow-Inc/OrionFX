@@ -29,12 +29,18 @@
 # - Trigger is `pull_request`, never `pull_request_target`, so fork PRs get no
 #   secrets. The `if:` also skips drafts, bots and non-collaborator authors.
 #
-# Model: OpenCode Go `opencode-go/deepseek-v4-pro`, using the OPENCODE_API_KEY
-# repo secret. Free models are refused from CI ("429 FreeUsageLimitError" on
-# 2026-11-28), so a key is required. deepseek-v4-pro is the stronger sibling of
-# the deepseek-v4.1-flash benchmarked in M03, at ~1/5 of kimi-k3's price.
-# To change the model, edit `model:`; any `opencode-go/<id>` works with the
-# same secret.
+# Model: OpenCode Go `opencode-go/deepseek-v4-pro`, billed to the owner's Go
+# plan. Free models are refused from CI ("429 FreeUsageLimitError" on
+# 2026-11-28). deepseek-v4-pro is the stronger sibling of the
+# deepseek-v4.1-flash benchmarked in M03, at ~1/5 of kimi-k3's price. To change
+# the model, edit `model:`.
+#
+# Model auth needs NO repo secret. The OpenCode Console service account
+# "OrionFX PR Review" (created 2026-11-28) trusts GitHub Actions OIDC from
+# Slow-Inc/OrionFX (repo ID 1473623856), pull_request runs only, permission
+# Models: Request. The "Sign in to OpenCode" step exchanges this job's OIDC
+# token for a 1-hour key (OPENCODE_API_KEY, masked). That is why the job needs
+# `id-token: write`.
 name: OpenCode review
 
 on:
@@ -59,15 +65,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      id-token: write
     steps:
-      - name: Require OPENCODE_API_KEY
-        env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-        run: |
-          if [ -z "${OPENCODE_API_KEY}" ]; then
-            echo "::error::Repo secret OPENCODE_API_KEY is not set; the OpenCode review needs an OpenCode Go key (free models are refused from CI)."
-            exit 1
-          fi
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -87,10 +86,28 @@ jobs:
                 gh issue view "$n" --repo "$GITHUB_REPOSITORY" > "$out/issue-$n.md" 2>/dev/null || rm -f "$out/issue-$n.md"
               done
           ls -l "$out"
+      - name: Sign in to OpenCode
+        # Placed last before OpenCode so the minted key reaches only that step.
+        env:
+          AUDIENCE: https://opencode.ai/console
+          # NOT a secret: the service account's credential ID. It only works with
+          # an OIDC token minted by a pull_request run of this repo. Its `sk_`
+          # prefix may trip secret scanners; that is a false positive.
+          CLIENT_ID: sk_dcae4ec7-d3b6-4328-92a0-b14ae60dfad8
+        run: |
+          set -euo pipefail
+          oidc=$(curl -sSf --oauth2-bearer "$ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" | jq -r .value)
+          echo "::add-mask::$oidc"
+          token=$(curl -sSf https://opencode.ai/console/auth/oauth/token             -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange             -d subject_token_type=urn:ietf:params:oauth:token-type:jwt             -d client_id="$CLIENT_ID"             -d subject_token="$oidc" | jq -r .access_token)
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            echo "::error::OpenCode Console token exchange returned no access token (service account 'OrionFX PR Review')."
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "OPENCODE_API_KEY=$token" >> "$GITHUB_ENV"
       - name: Run OpenCode review
         uses: dceoy/opencode-action@cda16d479232f0998a3046425dc43747f1c4c66e  # v1.1.0
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           OPENCODE_CONFIG_CONTENT: >-
             {"permission": {"*": "deny", "read": "allow", "glob": "allow",

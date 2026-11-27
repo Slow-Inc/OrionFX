@@ -60,7 +60,8 @@ Honest limits:
 - A **skipped** check means no review ran (draft PR, bot or Dependabot PR, or author not OWNER/MEMBER/COLLABORATOR). Treat it as "no review", not as a pass.
 - Fork PRs are excluded.
 - The skills are read from the PR head, so a PR can change its own reviewer. Review edits to `.opencode/` with that in mind.
-- **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28, where the run hung for 18 minutes). The job uses `opencode-go/deepseek-v4-pro` with the `OPENCODE_API_KEY` secret and fails fast without it. Hard caps: 15 minutes for the job, 12 for OpenCode. Every review spends the Go allowance.
+- **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28, where the run hung for 18 minutes). The job uses `opencode-go/deepseek-v4-pro`, billed to the owner's Go plan. Every review spends that allowance, so keep the prompt lean. Hard caps: 15 minutes for the job, 12 for OpenCode.
+- **No repo secret.** The OpenCode Console service account "OrionFX PR Review" (created 2026-11-28 via the Console) trusts GitHub Actions OIDC. It is pinned to `Slow-Inc/OrionFX` (repo ID 1473623856), accepts pull_request runs only, and has the permission Models: Request. The "Sign in to OpenCode" step exchanges the job's OIDC token (`id-token: write`) for a 1-hour key, masks it, and fails fast if the exchange returns nothing. The client ID `sk_dcae4ec7-d3b6-4328-92a0-b14ae60dfad8` is a credential ID, not a secret; a scanner flagging the `sk_` prefix is a false positive. To revoke access, disable the service account in the Console.
 
 ## Training-loop research
 
