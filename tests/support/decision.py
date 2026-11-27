@@ -84,7 +84,7 @@ def _reasoning(direction: Direction, cites: list[str]) -> LlmReasoning:
     return LlmReasoning(
         reasoning_id="rs_1", news_assessment_ids=cites, prediction_ids=[], direction=direction,
         score=Confidence(value=D("0.6"), semantics="uncalibrated LLM score"), rationale="r",
-        prompt_version="v", provider="fake", valid_until=LATER,
+        prompt_version="v", provider="fake", available_at=T0, valid_until=LATER,
     )  # fmt: skip
 
 

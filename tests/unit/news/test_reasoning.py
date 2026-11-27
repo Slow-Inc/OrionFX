@@ -82,6 +82,7 @@ def test_reasoning_links_news_charts_and_forecasts() -> None:
     assert r.direction is Direction.UP and r.score.calibrated is False
     assert r.prompt_version == REASONING_PROMPT_VERSION and r.provider == "fake"
     assert r.valid_until == T0 + timedelta(minutes=30)  # the earliest expiry it relied on
+    assert r.available_at == NOW  # known from the moment it was produced, not before
     prompt = provider.prompts[0]
     assert "a1" in prompt and "p1" in prompt and "H1.direction_10.direction" in prompt
     assert "M5.sma_20.sma" not in prompt  # only the summary features, not every value
@@ -188,3 +189,18 @@ def test_any_adapter_exception_degrades_instead_of_crashing() -> None:
     result = reason([_assessment("a1")], [], None, _Boom(), now=NOW)
     assert result.reasoning is None and result.health.status is HealthStatus.DEGRADED
     assert "sk-secret" not in (result.health.detail or "")
+
+
+def test_reasoning_is_stamped_when_the_answer_returned() -> None:
+    """#83 review: a slow call is not stamped available before it existed."""
+    later = NOW + timedelta(seconds=20)
+    result = reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, FakeProvider([_answer()]),
+                    now=NOW, clock=lambda: later)  # fmt: skip
+    assert result.reasoning is not None and result.reasoning.available_at == later
+
+
+def test_evidence_that_expires_during_the_call_gives_no_reasoning() -> None:
+    too_late = T0 + timedelta(hours=5)  # after every expiry it relied on
+    result = reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, FakeProvider([_answer()]),
+                    now=NOW, clock=lambda: too_late)  # fmt: skip
+    assert result.reasoning is None and result.health.status is HealthStatus.DEGRADED

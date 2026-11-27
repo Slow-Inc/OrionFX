@@ -276,3 +276,21 @@ def test_a_forecast_with_unusable_data_neither_votes_nor_is_cited() -> None:
     d = _decide(evidence=Evidence(forecast=bad))
     assert "EV_UNKNOWN" in _reasons(d)  # not CONFLICT_EVIDENCE: the stale forecast has no vote
     assert "pred_1" not in d.created.evidence_refs
+
+
+def test_reasoning_produced_after_now_is_not_used() -> None:
+    """#83: no look-ahead through LLM reasoning (AT-15)."""
+    later = _reasoning(Direction.DOWN, []).model_copy(
+        update={"available_at": NOW + timedelta(minutes=1)}
+    )
+    ev = Evidence(forecast=_forecast(), reasoning=later)
+    d = _decide(evidence=ev)
+    assert "rs_1" not in d.created.evidence_refs
+    assert d.created.action is DecisionAction.ENTER  # the future DOWN vote did not count
+
+
+def test_reasoning_available_exactly_at_now_is_used() -> None:
+    at_now = _reasoning(Direction.DOWN, []).model_copy(update={"available_at": NOW})
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()], reasoning=at_now))
+    assert "rs_1" in d.created.evidence_refs
+    assert "CONFLICT_EVIDENCE" in d.created.reason_codes  # its DOWN vote counted: 2 vs 2

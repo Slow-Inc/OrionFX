@@ -22,7 +22,7 @@ from pydantic import Field
 from app.core.contracts import Confidence, ContractModel, HealthUpdated, NewsAssessment
 from app.core.enums import Direction, HealthStatus
 from app.core.ids import new_id
-from app.core.time import live
+from app.core.time import Clock, live
 from app.core.types import Probability
 from app.news.injection import PROMPT_VERSION, build_prompt, injection_flags
 from app.news.llm_call import NO_PROVIDER, TIMEOUT_S, ask, health, load_json
@@ -73,7 +73,10 @@ def assess_news(
     *,
     now: datetime,
     timeout_s: float = TIMEOUT_S,
+    clock: Clock | None = None,
 ) -> AssessmentResult:
+    """`now` judges which items are live; `available_at` is stamped from `clock` after the
+    answer returns (defaults to `now`), so an assessment is never usable before it existed."""
     known = [i for i in items if live(i.fetched_at, i.valid_until, now)]  # no look-ahead
     excluded = tuple(i.item_id for i in known if injection_flags(f"{i.title}\n{i.body}"))
     usable = [i for i in known if i.item_id not in excluded]
@@ -114,6 +117,10 @@ def assess_news(
     confidence = answer.confidence
     if conflict:
         confidence = min(confidence, CONFLICT_CONFIDENCE_CAP)
+    answered_at = clock() if clock else now
+    expiry = min(i.valid_until for i in cited)
+    if answered_at >= expiry:  # the cited news expired while the model was answering
+        return done(HealthStatus.DEGRADED, "news expired during the call", None)
     assessment = NewsAssessment(
         assessment_id=new_id("news"),
         news_ids=[i.item_id for i in cited],
@@ -121,7 +128,7 @@ def assess_news(
         direction=Direction.NEUTRAL if conflict else answer.direction,
         impact=answer.impact,
         score=Confidence(value=confidence, semantics=SEMANTICS),
-        available_at=now,
-        valid_until=min(i.valid_until for i in cited),
+        available_at=answered_at,
+        valid_until=expiry,
     )
     return done(HealthStatus.OK, "conflicting news" if conflict else None, assessment)

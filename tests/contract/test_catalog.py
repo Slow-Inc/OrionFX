@@ -249,3 +249,16 @@ def test_consistent_eligibility_record_is_accepted() -> None:
 def test_contradictory_eligibility_records_are_rejected(over: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         EligibilityRecord.model_validate(_eligibility(**over))
+
+
+@pytest.mark.parametrize("model", ["NewsAssessment", "LlmReasoning"])
+def test_an_observation_must_become_available_before_it_expires(model: str) -> None:
+    """#83: one rule for "usable over [available_at, valid_until)" windows."""
+    from tests.support.decision import LATER, _news, _reasoning
+
+    import app.core.contracts as c
+    from app.core.enums import Direction
+
+    sample = _news() if model == "NewsAssessment" else _reasoning(Direction.UP, [])
+    with pytest.raises(ValidationError, match="available_at"):
+        getattr(c, model).model_validate({**sample.model_dump(), "available_at": LATER})
