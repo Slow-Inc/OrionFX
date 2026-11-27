@@ -31,7 +31,7 @@ from app.core.contracts import (
 )
 from app.core.enums import Direction, HealthStatus
 from app.core.ids import new_id
-from app.core.time import live
+from app.core.time import Clock, live
 from app.core.types import Probability
 from app.market_data.features import SUMMARY_KEYS, USABLE_QUALITY, snapshot_problem
 from app.news.llm_call import NO_PROVIDER, TIMEOUT_S, ask, health, load_json
@@ -102,7 +102,10 @@ def reason(
     *,
     now: datetime,
     timeout_s: float = TIMEOUT_S,
+    clock: Clock | None = None,
 ) -> ReasoningResult:
+    """`now` judges which inputs are live; `available_at` is stamped from `clock` after the
+    answer returns (defaults to `now`), so reasoning is never usable before it existed."""
     if provider is None:
         return ReasoningResult(None, health(HealthStatus.DOWN, NO_PROVIDER, now))
     news = [a for a in assessments if live(a.available_at, a.valid_until, now)]
@@ -146,6 +149,11 @@ def reason(
     expiries += [p.valid_until for p in forecasts if p.prediction_id in cited_p]
     if snap is not None:
         expiries.append(snap.valid_until)
+    answered_at = clock() if clock else now
+    if answered_at >= min(expiries):  # its evidence expired while the model was answering
+        return ReasoningResult(
+            None, health(HealthStatus.DEGRADED, "evidence expired during the call", now)
+        )
     reasoning = LlmReasoning(
         reasoning_id=new_id("reason"),
         news_assessment_ids=cited_a,
@@ -155,7 +163,7 @@ def reason(
         rationale=answer.rationale,
         prompt_version=REASONING_PROMPT_VERSION,
         provider=provider.provider_id,
-        available_at=now,
+        available_at=answered_at,
         valid_until=min(expiries),
         feature_snapshot_ref=None if snap is None else snap.ref,
     )

@@ -6,6 +6,32 @@
 
 ---
 
+## X01 follow-up B: reasoning availability, judged point-in-time (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/83-reasoning-available-at`)
+
+**Goal:** no look-ahead through LLM output (PRD-X01b #81, slice #83; AT-15).
+
+**Shipped:**
+- `LlmReasoning.available_at` is now required.
+- One window rule, `require_window`, is shared by `NewsAssessment` (which had no check), `LlmReasoning` and `TechniqueObservation`.
+- `reason()` and `assess_news()` stamp `available_at` from an injected clock *after* the answer returns. If the evidence expired during the call, they return DEGRADED instead of throwing.
+- M05 fusion counts reasoning only while `live(available_at, valid_until, now)`.
+
+**Validation:**
+- `uv run pytest`: all pass.
+- Mutation probes: all caught, including the window off-by-one and stamping before the call.
+
+**Review fixes:**
+- Stamping happens after the call, not before.
+- An expired-during-call case gives a health result.
+- One shared validator instead of three spellings.
+- The fusion condition is a single line again.
+- The contract test is in `test_catalog.py`, parametrized over both models.
+- New boundary test: reasoning available exactly at `now` still counts.
+
+**Note:** making `available_at` required doesn't break stored data, because `llm.reasoning` has never been persisted; nothing wires `reason()` into a running loop yet. The decision loop (#84) is the first writer.
+
+---
+
 ## X01 follow-up A: bot positions read model (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/82-positions-read-model`)
 
 **Goal:** the owner sees the bot's own positions, never a Manual Position, and never a stale or wrong list shown as fresh (PRD-X01b #81, slice #82; UI-02).

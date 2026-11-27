@@ -189,3 +189,18 @@ def test_any_adapter_exception_degrades_instead_of_crashing() -> None:
     result = reason([_assessment("a1")], [], None, _Boom(), now=NOW)
     assert result.reasoning is None and result.health.status is HealthStatus.DEGRADED
     assert "sk-secret" not in (result.health.detail or "")
+
+
+def test_reasoning_is_stamped_when_the_answer_returned() -> None:
+    """#83 review: a slow call is not stamped available before it existed."""
+    later = NOW + timedelta(seconds=20)
+    result = reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, FakeProvider([_answer()]),
+                    now=NOW, clock=lambda: later)  # fmt: skip
+    assert result.reasoning is not None and result.reasoning.available_at == later
+
+
+def test_evidence_that_expires_during_the_call_gives_no_reasoning() -> None:
+    too_late = T0 + timedelta(hours=5)  # after every expiry it relied on
+    result = reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, FakeProvider([_answer()]),
+                    now=NOW, clock=lambda: too_late)  # fmt: skip
+    assert result.reasoning is None and result.health.status is HealthStatus.DEGRADED

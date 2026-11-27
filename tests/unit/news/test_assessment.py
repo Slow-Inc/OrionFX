@@ -253,3 +253,12 @@ def test_stances_for_items_it_was_not_given_are_rejected() -> None:
     answer = _answer(item_directions={"n1": "UP", "n2": "UP", "n77": "DOWN"})
     result = assess_news([FED, CPI], FakeProvider([answer, answer]), now=NOW)
     assert result.assessment is None and "not given" in (result.health.detail or "")
+
+
+def test_assessment_is_stamped_when_the_answer_returned_and_refused_if_news_expired() -> None:
+    later = NOW + timedelta(seconds=15)
+    stamped = assess_news([FED, CPI], FakeProvider([_answer()]), now=NOW, clock=lambda: later)
+    assert stamped.assessment is not None and stamped.assessment.available_at == later
+    too_late = max(FED.valid_until, CPI.valid_until) + timedelta(seconds=1)
+    gone = assess_news([FED, CPI], FakeProvider([_answer()]), now=NOW, clock=lambda: too_late)
+    assert gone.assessment is None and gone.health.status is HealthStatus.DEGRADED

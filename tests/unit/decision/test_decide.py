@@ -289,11 +289,8 @@ def test_reasoning_produced_after_now_is_not_used() -> None:
     assert d.created.action is DecisionAction.ENTER  # the future DOWN vote did not count
 
 
-def test_reasoning_must_become_available_before_it_expires() -> None:
-    import pytest
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
-        _reasoning(Direction.UP, []).model_validate(
-            {**_reasoning(Direction.UP, []).model_dump(), "available_at": LATER}
-        )
+def test_reasoning_available_exactly_at_now_is_used() -> None:
+    at_now = _reasoning(Direction.DOWN, []).model_copy(update={"available_at": NOW})
+    d = _decide(evidence=Evidence(forecast=_forecast(), news=[_news()], reasoning=at_now))
+    assert "rs_1" in d.created.evidence_refs
+    assert "CONFLICT_EVIDENCE" in d.created.reason_codes  # its DOWN vote counted: 2 vs 2

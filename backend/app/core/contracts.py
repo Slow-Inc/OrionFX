@@ -47,6 +47,13 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+def require_window(available_at: datetime, valid_until: datetime) -> None:
+    """An observation is usable over [available_at, valid_until) (core.time.live), so a
+    window that ends when (or before) it starts is never usable: refuse it."""
+    if available_at >= valid_until:
+        raise ValueError("available_at must be before valid_until")
+
+
 class Confidence(ContractModel):
     """A 0-1 score is never shipped without what it means (master plan §4.6).
 
@@ -136,6 +143,11 @@ class NewsAssessment(ContractModel):
     available_at: UtcDatetime
     valid_until: UtcDatetime
 
+    @model_validator(mode="after")
+    def _window(self) -> Self:
+        require_window(self.available_at, self.valid_until)
+        return self
+
 
 class LlmReasoning(ContractModel):
     reasoning_id: str
@@ -153,9 +165,8 @@ class LlmReasoning(ContractModel):
     """`{feature_schema}@{as_of}` of the chart summary used, if any (auditability)."""
 
     @model_validator(mode="after")
-    def _available_before_expiry(self) -> Self:
-        if self.available_at >= self.valid_until:
-            raise ValueError("available_at must be before valid_until")
+    def _window(self) -> Self:
+        require_window(self.available_at, self.valid_until)
         return self
 
 
@@ -422,9 +433,8 @@ class TechniqueObservation(ContractModel):
     reason_codes: list[str]
 
     @model_validator(mode="after")
-    def _expires_after_available(self) -> Self:
-        if self.valid_until <= self.available_at:
-            raise ValueError("valid_until must be after available_at")
+    def _window(self) -> Self:
+        require_window(self.available_at, self.valid_until)
         return self
 
 
