@@ -1801,10 +1801,6 @@
     "catalog_class": "R",
     "dependency": "Chronological training and calibration; market risk only",
     "coverage_state": "blocked",
-    "implementation_refs": [
-      "backend/app/prediction/engine.py",
-      "backend/app/prediction/card.py"
-    ],
     "blocker_reason": "ML regime detection needs a trained model (training out of scope); rule-based regime is CAT-T03-06",
     "resolution_owner": "M04",
     "review_trigger": "A trained model passes X02 walk-forward evaluation and M07 approval"

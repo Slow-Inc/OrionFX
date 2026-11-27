@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from app.core.contracts import CandleClosed, FeatureSnapshot
 from app.core.enums import DataQuality, QualityFlag, Timeframe
+from app.core.time import live
 from app.market_data.techniques.indicators import Technique, make_library, observe
 from app.market_data.techniques.price_action import make_price_action
 
@@ -39,6 +40,23 @@ SUMMARY_KEYS: frozenset[str] = frozenset(
     }
     | {"mtf.aligned"}
 )
+
+
+USABLE_QUALITY = (DataQuality.OK, DataQuality.DEGRADED)
+
+
+def snapshot_problem(
+    snapshot: FeatureSnapshot, now: datetime, *, schema: str = FEATURE_SCHEMA
+) -> str | None:
+    """Why a consumer may not use this snapshot at `now`, or None when it may: it must
+    be of the expected schema, of usable quality, and known and unexpired at `now`."""
+    if snapshot.feature_schema != schema:
+        return f"snapshot schema {snapshot.feature_schema} is not {schema}"
+    if snapshot.quality not in USABLE_QUALITY:
+        return f"snapshot quality {snapshot.quality}"
+    if not live(snapshot.available_at, snapshot.valid_until, now):
+        return f"snapshot not live at {now.isoformat()}"
+    return None
 
 
 def build_feature_snapshot(

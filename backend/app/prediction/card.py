@@ -20,6 +20,7 @@ from app.core.contracts import (
     StrategyManifest,
 )
 from app.core.enums import Direction, ForecastLineage, Mode, Timeframe
+from app.storage.registry import subject_ref
 
 
 class ModelCard(ContractModel):
@@ -50,10 +51,11 @@ class ModelCard(ContractModel):
 
     @property
     def ref(self) -> str:
-        return f"{self.model_id}@{self.model_version}"
+        return subject_ref(self.model_id, self.model_version)
 
     def manifest(self) -> StrategyManifest:
-        """The registry entry for this model's artifact."""
+        """The registry entry for this model's artifact: the registration contract M07
+        uses when it publishes an approved model (#48)."""
         if self.artifact_hash is None:
             raise ValueError("the baseline has no artifact to register")
         return StrategyManifest(
