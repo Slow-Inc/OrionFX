@@ -9,8 +9,8 @@
 - A bar is final only when a tick from a later interval arrives; `available_at`
   is that arrival time, never earlier than the close (no look-ahead).
 - Missing M5 intervals are not filled with synthetic bars: every bar that
-  contains or directly follows the hole carries a GAP flag, on the published
-  `CandleClosed` too. Tick count is broker tick volume, not traded volume.
+  contains the hole, and the M5 bar directly after it, carries a GAP flag, on the
+  published `CandleClosed` too. Tick count is broker tick volume, not traded volume.
 """
 
 from collections import Counter
@@ -117,8 +117,8 @@ class CandleEngine:
         last = self._last
         # The first M5 interval the market was open for, with no tick, between the last
         # tick and this one.
-        missed = None if last is None else self._first_missed(_floor(last.time, M5),
-                                                               _floor(tick.time, M5))  # fmt: skip
+        this_slot = _floor(tick.time, M5)
+        missed = None if last is None else self._first_missed(_floor(last.time, M5), this_slot)
         hole = missed is not None
         if hole:
             self.issues[Issue.GAP] += 1
@@ -132,15 +132,21 @@ class CandleEngine:
                 closed.append(self._close(tick.time, tf, size, cur))
                 cur = None
             if cur is None:
+                opened = _floor(tick.time, size)
+                # The M5 bar right after a hole carries the flag; a higher bar only if
+                # the hole reaches into it.
+                gap = missed is not None and (
+                    size == M5 or self._first_missed(opened - M5, this_slot) is not None
+                )
                 self._open[tf] = _Open(
-                    _floor(tick.time, size),
+                    opened,
                     tick.bid,
                     tick.bid,
                     tick.bid,
                     tick.bid,
                     1,
                     spread,
-                    hole,
+                    gap,
                     last is None,
                 )
             else:

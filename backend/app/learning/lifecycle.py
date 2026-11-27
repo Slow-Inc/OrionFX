@@ -20,7 +20,7 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
   - `learning_promotions` is the champion-pointer log; the registry's eligibility
     records stay the authority on what may run. Every change is audited.
 - Drift: `psi` (Population Stability Index) per feature, over per-value bins for a
-  low-cardinality feature and reference-quantile bins otherwise.
+  feature declared categorical and reference-quantile bins otherwise.
   PSI > RETRAIN_PSI [PROPOSED], or a feature missing from either window, recommends a
   retrain. That recommendation is an audit entry for the owner; nothing retrains.
 """
@@ -28,7 +28,7 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
 import bisect
 import sqlite3
 from collections import Counter
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Collection, Hashable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -327,17 +327,20 @@ class ModelLifecycle:
         audit(self._conn, actor="m07", action=action, detail=detail)
 
 
-def psi(reference: list[Decimal], recent: list[Decimal], *, bins: int = 10) -> Decimal:
-    """Population Stability Index. A feature with at most `bins` distinct reference
-    values (a flag, a code) gets one bin per value, plus one for values the
-    reference never had. Otherwise bins are cut at the reference quantiles, and a value
-    filling more than one quantile (a point mass, e.g. a sparse feature's zero) gets a
-    bin of its own instead of sharing one with the values above it."""
+def psi(
+    reference: list[Decimal], recent: list[Decimal], *, bins: int = 10, categorical: bool = False
+) -> Decimal:
+    """Population Stability Index. A feature declared `categorical` (a code, a regime)
+    gets one bin per reference value, plus one for values the reference never had: a
+    new code is drift. Otherwise bins are cut at the reference quantiles, and a value
+    filling more than one quantile (a point mass, e.g. a binary or sparse feature's
+    zero) gets a bin of its own instead of sharing one with the values above it. An
+    ordinal feature reaching a new neighbouring value is therefore not alarmed on."""
     if not reference or not recent:
         raise ValueError("PSI needs two non-empty windows")
     seen = set(reference)
     key: Callable[[Decimal], Hashable]
-    if len(seen) <= bins:
+    if categorical:
         key = lambda x: x if x in seen else None  # noqa: E731
     else:
         ref = sorted(reference)
@@ -369,10 +372,13 @@ class DriftReport:
 
 
 def drift_report(
-    reference: dict[str, list[Decimal]], recent: dict[str, list[Decimal]]
+    reference: dict[str, list[Decimal]],
+    recent: dict[str, list[Decimal]],
+    *,
+    categorical: Collection[str] = (),
 ) -> DriftReport:
     both = sorted(set(reference) & set(recent))
-    values = {k: psi(reference[k], recent[k]) for k in both}
+    values = {k: psi(reference[k], recent[k], categorical=k in categorical) for k in both}
     return DriftReport(
         psi=values,
         drifted=[k for k, v in values.items() if v > RETRAIN_PSI],

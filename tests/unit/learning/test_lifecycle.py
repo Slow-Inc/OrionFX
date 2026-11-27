@@ -220,8 +220,28 @@ def test_psi_sees_a_shift_in_a_binary_feature() -> None:
     reference = [D(0)] * 10 + [D(1)]
     assert psi(reference, [D(1)] * 11) > RETRAIN_PSI  # quantile edges collapse to [0]
     assert psi(reference, [D(2)] * 11) > RETRAIN_PSI  # a value the reference never had
-    codes = [D(0)] * 10 + [D(1), D(2)]  # quantile bins would put 1 and 2 together
-    assert psi(codes, [D(0)] * 10 + [D(2), D(2)]) > RETRAIN_PSI
+
+
+def test_psi_bins_a_declared_categorical_feature_per_value() -> None:
+    codes = [D(0)] * 10 + [D(1), D(2)]  # quantile bins put 1 and 2 together
+    shifted = [D(0)] * 10 + [D(2), D(2)]
+    assert psi(codes, shifted) == 0
+    assert psi(codes, shifted, categorical=True) == D("0.6175")
+    report = drift_report({"regime": codes, "rsi": codes}, {"regime": shifted, "rsi": codes},
+                          categorical={"regime"})  # fmt: skip
+    assert report.drifted == ["regime"]
+
+
+def test_psi_does_not_alarm_on_an_ordinal_feature_reaching_a_new_neighbour() -> None:
+    reference = [D(v) for v in range(1, 10) for _ in range(100)]  # 9 integer levels
+    recent = [D(v) for v in range(1, 10) for _ in range(95)] + [D(10)] * 45  # 5% at 10
+    assert psi(reference, recent) == D("0.0172")  # was 0.3127 with an unseen bin
+
+
+def test_a_value_on_a_single_quantile_cut_shares_its_bin() -> None:
+    reference = [D(x) for x in range(20)]  # cuts at 2, 4, ..., 18, each once
+    recent = [D(4) if x == 5 else x for x in reference]  # 5 -> 4, inside bin [4, 6)
+    assert psi(reference, recent) == 0
 
 
 def test_psi_sees_a_point_mass_moving_off_its_quantile_edge() -> None:

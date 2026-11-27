@@ -163,6 +163,19 @@ def test_a_hole_before_a_higher_bar_closes_flags_that_bar() -> None:
     assert eng.issues[Issue.GAP] == 1  # one outage, counted once
 
 
+def test_a_hole_flags_only_the_higher_bars_it_lies_in() -> None:
+    eng = _engine()
+    bars: list[ClosedBar] = []
+    minutes = [*range(0, 31), *range(61, 120), *range(140, 181)]  # holes 10:35-55, 12:00-15
+    for minute in minutes:
+        bars += eng.on_tick(_tick(T0 + timedelta(minutes=minute), "2000"))
+    flags = {(b.timeframe, b.event.open_time.strftime("%H:%M")): b.event.quality_flags
+             for b in bars}  # fmt: skip
+    assert flags[(Timeframe.H1, "10:00")] == ["GAP"]
+    assert flags[(Timeframe.M15, "11:00")] == [] and flags[(Timeframe.H1, "11:00")] == []
+    assert flags[(Timeframe.H1, "12:00")] == ["GAP"]  # opened after the hole, inside it
+
+
 def test_a_hole_after_a_higher_bar_does_not_flag_it() -> None:
     eng = _engine()
     for minute in range(60):

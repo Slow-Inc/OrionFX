@@ -122,6 +122,20 @@ def test_a_run_too_small_does_not_cover_a_regime(store: EvidenceStore) -> None:
     assert r.verdict is Verdict.NOT_READY and r.reasons == ["REGIME_MISSING:RANGE"]
 
 
+def test_a_run_with_exactly_the_per_regime_minimum_covers_its_regime(
+    store: EvidenceStore,
+) -> None:
+    store.save_policy(CERTIFIED)
+    trend = _run(store, "TREND", trades=100)  # exactly min_trades_per_regime
+    r = store.evaluate([trend, _run(store, "RANGE", trades=100, start=T0 + 40 * DAY)])
+    assert r.verdict is Verdict.READY
+
+
+def test_a_negative_per_regime_minimum_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        ReadinessPolicy.model_validate(CERTIFIED.model_dump() | {"min_trades_per_regime": -1})
+
+
 def test_an_undecided_per_regime_minimum_is_not_ready(store: EvidenceStore) -> None:
     store.save_policy(CERTIFIED.model_copy(update={"version": "readiness-2",
                                                    "min_trades_per_regime": None}))  # fmt: skip

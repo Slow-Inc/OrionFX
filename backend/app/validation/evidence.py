@@ -91,7 +91,7 @@ class ReadinessPolicy(ContractModel):
     min_trades: int | None
     min_days: int | None
     required_regimes: list[str]
-    min_trades_per_regime: int | None = None
+    min_trades_per_regime: int | None = Field(default=None, ge=0)
     """A run covers its regimes only with at least this many trades (per run)."""
 
     @model_validator(mode="after")
