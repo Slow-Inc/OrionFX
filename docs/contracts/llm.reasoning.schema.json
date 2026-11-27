@@ -40,6 +40,11 @@
   },
   "additionalProperties": false,
   "properties": {
+    "available_at": {
+      "format": "date-time",
+      "title": "Available At",
+      "type": "string"
+    },
     "direction": {
       "$ref": "#/$defs/Direction"
     },
@@ -103,6 +108,7 @@
     "rationale",
     "prompt_version",
     "provider",
+    "available_at",
     "valid_until"
   ],
   "title": "LlmReasoning",

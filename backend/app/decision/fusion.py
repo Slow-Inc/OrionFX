@@ -9,7 +9,8 @@ Evidence votes once per independent source:
   and of usable data quality;
 - live news assessments that cite a source, as one impact-weighted vote, unless the
   forecast is NEWS_ENHANCED (it already contains them);
-- an LLM reasoning, only if it restates nothing already voting (no voting or
+- an LLM reasoning, only while live (available and unexpired at `now`) and only if it
+  restates nothing already voting (no voting or
   forecast-covered news, not the forecast) and every news item it cites is live
   and cited; otherwise it is ignored and not referenced;
 - the chart: one vote when the live OPEN proposals agree on a direction.
@@ -175,7 +176,8 @@ def _votes(
     already_voting = news_ids if (weight or in_forecast) else set()
 
     r = ev.reasoning
-    if r is not None and now < r.valid_until and set(r.news_assessment_ids) <= news_ids:
+    reasoning_live = r is not None and live(r.available_at, r.valid_until, now)
+    if r is not None and reasoning_live and set(r.news_assessment_ids) <= news_ids:
         refs.append(r.reasoning_id)
         restates = already_voting.intersection(r.news_assessment_ids) or (
             forecast is not None and forecast.prediction_id in r.prediction_ids

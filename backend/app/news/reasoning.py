@@ -155,6 +155,7 @@ def reason(
         rationale=answer.rationale,
         prompt_version=REASONING_PROMPT_VERSION,
         provider=provider.provider_id,
+        available_at=now,
         valid_until=min(expiries),
         feature_snapshot_ref=None if snap is None else snap.ref,
     )

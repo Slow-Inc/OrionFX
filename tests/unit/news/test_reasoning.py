@@ -82,6 +82,7 @@ def test_reasoning_links_news_charts_and_forecasts() -> None:
     assert r.direction is Direction.UP and r.score.calibrated is False
     assert r.prompt_version == REASONING_PROMPT_VERSION and r.provider == "fake"
     assert r.valid_until == T0 + timedelta(minutes=30)  # the earliest expiry it relied on
+    assert r.available_at == NOW  # known from the moment it was produced, not before
     prompt = provider.prompts[0]
     assert "a1" in prompt and "p1" in prompt and "H1.direction_10.direction" in prompt
     assert "M5.sma_20.sma" not in prompt  # only the summary features, not every value
