@@ -17,7 +17,7 @@ from tests.support.decision import (
     _reasoning,
 )
 
-from app.core.enums import DecisionAction, Direction, IntentAction, Mode, Side
+from app.core.enums import DecisionAction, Direction, IntentAction, Mode, Side, Timeframe
 from app.decision.decide import decide
 from app.decision.fusion import Evidence
 from app.decision.manage import Held, manage
@@ -209,3 +209,14 @@ def test_the_trace_captures_every_input_field() -> None:
              (Costs, CostsTrace), (Held, HeldTrace)]  # fmt: skip
     for source, trace in pairs:
         assert {f.name for f in fields(source)} == set(trace.model_fields), source
+
+
+def test_a_managed_decision_leans_to_the_held_side() -> None:
+    """#90: manage acts on the basket: ADD, WAIT and EXIT all lean to the held side."""
+    down = Direction.DOWN
+    exit_ = _manage([_proposal(direction=down)],
+                    Evidence(forecast=_forecast(direction=down), news=[_news(down)]))  # fmt: skip
+    waiting = _manage([])
+    for d in (exit_, waiting, _manage()):
+        assert d.direction is Direction.UP
+    assert _manage().horizon is Timeframe.H1 and waiting.horizon is None

@@ -48,6 +48,7 @@ from app.core.enums import (
     IntentAction,
     Mode,
     Side,
+    Timeframe,
     WaitReason,
 )
 from app.core.events import EventEnvelope, make_event
@@ -102,6 +103,10 @@ class Decision:
     now: datetime
     mode: Mode
     cycle_id: str | None
+    direction: Direction | None = None
+    """The side it leaned to: the chosen proposal's, or the held basket's when managing."""
+    horizon: Timeframe | None = None
+    """The chosen proposal's horizon, if one was chosen."""
 
 
 @dataclass(frozen=True)
@@ -267,6 +272,7 @@ def build(
     confidence: Confidence | None = None,
     order: Order | None = None,
     extra_basis: list[object] | None = None,
+    leaning: Direction | None = None,
 ) -> Decision:
     decision_id = stable_id("dec", action, reasons, inp.basis, extra_basis or [])
     chosen = inp.chosen
@@ -289,7 +295,9 @@ def build(
             prediction_ids=[inp.forecast.prediction_id] if inp.forecast else [],
             position_refs=order.position_refs, valid_until=min(bounds),
         )  # fmt: skip
-    return Decision(created, intent, ctx.now, ctx.mode, cycle.cycle_id)
+    direction = leaning if leaning is not None else (chosen.direction if chosen else None)
+    horizon = chosen.horizon if chosen else None
+    return Decision(created, intent, ctx.now, ctx.mode, cycle.cycle_id, direction, horizon)
 
 
 def wait(
@@ -303,10 +311,11 @@ def wait(
     ev: Decimal | None = None,
     confidence: Confidence | None = None,
     extra_basis: list[object] | None = None,
+    leaning: Direction | None = None,
 ) -> Decision:
     return build(ctx, cycle, inp, action=DecisionAction.WAIT, reasons=[reason], symbol=symbol,
                  policy_version=policy_version, ev=ev, confidence=confidence,
-                 extra_basis=extra_basis)  # fmt: skip
+                 extra_basis=extra_basis, leaning=leaning)  # fmt: skip
 
 
 def to_events(d: Decision, *, account_id: str, bot_id: str) -> list[EventEnvelope]:

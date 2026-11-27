@@ -33,17 +33,14 @@ from app.core.contracts import (
     MarketSnapshot,
     PositionsSnapshot,
     RiskDecision,
-    StrategyProposal,
     TradeIntent,
 )
 from app.core.enums import (
     CycleState,
     DataQuality,
-    Direction,
     HealthStatus,
     IntentAction,
     Mode,
-    Side,
     Timeframe,
 )
 from app.core.events import make_event
@@ -51,7 +48,7 @@ from app.core.ids import stable_id
 from app.core.time import Clock, fresh, utc_now
 from app.decision.context import DecisionContext
 from app.decision.decide import decide
-from app.decision.fusion import Costs, CycleView, Decision, Evidence, to_events, usable_proposals
+from app.decision.fusion import Costs, CycleView, Decision, Evidence, to_events
 from app.decision.gate import Strategy, eligible
 from app.decision.manage import Held, manage
 from app.learning.experience import ExperienceLog
@@ -253,24 +250,18 @@ class DecisionLoop:
             d = manage(ctx, proposals, evidence, cycle=cycle, held=held,
                        max_positions=caps.max_positions, costs=self._costs,
                        symbol=self._symbol, policy_version=pv)  # fmt: skip
-        self._record(d, snapshot, proposals, held, mode, now)  # LRN-02 before M06 sees it
+        self._record(d, snapshot, mode)  # LRN-02 before M06 sees it
         for env in to_events(d, account_id=self._account_id, bot_id=self._bot_id):
             self._journal.append(env)
         self.experiences.label_due(now=now)
         self._health(HealthStatus.OK, None, now)
         return d
 
-    def _record(self, d: Decision, snapshot: FeatureSnapshot, proposals: list[StrategyProposal],
-                held: Held | None, mode: Mode, now: datetime) -> None:  # fmt: skip
-        chosen = usable_proposals(proposals, now)
-        horizon = chosen[0].horizon if chosen else self._timeframes[0]
-        direction: Direction | None = chosen[0].direction if chosen else None
-        if held is not None:
-            direction = Direction.UP if held.side is Side.BUY else Direction.DOWN
+    def _record(self, d: Decision, snapshot: FeatureSnapshot, mode: Mode) -> None:
         self.experiences.record(
             decision=d.created, snapshot=snapshot, mode=mode, symbol=self._symbol,
             cycle_id=d.cycle_id, intent_id=d.intent.intent_id if d.intent else None,
-            direction=direction, horizon=horizon, horizon_bars=1,
+            direction=d.direction, horizon=d.horizon or self._timeframes[0], horizon_bars=1,
         )  # fmt: skip
 
 
