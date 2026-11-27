@@ -6,6 +6,44 @@
 
 ---
 
+## M01 slice C: AI Insights, History and Settings (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/75-m01-insights`)
+
+**Goal:** show what the AI did and why, report results honestly, and edit settings safely (PRD-01 #72, slice #75; UI-03/04/05, UST-09..11).
+
+**Shipped:**
+- `insights.tsx`:
+  - The latest 30 decisions, with action, side, strategy, the EV estimate, reasons and evidence.
+  - The latest 30 forecasts, with what the score means and whether it is Calibrated or Uncalibrated. A forecast is marked Expired when it is past its validity, or when the expiry can't be read.
+- `history.tsx`: cycles with final realized net. Triggered and achieved are reported separately, and a closed cycle without a net shows "Not yet known".
+- `settings.tsx`:
+  - Saves with the version it read. A 409 offers a reload. A 422 shows errors on their fields and lists any that have no field on screen.
+  - The secret is never shown or autofilled. The mask is echoed back unchanged, and the key can be removed.
+  - The strategy list comes from the backend. Live is a disabled option with an explanation.
+  - Save stays off until the saved version has been re-read.
+- `ui.tsx`: shared `Money` and `ReadError`.
+- Backend: `/api/settings` publishes `available_strategies`, and PATCH refuses unknown strategy ids with 422.
+
+**Validation:**
+- Backend verify is green.
+- Frontend lint, typecheck, test (56) and build are green.
+- Mutation probes: all caught.
+- Security review: no findings.
+
+**Review fixes:**
+- No false conflict on a quick second save.
+- Errors with no field on screen are listed.
+- The API key field can't be autofilled with the dashboard password.
+- A stored key can be removed.
+- History no longer says "open" for a closed cycle.
+- An unparseable expiry counts as expired.
+- Lists say "latest 30" and use de-duplicated keys.
+- The strategy list comes from the backend, which enforces it.
+- Shared money and error components.
+- A single outcome state in Settings.
+- Shared test render helper.
+
+---
+
 ## M01 slice B: Trading view (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/74-m01-trading`)
 
 **Goal:** see and control the bot honestly (PRD-01 #72, slice #74; UI-02, UST-01). The Account DD is kept apart from the Cycle Net estimate, nothing stale looks live, nothing sent looks done, and there is no accidental Emergency Stop.

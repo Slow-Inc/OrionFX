@@ -323,3 +323,18 @@ def test_status_risk_lock_follows_newest_event(client: TestClient, db: Path) -> 
     assert body["risk"]["epoch_ceiling_percent"] == "20"
     assert body["risk"]["observed_at"] is not None
     assert "risk_locked" not in body["risk"]  # one lock value, the top-level one
+
+
+def test_settings_publish_and_enforce_the_known_strategies(client: TestClient) -> None:
+    headers = _login(client)
+    current = client.get("/api/settings", headers=headers).json()
+    assert "trend_following" in current["available_strategies"]
+    cfg = current["config"]
+    cfg["trading"]["strategies_enabled"] = ["trend_folowing"]  # a typo would silently do nothing
+    r = client.patch(
+        "/api/settings",
+        json={"expected_version": current["version"], "config": cfg},
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["trading", "strategies_enabled"]

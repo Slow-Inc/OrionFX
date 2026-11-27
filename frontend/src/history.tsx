@@ -1,23 +1,15 @@
 // History (#75; UI-04). Cycles with their final realized net and whether the Profit
 // Target was triggered and achieved, reported separately: a target triggered but closed
-// below it is "Triggered" and "Not achieved", never a win by implication (AT-02).
-import { formatMoney, signed } from "./format";
+// below it is "Triggered" and "Not achieved", never a win by implication (AT-02). A cycle
+// that is not closed has no final net yet; a closed one without it is "Not yet known".
+import { formatMoney } from "./format";
 import { useSnapshot } from "./snapshot";
 import type { Cycle } from "./types";
+import { Money, ReadError } from "./ui";
 
 function achieved(c: Cycle): string {
   if (c.target_achieved === null) return "Not yet known";
   return c.target_achieved ? "Achieved" : "Not achieved";
-}
-
-function FinalNet({ value }: { value: string | null }) {
-  const s = value === null ? null : signed(value);
-  if (s === null) return <span className="muted">open</span>;
-  return (
-    <span className={`money ${s.word}`}>
-      <span>{s.text}</span> <span className="muted">{s.word}</span>
-    </span>
-  );
 }
 
 export function HistoryView() {
@@ -26,11 +18,11 @@ export function HistoryView() {
   return (
     <>
       <h2>History</h2>
-      {cycles.error !== null && <p role="alert">Could not read the history. Retrying…</p>}
+      {cycles.error !== null && <ReadError what="the history" />}
       {cycles.data && items.length === 0 && <p className="muted">No cycles yet.</p>}
       {items.length > 0 && (
         <table>
-          <caption>Cycles, newest first</caption>
+          <caption>Cycles, latest 50, newest first</caption>
           <thead>
             <tr>
               <th scope="col">Cycle</th>
@@ -51,7 +43,10 @@ export function HistoryView() {
                 <td>{c.state}</td>
                 <td>{formatMoney(c.target_usd)}</td>
                 <td>
-                  <FinalNet value={c.final_net_usd} />
+                  <Money
+                    value={c.final_net_usd}
+                    empty={c.state === "CLOSED" ? "Not yet known" : "open"}
+                  />
                 </td>
                 <td>{c.target_triggered ? "Triggered" : "Not triggered"}</td>
                 <td>{achieved(c)}</td>

@@ -155,14 +155,16 @@ export interface TradingConfig {
   strategies_enabled: string[];
 }
 
+export interface LlmConfig {
+  provider: string | null;
+  model: string | null;
+  api_key_ref: string | null;
+  news_handling: "adaptive" | "off";
+}
+
 export interface UserConfig {
   trading: TradingConfig;
-  llm: {
-    provider: string | null;
-    model: string | null;
-    api_key_ref: string | null;
-    news_handling: "adaptive" | "off";
-  };
+  llm: LlmConfig;
   system: {
     deployment: "local" | "vps" | "hybrid";
     storage: "local" | "cloud" | "hybrid";
@@ -176,6 +178,8 @@ export interface Settings {
   config: UserConfig;
   protected: { policy_version: string; live_allowed: boolean };
   missing_for_start: string[];
+  /** Strategy ids the backend knows; enabling any other is refused (422). */
+  available_strategies: string[];
 }
 
 /** One `/ws/live` message: the journal seq and the event envelope. */

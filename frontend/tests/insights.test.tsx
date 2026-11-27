@@ -1,15 +1,15 @@
 // M01 slice C (#75): AI Insights and History report what happened honestly; Settings
 // validates, keeps secrets masked, handles conflicts, and never offers Live by a toggle.
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Api } from "../src/api";
 import { ApiError } from "../src/api";
-import { AppContext, type AppContextValue } from "../src/app";
 import { HistoryView } from "../src/history";
 import { InsightsView } from "../src/insights";
 import { SettingsView } from "../src/settings";
 import type { Cycle, Decision, Prediction, Settings } from "../src/types";
+import { renderWithApp } from "./helpers";
 
 const NOW = new Date().toISOString();
 const LATER = new Date(Date.now() + 3_600_000).toISOString();
@@ -82,6 +82,7 @@ const SETTINGS: Settings = {
   },
   protected: { policy_version: "policy-0.1", live_allowed: false },
   missing_for_start: [],
+  available_strategies: ["breakout", "hybrid", "pullback", "range", "scalping", "trend_following"],
 };
 
 function fakeApi(over: Partial<Api> = {}): Api {
@@ -95,10 +96,7 @@ function fakeApi(over: Partial<Api> = {}): Api {
   } as unknown as Api;
 }
 
-function renderIn(ui: React.ReactElement, api: Api) {
-  const value: AppContextValue = { api, status: null, feed: "LIVE", revision: 0, refresh: vi.fn() };
-  return render(<AppContext.Provider value={value}>{ui}</AppContext.Provider>);
-}
+const renderIn = (ui: React.ReactElement, api: Api) => renderWithApp(ui, api);
 
 // --- Insights --------------------------------------------------------------------------------
 
@@ -222,5 +220,97 @@ describe("Settings", () => {
     const config = (api.saveSettings as ReturnType<typeof vi.fn>).mock
       .calls[0]?.[1] as Settings["config"];
     expect(config.trading.profit_target_usd).toBeNull();
+  });
+});
+
+// --- review fixes ---
+
+describe("review fixes", () => {
+  it("the API key field is never offered the saved sign-in password", async () => {
+    renderIn(<SettingsView />, fakeApi());
+    expect(await screen.findByLabelText(/API key reference/)).toHaveAttribute(
+      "autocomplete",
+      "new-password",
+    );
+  });
+
+  it("a stored key can be removed", async () => {
+    const api = fakeApi();
+    renderIn(<SettingsView />, api);
+    await userEvent.click(await screen.findByLabelText(/Remove the stored key/));
+    await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    const config = (api.saveSettings as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[1] as Settings["config"];
+    expect(config.llm.api_key_ref).toBeNull();
+  });
+
+  it("errors with no field on screen are listed, not dropped", async () => {
+    const api = fakeApi({
+      saveSettings: vi.fn(async () => {
+        throw new ApiError("validation", 422, "HTTP 422", {
+          "": "Value error, lot above the cap",
+          "system.storage": "bad storage",
+        });
+      }),
+    });
+    renderIn(<SettingsView />, api);
+    await userEvent.click(await screen.findByRole("button", { name: "Save settings" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("lot above the cap");
+    expect(alert).toHaveTextContent("system.storage: bad storage");
+  });
+
+  it("shows a stored strategy the backend no longer knows, so it can be removed", async () => {
+    const odd = structuredClone(SETTINGS);
+    odd.config.trading.strategies_enabled = ["trend_following", "retired_rule"];
+    renderIn(<SettingsView />, fakeApi({ settings: vi.fn(async () => odd) }));
+    const box = await screen.findByLabelText(/retired_rule/);
+    expect(box).toBeChecked();
+    expect(screen.getByText("unknown")).toBeInTheDocument();
+  });
+
+  it("Save stays off until the saved version is re-read, so a quick second save is not stale", async () => {
+    let release: (s: Settings) => void = () => {};
+    let reads = 0;
+    const api = fakeApi({
+      settings: vi.fn(async () => {
+        reads += 1;
+        if (reads === 1) return SETTINGS;
+        return new Promise<Settings>((r) => {
+          release = r;
+        });
+      }),
+    });
+    renderIn(<SettingsView />, api);
+    await userEvent.click(await screen.findByRole("button", { name: "Save settings" }));
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled(); // reload pending
+    release({ ...SETTINGS, version: 4 });
+    expect(await screen.findByRole("button", { name: "Save settings" })).toBeEnabled();
+  });
+
+  it("a closed cycle without a final net is not shown as open", async () => {
+    const closed = { ...CLOSED, final_net_usd: null, target_achieved: null };
+    renderIn(
+      <HistoryView />,
+      fakeApi({ cycles: vi.fn(async () => ({ as_of: NOW, items: [closed] })) }),
+    );
+    const row = await screen.findByRole("row", { name: /cyc-1/ });
+    expect(within(row).getAllByText("Not yet known").length).toBe(2);
+    expect(within(row).queryByText("open")).not.toBeInTheDocument();
+  });
+
+  it("an unreadable forecast expiry counts as expired", async () => {
+    const bad = { ...PREDICTION, valid_until: "" };
+    renderIn(
+      <InsightsView />,
+      fakeApi({ predictions: vi.fn(async () => ({ as_of: NOW, items: [bad] })) }),
+    );
+    const forecasts = await screen.findByRole("region", { name: "Forecasts" });
+    expect(await within(forecasts).findByText("Expired")).toBeInTheDocument();
+  });
+
+  it("says the lists are the latest 30", async () => {
+    renderIn(<InsightsView />, fakeApi());
+    expect(await screen.findAllByText(/latest 30/)).toHaveLength(2);
   });
 });

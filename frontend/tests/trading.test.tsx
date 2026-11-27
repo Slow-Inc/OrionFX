@@ -1,15 +1,15 @@
 // M01 slice B (#74): commands stay pending until M06 says otherwise; the Trading view
 // keeps Account DD apart from the Cycle Net estimate, never shows stale as live, and
 // confirms every control (Emergency Stop by typing).
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Api } from "../src/api";
 import { ApiError } from "../src/api";
-import { AppContext, type AppContextValue } from "../src/app";
 import { runCommand } from "../src/commands";
 import { TradingView } from "../src/trading";
 import type { Account, CommandResult, Cycle, Status } from "../src/types";
+import { renderWithApp } from "./helpers";
 
 const NOW = new Date().toISOString();
 
@@ -79,14 +79,8 @@ function fakeApi(over: Partial<Api> = {}): Api {
   } as unknown as Api;
 }
 
-function renderTrading(api: Api, status: Status | null = STATUS) {
-  const value: AppContextValue = { api, status, feed: "LIVE", revision: 0, refresh: vi.fn() };
-  return render(
-    <AppContext.Provider value={value}>
-      <TradingView />
-    </AppContext.Provider>,
-  );
-}
+const renderTrading = (api: Api, status: Status | null = STATUS) =>
+  renderWithApp(<TradingView />, api, status);
 
 // --- runCommand ---------------------------------------------------------------------------------
 

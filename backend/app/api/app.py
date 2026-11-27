@@ -45,6 +45,7 @@ from app.core.health import effective_health
 from app.core.ids import new_id
 from app.core.secrets import redact, unredact
 from app.core.time import Clock, utc_now
+from app.decision.strategies import STRATEGIES
 from app.storage.audit import audit
 from app.storage.config_store import ConfigStore, VersionConflict
 from app.storage.db import connect, transaction
@@ -264,6 +265,7 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
             "config": redact(cfg.model_dump(mode="json")),
             "protected": ProtectedPolicy().model_dump(mode="json"),
             "missing_for_start": missing_for_start(cfg),
+            "available_strategies": sorted(STRATEGIES),
         }
 
     @private.patch("/api/settings")
@@ -277,6 +279,12 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
         except ValidationError as exc:
             errors = json.loads(exc.json(include_input=False, include_url=False))
             raise HTTPException(status_code=422, detail=errors) from None
+        unknown = sorted(set(cfg.trading.strategies_enabled) - set(STRATEGIES))
+        if unknown:  # an unknown id would be accepted and silently never run
+            raise HTTPException(status_code=422, detail=[{
+                "loc": ["trading", "strategies_enabled"], "type": "unknown_strategy",
+                "msg": f"Unknown strategies: {', '.join(unknown)}",
+            }])  # fmt: skip
         try:
             version = store.update(cfg, expected_version=body.expected_version, actor="owner")
         except VersionConflict as exc:

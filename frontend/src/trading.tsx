@@ -6,10 +6,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp, useNow } from "./app";
 import { type CommandState, runCommand } from "./commands";
-import { formatMoney, formatPercent, signed } from "./format";
+import { formatMoney, formatPercent } from "./format";
 import { freshness } from "./freshness";
 import { useSnapshot } from "./snapshot";
 import type { ControlAction, ControlState, Cycle, Status } from "./types";
+import { Money, ReadError } from "./ui";
 
 /** Keep equal to the backend's ACCOUNT_STALE_AFTER (backend/app/api/app.py). */
 const ACCOUNT_MAX_AGE_MS = 60_000;
@@ -33,20 +34,6 @@ function Fresh({
       {old ? <span className="pill warn">Stale</span> : <span className="pill ok">Fresh</span>}{" "}
       {asOf ? `observed ${new Date(asOf).toLocaleTimeString()}` : "never observed"}
     </p>
-  );
-}
-
-function ReadError() {
-  return <p role="alert">Could not read this from the bot. Retrying…</p>;
-}
-
-function Money({ value }: { value: string | null }) {
-  const s = value === null ? null : signed(value);
-  if (s === null) return <span>—</span>;
-  return (
-    <span className={`money ${s.word}`}>
-      <span>{s.text}</span> <span className="muted">{s.word}</span>
-    </span>
   );
 }
 
