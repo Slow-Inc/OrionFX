@@ -28,6 +28,16 @@ DEFAULT_TECHNIQUES: tuple[Technique, ...] = (
     *make_price_action().values(),
 )
 
+
+def feature_key(tf: Timeframe, catalog_id: str, output: str) -> str:
+    """The snapshot key of one output of the default technique for a catalog row, so
+    consumers name features by catalog id, not by technique-id spelling."""
+    for t in DEFAULT_TECHNIQUES:
+        if t.catalog_id == catalog_id and output in t.outputs:
+            return f"{tf}.{t.technique_id}.{output}"
+    raise KeyError(f"no default technique for {catalog_id} with output {output!r}")
+
+
 SUMMARY_CATALOG_IDS = ("CAT-T03-04", "CAT-T03-06", "CAT-T03-07")
 """Structure, regime and multi-bar direction: the chart summary other modules may read."""
 SUMMARY_KEYS: frozenset[str] = frozenset(

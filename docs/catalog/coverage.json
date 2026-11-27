@@ -6,7 +6,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "OHLC/tick, forecast, validated costs",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/decision/strategies.py",
+      "backend/app/decision/gate.py"
+    ],
+    "test_ids": [
+      "tests/unit/decision/test_strategies.py::test_trend_following_needs_aligned_structure_and_a_trending_adx",
+      "tests/unit/decision/test_strategies.py::test_only_enabled_and_approved_strategies_pass"
+    ],
+    "note": "Rule logic tested on synthetic snapshots; thresholds PROPOSED; no performance claim (X02 walk-forward pending)."
   },
   {
     "catalog_id": "CAT-S01-02",
@@ -15,7 +24,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "OHLC/tick, forecast, validated costs",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/decision/strategies.py",
+      "backend/app/decision/gate.py"
+    ],
+    "test_ids": [
+      "tests/unit/decision/test_strategies.py::test_scalping_needs_aligned_fast_timeframes_and_a_tight_spread",
+      "tests/unit/decision/test_strategies.py::test_only_enabled_and_approved_strategies_pass"
+    ],
+    "note": "Rule logic tested on synthetic snapshots; thresholds PROPOSED; no performance claim (X02 walk-forward pending)."
   },
   {
     "catalog_id": "CAT-S01-03",
@@ -24,7 +42,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "OHLC/tick, forecast, validated costs",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/decision/strategies.py",
+      "backend/app/decision/gate.py"
+    ],
+    "test_ids": [
+      "tests/unit/decision/test_strategies.py::test_pullback_enters_with_the_trend_after_a_counter_move",
+      "tests/unit/decision/test_strategies.py::test_only_enabled_and_approved_strategies_pass"
+    ],
+    "note": "Rule logic tested on synthetic snapshots; thresholds PROPOSED; no performance claim (X02 walk-forward pending)."
   },
   {
     "catalog_id": "CAT-S01-04",
@@ -33,7 +60,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "OHLC/tick, forecast, validated costs",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/decision/strategies.py",
+      "backend/app/decision/gate.py"
+    ],
+    "test_ids": [
+      "tests/unit/decision/test_strategies.py::test_breakout_fires_beyond_a_level_outside_a_range",
+      "tests/unit/decision/test_strategies.py::test_only_enabled_and_approved_strategies_pass"
+    ],
+    "note": "Rule logic tested on synthetic snapshots; thresholds PROPOSED; no performance claim (X02 walk-forward pending)."
   },
   {
     "catalog_id": "CAT-S01-05",
@@ -42,7 +78,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "OHLC/tick, forecast, validated costs",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/decision/strategies.py",
+      "backend/app/decision/gate.py"
+    ],
+    "test_ids": [
+      "tests/unit/decision/test_strategies.py::test_range_fades_the_edges_only_in_a_range_regime",
+      "tests/unit/decision/test_strategies.py::test_only_enabled_and_approved_strategies_pass"
+    ],
+    "note": "Rule logic tested on synthetic snapshots; thresholds PROPOSED; no performance claim (X02 walk-forward pending)."
   },
   {
     "catalog_id": "CAT-S01-06",
@@ -51,7 +96,16 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "OHLC/tick, forecast, validated costs",
-    "coverage_state": "planned"
+    "coverage_state": "tested",
+    "implementation_refs": [
+      "backend/app/decision/strategies.py",
+      "backend/app/decision/gate.py"
+    ],
+    "test_ids": [
+      "tests/unit/decision/test_strategies.py::test_hybrid_needs_two_strategies_to_agree",
+      "tests/unit/decision/test_strategies.py::test_only_enabled_and_approved_strategies_pass"
+    ],
+    "note": "Rule logic tested on synthetic snapshots; thresholds PROPOSED; no performance claim (X02 walk-forward pending)."
   },
   {
     "catalog_id": "CAT-S01-07",
@@ -60,7 +114,10 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "OHLC/tick, forecast, validated costs",
-    "coverage_state": "planned"
+    "coverage_state": "blocked",
+    "blocker_reason": "Machine Learning Trading needs a trained, approved model (training out of scope; #48)",
+    "resolution_owner": "M05",
+    "review_trigger": "An approved M04 model exists"
   },
   {
     "catalog_id": "CAT-S02-01",
