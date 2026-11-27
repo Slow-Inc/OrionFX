@@ -35,7 +35,13 @@ def test_fixture_source_returns_items_after_a_time() -> None:
     src = FixtureSource(
         [_item("1", "Fed holds"), _item("2", "CPI hot", at=T0 + timedelta(hours=1))]
     )
-    assert [i.item_id for i in src.fetch(since=T0)] == ["2"]
+    assert [i.item_id for i in src.fetch(since=T0 + timedelta(minutes=1))] == ["2"]
+
+
+def test_a_story_published_before_the_cursor_but_delivered_after_is_not_lost() -> None:
+    late = _item("3", "Late wire").model_copy(update={"fetched_at": T0 + timedelta(minutes=30)})
+    src = FixtureSource([late])
+    assert [i.item_id for i in src.fetch(since=T0 + timedelta(minutes=10))] == ["3"]
     assert src.available
 
 
@@ -98,8 +104,7 @@ def test_fingerprint_ignores_case_spacing_and_punctuation() -> None:
 # --- schedule -------------------------------------------------------------------------------------
 
 
-POLICY = FetchPolicy(base_interval=timedelta(minutes=30), event_window=timedelta(minutes=15),
-                     event_interval=timedelta(minutes=2))  # fmt: skip
+POLICY = FetchPolicy()  # 30 min base; 2 min within 15 min of a high-impact event
 NFP = CalendarEvent(name="NFP", at=T0 + timedelta(hours=2), impact="high")
 
 
@@ -136,3 +141,72 @@ def test_never_fetches_every_tick() -> None:
 
 def test_first_fetch_happens_immediately() -> None:
     assert should_fetch(T0, last_fetch=None, calendar=[], policy=POLICY)
+
+
+# --- review findings ------------------------------------------------------------------------------
+
+
+def test_two_sources_reusing_an_id_do_not_overwrite_each_other() -> None:
+    cache = NewsCache()
+    cache.add(_item("1", "Fed holds rates steady", source="wire-a"))
+    cache.add(_item("1", "CPI beats forecast sharply", source="wire-b"))
+    titles = {i.title for i in cache.current(T0)}
+    assert titles == {"Fed holds rates steady", "CPI beats forecast sharply"}
+
+
+def test_a_repeat_after_expiry_is_live_news_again() -> None:
+    cache = NewsCache()
+    cache.add(_item("1", "Gold jumps on haven demand", at=T0 - timedelta(hours=8)))
+    fresh = _item("2", "Gold jumps on haven demand")
+    assert cache.add(fresh) is True
+    assert [i.item_id for i in cache.current(T0)] == ["2"]
+
+
+def test_a_repeat_extends_the_story() -> None:
+    cache = NewsCache()
+    first = _item("1", "Fed holds rates steady").model_copy(
+        update={"valid_until": T0 + timedelta(hours=1)}
+    )
+    cache.add(first)
+    cache.add(_item("2", "Fed holds rates steady", source="wire-b", at=T0 + timedelta(minutes=50)))
+    assert [i.item_id for i in cache.current(T0 + timedelta(minutes=70))] == ["1"]
+
+
+def test_bare_headlines_dedup_by_url_only() -> None:
+    cache = NewsCache()
+    morning = _item("1", "Gold price update", body=" ")
+    afternoon = _item("2", "Gold price update", body=" ", at=T0 + timedelta(hours=1))
+    cache.add(morning)
+    assert cache.add(afternoon) is True
+
+
+def test_a_publisher_clock_slightly_ahead_is_accepted() -> None:
+    early = T0 + timedelta(minutes=1, seconds=1)  # one second after our fetch time
+    ahead = _item("1", "Breaking").model_dump() | {"published_at": early}
+    assert NewsItem.model_validate(ahead).published_at > ahead["fetched_at"]
+
+
+def test_sources_must_start_with_the_item_source() -> None:
+    with pytest.raises(ValueError):
+        NewsItem.model_validate(_item("1", "t").model_dump() | {"sources": ("wire-b", "wire-c")})
+
+
+def test_naive_times_are_refused() -> None:
+    with pytest.raises(ValueError):
+        should_fetch(datetime(2026, 1, 5, 12), last_fetch=None, calendar=[], policy=POLICY)
+    with pytest.raises(ValueError):
+        NewsCache().current(datetime(2026, 1, 5, 12))
+    with pytest.raises(ValueError):
+        CalendarEvent(name="NFP", at=datetime(2026, 1, 5, 12), impact="high")
+
+
+def test_a_clock_that_moved_back_fetches_at_once() -> None:
+    assert should_fetch(T0, last_fetch=T0 + timedelta(minutes=20), calendar=[], policy=POLICY)
+
+
+def test_url_variants_are_the_same_story() -> None:
+    cache = NewsCache()
+    a = _item("1", "Gold jumps", body=" ")
+    b = a.model_copy(update={"item_id": "2", "url": "HTTPS://WIRE-A.example/1/"})
+    cache.add(a)
+    assert cache.add(b) is False

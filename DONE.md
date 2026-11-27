@@ -6,6 +6,20 @@
 
 ---
 
+## M03 slice A — news sources, provenance, cache, dedup, schedule (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/38-m03-news-sources`)
+
+**Goal:** honest news input: provenance on every item, repeats never counted as independent evidence, fetching on a calendar/event schedule (PRD-03 #37, slice #38; LLM-02/03/05).
+
+**Shipped:** `backend/app/news/{sources,cache,schedule}.py` (`NewsItem`, `NewsSource` port, `FixtureSource`, `NoSource`, `NewsCache`, `fingerprint`, `normalize_url`, `CalendarEvent`, `FetchPolicy`, `should_fetch`); `EventImpact` enum.
+
+**Validation:** `uv run pytest` → all pass (23 news tests, written first). 20 mutation probes caught (one survivor fixed with a URL-variant test).
+
+**Review fixes:** cursor on `fetched_at` (late-delivered stories not lost); cache keyed by (source, item_id); repeats extend validity; expired stories pruned (a repeat after expiry is live again); bare headlines dedup by URL only; normalized URLs; publisher clock skew tolerated; naive times refused; a clock that moved back fetches at once; `sources` always starts with the item's own source.
+
+**Not done:** real news/calendar adapters (#41, no licensed source).
+
+---
+
 ## M02 slice D — point-in-time candle store and replay (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/32-m02-store-replay`)
 
 **Goal:** "what did we know at T" for backtests, and replays that reproduce live features (PRD-02 #28, slice #32; DAT-04, AT-15).

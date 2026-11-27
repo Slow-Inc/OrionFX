@@ -2,20 +2,25 @@
 
 A pure decision from (now, last fetch, calendar, policy): fetch on a base
 interval, and on a tighter interval inside a window around each high-impact
-calendar event. All intervals are [PROPOSED].
+calendar event. A clock that moved backwards (NTP step, a last fetch restored
+from another host) fetches at once rather than going quiet. All intervals are
+[PROPOSED].
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal
+
+from app.core.contracts import ContractModel
+from app.core.enums import EventImpact
+from app.core.time import require_utc
+from app.core.types import UtcDatetime
 
 
-@dataclass(frozen=True, slots=True)
-class CalendarEvent:
+class CalendarEvent(ContractModel):
     name: str
-    at: datetime
-    impact: Literal["low", "medium", "high"]
+    at: UtcDatetime
+    impact: EventImpact
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +31,7 @@ class FetchPolicy:
 
 
 def _near_event(now: datetime, calendar: Sequence[CalendarEvent], window: timedelta) -> bool:
-    return any(e.impact == "high" and abs(now - e.at) <= window for e in calendar)
+    return any(e.impact is EventImpact.HIGH and abs(now - e.at) <= window for e in calendar)
 
 
 def should_fetch(
@@ -36,11 +41,8 @@ def should_fetch(
     calendar: Sequence[CalendarEvent],
     policy: FetchPolicy,
 ) -> bool:
-    if last_fetch is None:
+    require_utc(now)
+    if last_fetch is None or now < require_utc(last_fetch):
         return True
-    interval = (
-        policy.event_interval
-        if _near_event(now, calendar, policy.event_window)
-        else policy.base_interval
-    )
-    return now - last_fetch >= interval
+    near = _near_event(now, calendar, policy.event_window)
+    return now - last_fetch >= (policy.event_interval if near else policy.base_interval)
