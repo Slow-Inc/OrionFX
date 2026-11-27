@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from app.core.enums import ForecastLineage, Mode, Timeframe
 from app.learning.lifecycle import (
+    RETRAIN_PSI,
     DatasetManifest,
     DatasetStore,
     LifecycleRefused,
@@ -213,6 +214,20 @@ def test_psi_matches_a_hand_computed_value() -> None:
     # recent 1/8, 1/8, 1/8, 5/8 -> PSI = sum((r - e) ln(r / e))
     value = psi(reference, recent, bins=4)
     assert value == D("0.6035")  # 3 x (0.125 - 0.25) ln 0.5 + (0.625 - 0.25) ln 2.5
+
+
+def test_psi_sees_a_shift_in_a_binary_feature() -> None:
+    reference = [D(0)] * 10 + [D(1)]
+    assert psi(reference, [D(1)] * 11) > RETRAIN_PSI  # quantile edges collapse to [0]
+    assert psi(reference, [D(2)] * 11) > RETRAIN_PSI  # a value the reference never had
+    codes = [D(0)] * 10 + [D(1), D(2)]  # quantile bins would put 1 and 2 together
+    assert psi(codes, [D(0)] * 10 + [D(2), D(2)]) > RETRAIN_PSI
+
+
+def test_psi_sees_a_point_mass_moving_off_its_quantile_edge() -> None:
+    reference = [D(0)] * 50 + [D(x) for x in range(1, 51)]  # a sparse feature: half zero
+    recent = [D("0.5")] * 50 + [D(x) for x in range(1, 51)]
+    assert psi(reference, recent) > RETRAIN_PSI
 
 
 def test_identical_windows_have_zero_drift_and_no_recommendation() -> None:

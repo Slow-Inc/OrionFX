@@ -30,7 +30,7 @@ from enum import StrEnum
 
 from app.core.contracts import ContractModel, FeatureSnapshot, PredictionGenerated
 from app.core.enums import Mode, Timeframe
-from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
+from app.core.time import TIMEFRAME_DURATION, Clock, utc_iso, utc_now
 from app.core.types import Dec, UtcDatetime
 from app.learning.moves import bars_closing_at, data_frontier
 from app.market_data.store import CandleStore
@@ -84,10 +84,6 @@ class RecordedPrediction:
     prediction: PredictionGenerated
 
 
-def _ts(t: datetime) -> str:
-    return t.isoformat()
-
-
 class BarLog:
     def __init__(self, conn: sqlite3.Connection, *, clock: Clock = utc_now) -> None:
         self._conn = conn
@@ -110,10 +106,10 @@ class BarLog:
                 "INSERT INTO learning_snapshots (symbol, timeframe, as_of, feature_schema,"
                 " dataset_version, provenance, mode, quality, available_at, body, recorded_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                (snapshot.symbol, timeframe.value, _ts(snapshot.as_of), snapshot.feature_schema,
+                (snapshot.symbol, timeframe.value, utc_iso(snapshot.as_of), snapshot.feature_schema,
                  dataset_version, provenance.value, None if mode is None else mode.value,
-                 snapshot.quality.value, _ts(snapshot.available_at),
-                 snapshot.model_dump_json(), _ts(self._clock())),
+                 snapshot.quality.value, utc_iso(snapshot.available_at),
+                 snapshot.model_dump_json(), utc_iso(self._clock())),
             ).rowcount)  # fmt: skip
 
     def record_prediction(
@@ -131,10 +127,10 @@ class BarLog:
                 " dataset_version, model_id, model_version, horizon, horizon_bars, direction,"
                 " provenance, body, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT DO NOTHING",
-                (snapshot.symbol, _ts(snapshot.as_of), snapshot.feature_schema, dataset_version,
+                (snapshot.symbol, utc_iso(snapshot.as_of), snapshot.feature_schema, dataset_version,
                  p.model_id, p.model_version, p.horizon.value, p.horizon_bars,
                  p.direction.value, provenance.value, p.model_dump_json(),
-                 _ts(self._clock())),
+                 utc_iso(self._clock())),
             ).rowcount)  # fmt: skip
 
     def label_due(
@@ -157,8 +153,8 @@ class BarLog:
                 " AND u.as_of = s.as_of AND u.horizon = ? AND u.horizon_bars = ?"
                 " AND u.dataset_version = s.dataset_version AND u.decided_at <= ?)"
                 " ORDER BY s.as_of",
-                (symbol, version, _ts(now - h.length), h.timeframe.value, h.bars,
-                 h.timeframe.value, h.bars, _ts(now)),
+                (symbol, version, utc_iso(now - h.length), h.timeframe.value, h.bars,
+                 h.timeframe.value, h.bars, utc_iso(now)),
             ).fetchall()  # fmt: skip
             for (as_of_text,) in rows:
                 as_of = datetime.fromisoformat(as_of_text)
@@ -186,8 +182,8 @@ class BarLog:
                 "INSERT INTO learning_unlabellable (symbol, as_of, horizon, horizon_bars,"
                 " dataset_version, reason, decided_at, marked_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                (symbol, _ts(as_of), h.timeframe.value, h.bars, version, reason, _ts(now),
-                 _ts(self._clock())),
+                (symbol, utc_iso(as_of), h.timeframe.value, h.bars, version, reason, utc_iso(now),
+                 utc_iso(self._clock())),
             )  # fmt: skip
 
     def unlabellable(self, symbol: str, h: Horizon, *, dataset_version: str) -> list[datetime]:
@@ -220,9 +216,9 @@ class BarLog:
                 "INSERT INTO learning_outcomes (symbol, as_of, horizon, horizon_bars,"
                 " dataset_version, move, spread, available_at, body, labeled_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                (o.symbol, _ts(o.as_of), o.horizon.value, o.horizon_bars, o.dataset_version,
+                (o.symbol, utc_iso(o.as_of), o.horizon.value, o.horizon_bars, o.dataset_version,
                  str(o.move), None if o.spread is None else str(o.spread),
-                 _ts(o.available_at), o.model_dump_json(), _ts(self._clock())),
+                 utc_iso(o.available_at), o.model_dump_json(), utc_iso(self._clock())),
             ).rowcount)  # fmt: skip
 
     # --- reading -----------------------------------------------------------------------
@@ -248,7 +244,7 @@ class BarLog:
             "SELECT body, provenance, mode, dataset_version FROM learning_snapshots"
             " WHERE symbol = ? AND timeframe = ? AND as_of >= ? AND as_of < ?"
             " ORDER BY as_of, dataset_version, feature_schema",
-            (symbol, timeframe.value, _ts(start), _ts(end)),
+            (symbol, timeframe.value, utc_iso(start), utc_iso(end)),
         ).fetchall()
         return [
             SnapshotRow(
@@ -268,7 +264,7 @@ class BarLog:
         rows = self._conn.execute(
             "SELECT body FROM learning_outcomes WHERE symbol = ? AND horizon = ?"
             " AND horizon_bars = ? AND as_of >= ? AND as_of < ? ORDER BY as_of, dataset_version",
-            (symbol, horizon.timeframe.value, horizon.bars, _ts(start), _ts(end)),
+            (symbol, horizon.timeframe.value, horizon.bars, utc_iso(start), utc_iso(end)),
         ).fetchall()
         return [BarOutcome.model_validate_json(b) for (b,) in rows]
 
@@ -287,7 +283,7 @@ class BarLog:
             "SELECT as_of, provenance, body FROM learning_predictions WHERE symbol = ?"
             " AND model_id = ? AND (? IS NULL OR model_version = ?) AND as_of >= ?"
             " AND as_of < ? ORDER BY as_of, model_version, dataset_version",
-            (symbol, model_id, model_version, model_version, _ts(start), _ts(end)),
+            (symbol, model_id, model_version, model_version, utc_iso(start), utc_iso(end)),
         ).fetchall()
         return [_recorded(a, pv, b) for a, pv, b in rows]
 
@@ -310,7 +306,7 @@ class BarLog:
             " WHERE p.symbol = ? AND p.model_id = ? AND (? IS NULL OR p.model_version = ?)"
             " AND p.as_of >= ? AND p.as_of < ?"
             " ORDER BY p.as_of, p.model_version, p.dataset_version",
-            (symbol, model_id, model_version, model_version, _ts(start), _ts(end)),
+            (symbol, model_id, model_version, model_version, utc_iso(start), utc_iso(end)),
         ).fetchall()
         return [
             (_recorded(a, pv, pb), None if ob is None else BarOutcome.model_validate_json(ob))

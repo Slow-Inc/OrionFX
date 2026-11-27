@@ -8,7 +8,7 @@ and not re-queried; a row whose end is merely not due yet is left alone."""
 
 import sqlite3
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -85,6 +85,16 @@ def test_m15_and_h1_horizons_recorded_on_m5_are_labelled_on_every_row(
     # as_of = close of bar 1 (10:10); M15x2 ends 30 min later = close of bar 7
     assert by[(M15, T0 + 2 * FIVE)].move == _close(7) - _close(1)
     assert by[(H1, T0 + 2 * FIVE)].move == _close(13) - _close(1)
+
+
+def test_a_non_utc_now_is_compared_in_utc(conn: sqlite3.Connection, candles: CandleStore) -> None:
+    _m5_bars(candles, 40)
+    log = BarLog(conn)
+    _record(log, 20)
+    now = (T0 + 40 * FIVE).astimezone(timezone(timedelta(hours=-5)))  # 08:20-05:00
+    assert len(log.label_due(candles, symbol="XAUUSD", horizons=[Horizon(M15, 2)], now=now)) == 20
+    with pytest.raises(ValueError, match="naive"):
+        log.snapshots("XAUUSD", M5, start=T0.replace(tzinfo=None), end=now)
 
 
 def test_a_row_past_a_hole_is_marked_once_and_a_row_not_yet_due_is_left_alone(

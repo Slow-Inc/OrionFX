@@ -1,7 +1,7 @@
 """Trading-session schedules (#124, PRD #120 slice 0a). The XAUUSD market closes daily
 and at weekends on purpose: a technique window spanning a scheduled closure is still
 contiguous, the first bar after it is not a gap, and the last bar before it stays valid
-until the next expected bar closes. Holes while the market is open remain gaps."""
+only until the market reopens. Holes while the market is open remain gaps."""
 
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
@@ -162,6 +162,18 @@ def test_the_candle_engine_flags_open_market_holes_but_not_scheduled_breaks() ->
     open_hole.on_tick(_tick(WED_JAN.replace(hour=10, minute=31)))
     nxt = open_hole.on_tick(_tick(WED_JAN.replace(hour=10, minute=36)))
     assert any(c.event.quality_flags == ["GAP"] for c in nxt)
+
+
+def test_a_higher_bar_cut_by_a_scheduled_close_is_not_a_gap() -> None:
+    # Closes 17:30 New York (22:30 UTC in January): H1 22:00 is half open, half closed.
+    half = SessionSchedule("x", "America/New_York", time(17, 30), time(18, 0))
+    later = datetime(2027, 1, 1, tzinfo=UTC)
+    eng = CandleEngine("XAUUSD", {"XAUUSD": "XAUUSD"}, clock=lambda: later, session=half)
+    for minute in range(30):
+        eng.on_tick(_tick(WED_JAN.replace(hour=22, minute=minute)))
+    closed = eng.on_tick(_tick(WED_JAN.replace(hour=23, minute=1)))
+    (h1,) = [c.event for c in closed if c.event.timeframe is Timeframe.H1]
+    assert h1.quality_flags == []
 
 
 def test_audit_finds_bars_in_closed_time_and_real_gaps() -> None:

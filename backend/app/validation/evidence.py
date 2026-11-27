@@ -4,8 +4,11 @@ VAL-05, VAL-06; AT-16, AT-24; master plan §11.1).
 - A validation run (replay, walk-forward, scenario) is stored append-only. Its ref,
   `x02:run:<hash>`, is a hash of its content, so the same evidence has the same ref.
 - A `ReadinessPolicy` lists metric criteria, minimum trades and days, and the regimes
-  that must be covered. Anything not yet decided stays None (TBD). Versions are
-  immutable; changing a policy means saving a new version, and the newest is current.
+  that must be covered. A run covers its regimes only if the run has at least
+  `min_trades_per_regime` trades, so one lucky trade labelled with every regime cannot
+  (runs carry no per-regime trade count, so the floor is per run).
+  Anything not yet decided stays None (TBD). Versions are immutable; changing a policy
+  means saving a new version, and the newest is current.
   A certified policy must have criteria and regimes. The shipped `DEFAULT_POLICY` is
   uncertified with every threshold TBD, so nothing qualifies until the owner and the
   modules set real thresholds (OD-07, OD-08).
@@ -88,6 +91,8 @@ class ReadinessPolicy(ContractModel):
     min_trades: int | None
     min_days: int | None
     required_regimes: list[str]
+    min_trades_per_regime: int | None = None
+    """A run covers its regimes only with at least this many trades (per run)."""
 
     @model_validator(mode="after")
     def _sound(self) -> Self:
@@ -163,7 +168,10 @@ def _reasons(policy: ReadinessPolicy, runs: list[ValidationRun]) -> list[str]:
         reasons.append("MIN_DAYS_TBD")
     elif days < policy.min_days:
         reasons.append("MIN_DAYS")
-    covered = {g for r in runs for g in r.regimes}
+    if policy.min_trades_per_regime is None:
+        reasons.append("MIN_TRADES_PER_REGIME_TBD")
+    floor = policy.min_trades_per_regime or 0
+    covered = {g for r in runs if r.trades >= floor for g in r.regimes}
     reasons += [f"REGIME_MISSING:{g}" for g in policy.required_regimes if g not in covered]
     return reasons
 

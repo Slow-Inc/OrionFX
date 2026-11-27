@@ -252,7 +252,8 @@ def observe(
 
     With a `session`, bars are expected only while the market is open: a window that
     spans a scheduled closure is contiguous, and the last bar before one stays valid
-    until the next expected bar closes. Without one the market never closes (24/7)."""
+    only until the market reopens (safety over availability: the reopen is when spreads
+    are widest). Without one the market never closes (24/7)."""
     if not bars:
         raise ValueError("observe needs at least one bar")
     last = bars[-1]

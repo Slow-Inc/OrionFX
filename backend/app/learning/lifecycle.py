@@ -19,7 +19,8 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
     away from. A restored approval that has expired is refused, not silently written.
   - `learning_promotions` is the champion-pointer log; the registry's eligibility
     records stay the authority on what may run. Every change is audited.
-- Drift: `psi` (Population Stability Index) per feature over reference-quantile bins.
+- Drift: `psi` (Population Stability Index) per feature, over per-value bins for a
+  low-cardinality feature and reference-quantile bins otherwise.
   PSI > RETRAIN_PSI [PROPOSED], or a feature missing from either window, recommends a
   retrain. That recommendation is an audit entry for the owner; nothing retrains.
 """
@@ -27,7 +28,7 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
 import bisect
 import sqlite3
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -327,15 +328,27 @@ class ModelLifecycle:
 
 
 def psi(reference: list[Decimal], recent: list[Decimal], *, bins: int = 10) -> Decimal:
-    """Population Stability Index over bins cut at the reference quantiles."""
+    """Population Stability Index. A feature with at most `bins` distinct reference
+    values (a flag, a code) gets one bin per value, plus one for values the
+    reference never had. Otherwise bins are cut at the reference quantiles, and a value
+    filling more than one quantile (a point mass, e.g. a sparse feature's zero) gets a
+    bin of its own instead of sharing one with the values above it."""
     if not reference or not recent:
         raise ValueError("PSI needs two non-empty windows")
-    ref = sorted(reference)
-    edges = sorted({ref[i * len(ref) // bins] for i in range(1, bins)})
-    ref_counts = Counter(bisect.bisect_right(edges, x) for x in reference)
-    new_counts = Counter(bisect.bisect_right(edges, x) for x in recent)
+    seen = set(reference)
+    key: Callable[[Decimal], Hashable]
+    if len(seen) <= bins:
+        key = lambda x: x if x in seen else None  # noqa: E731
+    else:
+        ref = sorted(reference)
+        cuts = Counter(ref[i * len(ref) // bins] for i in range(1, bins))
+        edges = sorted(cuts)
+        masses = {c for c, n in cuts.items() if n > 1}
+        key = lambda x: (bisect.bisect_right(edges, x), x in masses)  # noqa: E731
+    ref_counts = Counter(map(key, reference))
+    new_counts = Counter(map(key, recent))
     total = D(0)
-    for b in range(len(edges) + 1):
+    for b in ref_counts.keys() | new_counts.keys():
         e = max(D(ref_counts[b]) / len(reference), PSI_FLOOR)
         r = max(D(new_counts[b]) / len(recent), PSI_FLOOR)
         total += (r - e) * (r / e).ln()
