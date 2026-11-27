@@ -28,9 +28,9 @@ jobs:
       && github.event.issue.user.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # GITHUB_TOKEN is read-only; labels and comments use the OpenCode App token.
     permissions:
       contents: read
-      issues: write
       id-token: write
     steps:
       - name: Checkout
@@ -62,9 +62,14 @@ jobs:
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           timeout-minutes: '7'
-      - name: Apply labels and check the bilingual body
+      - name: Apply labels and check the bilingual body as the OpenCode app
         env:
-          GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ github.event.issue.number }}
           LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
-        run: python3 -I .github/opencode/post.py triage "$RUNNER_TEMP/answer.md" "$GITHUB_REPOSITORY" "$ISSUE" .git/opencode-ctx/body.md "$LABELS"
+        run: |
+          set -euo pipefail
+          GH_TOKEN=$(bash .github/opencode/app-token.sh)
+          echo "::add-mask::$GH_TOKEN"
+          export GH_TOKEN
+          trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
+          python3 -I .github/opencode/post.py triage "$RUNNER_TEMP/answer.md" "$GITHUB_REPOSITORY" "$ISSUE" .git/opencode-ctx/body.md "$LABELS"

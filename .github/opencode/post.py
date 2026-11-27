@@ -30,7 +30,7 @@ COMPONENTS = {
 }
 # wontfix is a maintainer decision; the bot never applies it.
 ROLES = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human"}
-MAX_INLINE = 10
+MAX_INLINE = 15
 
 
 def gh_api(endpoint: str, payload: dict) -> subprocess.CompletedProcess:
@@ -45,9 +45,11 @@ def gh_api(endpoint: str, payload: dict) -> subprocess.CompletedProcess:
 def commentable_lines(diff: str) -> dict[str, set[int]]:
     """Right-side line numbers present in the diff, per file."""
     lines: dict[str, set[int]] = {}
-    path, new_line = None, 0
+    path, new_line, prev = None, 0, ""
     for raw in diff.splitlines():
-        if raw.startswith("+++ "):
+        is_header = raw.startswith("+++ ") and prev.startswith("--- ")
+        prev = raw
+        if is_header:
             path = raw[6:] if raw.startswith("+++ b/") else None
             if path is not None:
                 lines.setdefault(path, set())
@@ -63,28 +65,37 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
 def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) -> int:
     answer = Path(answer_path).read_text(encoding="utf-8")
     allowed = commentable_lines(Path(diff_path).read_text(encoding="utf-8"))
-    comments = []
+    comments: list[dict] = []
+    unanchored: list[str] = []
     match = INLINE_RE.search(answer)
     if match:
         try:
             items = json.loads(match.group(1))
         except ValueError:
             items = []
+            print("::warning::The inline-comment block is not valid JSON; skipped.")
         for item in items if isinstance(items, list) else []:
             if not isinstance(item, dict):
                 continue
             path, line, body = item.get("path"), item.get("line"), item.get("body")
-            valid = isinstance(path, str) and isinstance(line, int) and isinstance(body, str)
-            if valid and line in allowed.get(path, set()):
+            if not isinstance(body, str):
+                continue
+            anchored = isinstance(path, str) and isinstance(line, int)
+            if anchored and line in allowed.get(path, set()) and len(comments) < MAX_INLINE:
                 comments.append({"path": path, "line": line, "side": "RIGHT", "body": body[:2000]})
+            else:
+                unanchored.append(f"- `{path}:{line}` {body[:500]}")
         answer = INLINE_RE.sub("", answer).strip()
-    comments = comments[:MAX_INLINE]
+    if unanchored:
+        answer += "\n\n#### Not anchored to a diff line\n" + "\n".join(unanchored)
     payload = {"commit_id": head_sha, "event": "COMMENT", "body": answer, "comments": comments}
     endpoint = f"repos/{repo}/pulls/{pr}/reviews"
     result = gh_api(endpoint, payload)
     if result.returncode != 0 and comments:
         reason = result.stderr.strip()[:300]
-        print(f"::warning::Inline comments rejected ({reason}); posting the summary only.")
+        print(f"::warning::Inline comments rejected ({reason}); moving them to the summary.")
+        moved = "\n".join(f"- `{c['path']}:{c['line']}` {c['body'][:500]}" for c in comments)
+        payload["body"] = answer + "\n\n#### Inline comments GitHub rejected\n" + moved
         payload["comments"] = []
         result = gh_api(endpoint, payload)
     if result.returncode != 0:
@@ -101,7 +112,7 @@ def has_thai(text: str) -> bool:
 def has_english(text: str) -> bool:
     # Words outside code spans; identifiers alone do not make an English body.
     prose = re.sub(r"`[^`]*`|```.*?```", " ", text, flags=re.S)
-    return len(re.findall(r"\b[A-Za-z]{3,}\b", prose)) >= 15
+    return len(re.findall(r"\b[A-Za-z]{3,}\b", prose)) >= 5
 
 
 def triage(answer_path: str, repo: str, issue: str, body_path: str, existing_csv: str) -> int:

@@ -31,9 +31,9 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # GITHUB_TOKEN is read-only; an issue comment is posted with the OpenCode App token.
     permissions:
       contents: read
-      issues: write
       id-token: write
     steps:
       - name: Checkout
@@ -67,12 +67,15 @@ jobs:
           timeout-minutes: '12'
       - name: Publish the answer
         env:
-          GH_TOKEN: ${{ github.token }}
           ISSUE: ${{ inputs.issue }}
         run: |
           set -euo pipefail
           printf '\n\n_OpenCode dispatch run %s, read-only and advisory._\n' "$GITHUB_RUN_ID" >> "$RUNNER_TEMP/answer.md"
           if [ -n "$ISSUE" ]; then
+            GH_TOKEN=$(bash .github/opencode/app-token.sh)
+            echo "::add-mask::$GH_TOKEN"
+            export GH_TOKEN
+            trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
             gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/answer.md"
           else
             cat "$RUNNER_TEMP/answer.md" >> "$GITHUB_STEP_SUMMARY"

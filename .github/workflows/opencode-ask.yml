@@ -27,15 +27,16 @@ permissions: {}
 jobs:
   answer:
     if: >-
-      (startsWith(github.event.comment.body, '/oc') || startsWith(github.event.comment.body, '/opencode'))
+      (startsWith(github.event.comment.body, '/oc ') || startsWith(github.event.comment.body, '/opencode '))
       && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       && github.event.comment.user.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    # GITHUB_TOKEN is read-only; the reply is posted with the OpenCode App token.
     permissions:
       contents: read
-      issues: write
-      pull-requests: write
+      issues: read
+      pull-requests: read
       id-token: write
     steps:
       - name: Checkout
@@ -55,7 +56,7 @@ jobs:
           set -euo pipefail
           ctx=.git/opencode-ctx
           mkdir -p "$ctx"
-          printf '%s\n' "$COMMENT_BODY" | sed -E '1s#^/(opencode|oc)[[:space:]]*##' > "$ctx/question.md"
+          printf '%s\n' "$COMMENT_BODY" | sed -E '1s#^/(opencode|oc) +##' > "$ctx/question.md"
           if [ "$IS_PR" = "true" ]; then
             gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json title,body --jq '"# " + .title + "\n\n" + (.body // "")' > "$ctx/thread.md"
             gh pr diff "$NUMBER" --repo "$GITHUB_REPOSITORY" > "$ctx/pr.diff"
@@ -80,14 +81,17 @@ jobs:
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           timeout-minutes: '9'
-      - name: Reply
+      - name: Reply as the OpenCode app
         env:
-          GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
+          GH_TOKEN=$(bash .github/opencode/app-token.sh)
+          echo "::add-mask::$GH_TOKEN"
+          export GH_TOKEN
+          trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
           printf '\n\n_OpenCode, read-only and advisory. / OpenCode อ่านอย่างเดียว เป็นคำแนะนำเท่านั้น_\n' >> "$RUNNER_TEMP/answer.md"
           if [ "$EVENT" = "pull_request_review_comment" ]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/comments/$COMMENT_ID/replies" -F body=@"$RUNNER_TEMP/answer.md" > /dev/null

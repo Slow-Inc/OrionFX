@@ -28,9 +28,9 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # GITHUB_TOKEN is read-only; the issue is filed with the OpenCode App token.
     permissions:
       contents: read
-      issues: write
       id-token: write
     steps:
       - name: Checkout main
@@ -69,9 +69,7 @@ jobs:
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           timeout-minutes: '15'
-      - name: File or update the audit issue
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: File or update the audit issue as the OpenCode app
         run: |
           set -euo pipefail
           answer="$RUNNER_TEMP/answer.md"
@@ -79,6 +77,10 @@ jobs:
             echo "No findings; nothing posted."
             exit 0
           fi
+          GH_TOKEN=$(bash .github/opencode/app-token.sh)
+          echo "::add-mask::$GH_TOKEN"
+          export GH_TOKEN
+          trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
           printf '\n\n_Weekly OpenCode audit of %s (advisory, read-only). / ตรวจรายสัปดาห์โดย OpenCode (เป็นคำแนะนำ อ่านอย่างเดียว)_\n' "$GITHUB_SHA" >> "$answer"
           title="OpenCode weekly audit findings"
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label repo-ops \

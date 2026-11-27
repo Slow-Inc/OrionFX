@@ -71,7 +71,6 @@ runs:
         OPENCODE_CONFIG_CONTENT: >-
           {"permission": {"*": "deny", "read": "allow", "glob": "allow",
           "grep": "allow", "list": "allow", "skill": "allow",
-          "todowrite": "allow", "todoread": "allow",
           "external_directory": "deny"}}
       run: |
         set -euo pipefail
@@ -80,8 +79,11 @@ runs:
         timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
           opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
           < /dev/null > "$events" || status=$?
-        python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE"
+        extract=0
+        python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE" || extract=$?
         if [ "$status" -ne 0 ]; then
           echo "::error::OpenCode exited with status $status (124 = timed out after ${TIMEOUT_MINUTES}m)."
-          exit "$status"
+        fi
+        if [ "$extract" -ne 0 ] || [ "$status" -ne 0 ]; then
+          exit 1
         fi

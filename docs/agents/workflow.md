@@ -36,14 +36,14 @@ Every job runs the shared action `.github/actions/opencode-run` with the same th
 
 1. **Sign in.** Exchange the job's GitHub OIDC token for a 1-hour OpenCode key, with no repo secret. The step fails fast if the exchange returns nothing.
 2. **Run.** Run the pinned CLI (`opencode-ai@1.19.6`) with a deny-by-default tool policy: only `read`, `glob`, `grep` and `list` inside the checkout, plus the `skill` tool. It has no bash, no edit, no web and no reads outside the checkout. The model never gets a GitHub token, and no tool lets it read its env.
-3. **Post.** A trusted workflow step posts the answer.
+3. **Post.** A trusted workflow step posts the answer **as the OpenCode GitHub App** (`opencode-agent[bot]`). The step gets an App installation token through a second OIDC exchange (audience `opencode-github-action`, separate from the Console model sign-in), uses it for that one POST, and then revokes it. The job's own `GITHUB_TOKEN` is read-only. The App token is broader than the job token (it carries the App's installation permissions), so it lives only in the trusted posting step and never reaches the model.
 
 Each job's context is pre-fetched into `.git/opencode-ctx/`. The model is set in one place, the `model` default in that action (`opencode-go/deepseek-v4.1-flash`).
 
 | Workflow | Trigger | Can | Cannot |
 |---|---|---|---|
-| `opencode-review.yml` | `pull_request` from collaborator authors, non-draft, non-bot | Load the repo skills (`code-review`, `scrutinize`, `simplify`, `t4-gates`) and post ONE review with event `COMMENT`, plus up to 10 inline comments on lines in the diff | Approve, request changes, push, merge |
-| `opencode-ask.yml` | A comment starting `/oc` or `/opencode` by OWNER/MEMBER/COLLABORATOR, on `issue_comment` or `pull_request_review_comment` | Read the repo and reply once | Change code. It refuses and says Claude is the developer |
+| `opencode-review.yml` | `pull_request` from same-repo branches (forks skipped), collaborator authors, non-draft, non-bot | Load the repo skills (`code-review`, `scrutinize`, `simplify`, `t4-gates`) and submit ONE pull request review (`event: COMMENT`, `commit_id` = head) with a summary that keeps each skill section, plus inline comments on the exact diff lines (at most 15). Findings that cannot be tied to a diff line stay in the summary | Approve, request changes, push, merge |
+| `opencode-ask.yml` | A comment starting `/oc ` or `/opencode ` (followed by the question) by OWNER/MEMBER/COLLABORATOR, on `issue_comment` or `pull_request_review_comment` | Read the repo and reply once | Change code. It refuses and says Claude is the developer |
 | `opencode-audit.yml` | `schedule` (Mon 02:00 UTC) + `workflow_dispatch` | Review the last week of `main` and check that the ledger and catalog are honest; open ONE bilingual issue labelled `needs-triage` + `repo-ops`, or comment on the open one; post nothing if there are no findings | Close or edit issues |
 | `opencode-triage.yml` | `issues: opened` by a trusted author | Add one Component label and one triage role when the issue has none (never `wontfix`); ask for a missing EN/TH part | Close issues, edit the body |
 | `opencode-dispatch.yml` | `workflow_dispatch` with `prompt` (and an optional `issue`) | Answer to the job summary or as an issue comment | Change code |
@@ -58,15 +58,15 @@ The client IDs are credential IDs, not secrets. A scanner flagging their `sk_` p
 ### Gate before `gh pr merge`
 
 1. Wait for the `review` check (`gh pr checks <n> --watch`).
-2. Read the OpenCode review (`gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`, author `github-actions[bot]`, body starting `OpenCode review of <sha>`) and its inline comments. Its `commit_id` must be the current head. After a push, wait for the new review.
+2. Read the OpenCode review (`gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`, author `opencode-agent[bot]`, body starting `OpenCode review of <sha>`) and its inline comments. Its `commit_id` must be the current head. After a push, wait for the new review.
 3. For each finding: fix it if it is valid, or reply on the PR saying why not.
 
-The review is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`. Issues filed by the audit enter the normal triage flow through `needs-triage`. Issues created with `GITHUB_TOKEN` do not trigger `opencode-triage`.
+The review is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`. Issues filed by the audit enter the normal triage flow through `needs-triage`. `opencode-triage` skips bot-authored issues, so audit issues are triaged by hand.
 
 ### Honest limits
 
-- It is not a required check (free plan). A green check can still carry findings, so read the review. A **skipped** check means no review ran. Fork PRs get no OIDC token, so they get no review.
-- The repo is **public**. Text in issues, PR bodies and comments may come from anyone, and can bias **what the answer says**. It cannot give the model new tools.
+- It is not a required check (free plan). A green check can still carry findings, so read the review. A **skipped** check means no review ran. Fork PRs are skipped by the `if:`, and could not mint an OIDC token anyway.
+- The repo is **public**. Text in issues, PR bodies and comments may come from anyone, and can bias **what the answer says**. It cannot give the model new tools. The no-exfiltration claim is scoped to that case: an outsider's text cannot make the model read secrets or reach the network. A collaborator who edits the workflow or the shared action in a PR can, as with any workflow.
 - The skills and the shared action are read from the PR head, so a collaborator PR can change its own reviewer. That is no escalation, because such a PR could edit the workflow anyway.
 - **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28; that run hung for 18 minutes). Billing goes to the owner's Go plan. Every workflow has a hard `timeout-minutes`.
 - `opencode-go/deepseek-v4-pro` is the stronger choice, but it returned 403 "Model access is disabled" for this workspace. Enable it in the Console's Go model access before switching to it.

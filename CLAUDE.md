@@ -69,12 +69,12 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 - **CI** (`t4-verify.yml`): `guards`, `lint`, `typecheck`, `test`, `frontend`; plus the OpenCode workflows (below). **Not required checks** — Slow-Inc is on the free plan and private repos can't enforce rulesets. `requireGreenCI: true` makes the agent's `gh pr merge` wait for green CI; **a human merging on the web is not blocked by anything.**
 - **OpenCode (advisory, read-only; full table in `docs/agents/workflow.md` → OpenCode):** five workflows share `.github/actions/opencode-run`:
   - `opencode-review` (every collaborator PR) posts ONE `COMMENT` review plus inline comments, using the repo skills in `.opencode/skills/`;
-  - `opencode-ask` handles `/oc` and `/opencode` comments by collaborators, answer-only;
+  - `opencode-ask` handles `/oc <question>` and `/opencode <question>` comments by collaborators, answer-only;
   - `opencode-audit` runs weekly on `main` and opens one bilingual `needs-triage`+`repo-ops` issue, which enters normal triage;
   - `opencode-triage` labels new trusted issues and asks for a missing EN/TH part;
   - `opencode-dispatch` runs an ad-hoc read-only prompt.
 
-  **OpenCode never changes code.** No job has `contents: write`. The model runs with a deny-by-default tool policy: read, glob, grep and list in the checkout, plus the skill tool. It has no shell, no edit, no web, and no GitHub token. Trusted steps do all posting. `/oc` refuses change requests and says Claude is the developer.
+  **OpenCode never changes code.** No job has `contents: write`. The model runs with a deny-by-default tool policy: read, glob, grep and list in the checkout, plus the skill tool. It has no shell, no edit, no web, and no GitHub token. Trusted steps do all posting, as the OpenCode GitHub App (`opencode-agent[bot]`). Each step mints a short-lived App installation token by OIDC and revokes it after posting; the job `GITHUB_TOKEN` is read-only. `/oc` refuses change requests and says Claude is the developer.
 
   **Before merge** the agent waits for the `review` check, reads the OpenCode review on the current head SHA, and fixes each valid finding or replies explaining why not. The review is advisory and does **not** replace the T4 gates.
 
@@ -86,7 +86,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 
   **Free models are refused from CI**, so billing goes to the owner's Go plan. The model is `opencode-go/deepseek-v4.1-flash`, set in one place (the action's `model` default). Every job has a hard timeout.
 
-  **Limits:** these are not required checks; a skipped check means no review ran; fork PRs get no OIDC, so no review; the repo is public, so thread text can bias answers but cannot add tools; jobs on `main` events work only after merge.
+  **Limits:** these are not required checks; a skipped check means no review ran; fork PRs are skipped; the repo is public, so thread text can bias answers but cannot add tools; jobs on `main` events work only after merge.
 - Local `verify` is **armed** (ruff + format + mypy + pytest; backend only); `t4-gate` runs it before `gh pr merge`.
 - `.claude/hooks/` holds only the 16 files the wired hooks reach (dependency closure checked 2026-11-27); the unwired `clink`/canary/debt/receipt scripts and the unread `using-t4.snapshot.md` were left out. The scripts are vendored from `xeno-skills` — fix bugs upstream, not here.
 - **Known upstream defects (vendored, not patched here):** `.githooks/check-gate-ledger` reads the **oldest** `T4-Gates:` trailer on the branch (`git log … | tail -n 1`), so put the trailer on the first commit correctly; `t4-gate`'s `mcp__github__merge_pull_request` path skips the `requireGreenCI` check (no GitHub MCP server is configured here, so the path is unreachable today); `gh pr merge --squash <n>` (flag before the number) is not parsed as PR `<n>` — write `gh pr merge <n> --squash`.
