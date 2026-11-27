@@ -162,6 +162,11 @@ def _signed(d: Direction, x: Decimal) -> Decimal:
     return x if d is Direction.UP else -x if d is Direction.DOWN else D(0)
 
 
+def _live_news(ev: Evidence, now: datetime) -> list[NewsAssessment]:
+    """News that counts at `now`: live and citing a source (the vote and the veto agree)."""
+    return [n for n in ev.news if n.source_refs and live(n.available_at, n.valid_until, now)]
+
+
 def news_veto(ev: Evidence, side: Direction, now: datetime) -> bool:
     """Whether news vetoes an entry on `side` (#115, PRD #114).
 
@@ -171,11 +176,7 @@ def news_veto(ev: Evidence, side: Direction, now: datetime) -> bool:
     evidence refs. A guard, not a vote: it can only turn an entry into WAIT, it ignores
     the forecast's lineage, it never touches exits, and no news means no veto.
     """
-    net = sum(
-        (_signed(n.direction, n.impact) for n in ev.news
-         if n.source_refs and live(n.available_at, n.valid_until, now)),
-        D(0),
-    )  # fmt: skip
+    net = sum((_signed(n.direction, n.impact) for n in _live_news(ev, now)), D(0))
     against = -net if side is Direction.UP else net if side is Direction.DOWN else D(0)
     return against >= NEWS_VETO_IMPACT
 
@@ -195,7 +196,7 @@ def _votes(
     if forecast is not None and forecast.direction is not Direction.NEUTRAL:
         votes.append(forecast.direction)
         refs.append(forecast.prediction_id)
-    news = [n for n in ev.news if n.source_refs and live(n.available_at, n.valid_until, now)]
+    news = _live_news(ev, now)
     news_ids = {n.assessment_id for n in news}
     refs.extend(n.assessment_id for n in news)
     weight = sum((_signed(n.direction, n.impact) for n in news), D(0))

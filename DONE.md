@@ -6,6 +6,31 @@
 
 ---
 
+## M05 news veto: strong opposing news turns an entry into WAIT (2026-11-28, /tdd + review subagent (code-review + scrutinize lens), security-review n-a, branch `feat/115-news-veto`)
+
+**Goal:** let live, high-impact news block an entry that the chart and the forecast would take against it. This is the owner's decision on the #97 finding that, under current voting, news could never stop a wrong entry (#115, PRD #114).
+
+**Shipped:**
+- `fusion.news_veto(evidence, side, now)`:
+  - nets live, source-cited news by impact, the same way as the news vote, through a shared `_live_news`;
+  - vetoes when the net opposes the chart side with magnitude at least `NEWS_VETO_IMPACT` (0.6, [PROPOSED]).
+- `decide` checks it after the cooldown gate and before the evidence tally and EV, and returns WAIT `NEWS_VETO`. The decision direction is the refused chart side, which the M07 counterfactual uses.
+- `manage`, fusion votes, EV, M06 and M03 are unchanged. With no news, or the LLM down, nothing changes.
+- Protected `policy_version` bumped to `policy-0.2`.
+
+**Review fixes:**
+- The entry-replay test had gone hollow: it replayed a veto, comparing `None == None`.
+- The policy version was unchanged even though old traces replay differently.
+- No test covered a SELL entry.
+- The live-and-cited news filter was duplicated.
+
+**Validation:**
+- Backend verify green; 9 veto tests, plus a test that `manage` is untouched.
+- Mutation probes caught everything once the redundant id list and NEUTRAL filter were removed.
+- The benchmark E2 shape (chart and forecast wrong, news right) now WAITs; E1 still enters.
+
+---
+
 ## M07 dataset slice C: deterministic leak-free dataset export (2026-11-28, /tdd + review subagent (code-review + simplify + scrutinize lens), security-review n-a, branch `feat/110-dataset-export`)
 
 **Goal:** turn the recorded bars into a training dataset that a model card can cite exactly, with no look-ahead (#110, PRD #107).

@@ -378,3 +378,13 @@ def test_the_veto_never_opens_a_trade() -> None:
         evidence=Evidence(forecast=_forecast(), news=[_news(Direction.UP, impact="1")]),
     )
     assert d.created.action is DecisionAction.WAIT and _reasons(d) == ["NO_OPPORTUNITY"]
+
+
+def test_good_news_vetoes_a_sell_entry() -> None:
+    down = _proposal(direction=Direction.DOWN)
+    ev = Evidence(forecast=_forecast(direction=Direction.DOWN),
+                  news=[_news(Direction.UP, impact="0.8")])  # fmt: skip
+    d = _decide([down], ev)
+    assert _reasons(d) == ["NEWS_VETO"] and d.direction is Direction.DOWN
+    agreeing = Evidence(forecast=_forecast(direction=Direction.DOWN), news=[_news(impact="0.8")])
+    assert _decide([down], agreeing).created.action is DecisionAction.ENTER

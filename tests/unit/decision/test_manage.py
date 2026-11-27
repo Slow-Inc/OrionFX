@@ -123,13 +123,17 @@ def test_stale_snapshot_waits_even_when_holding() -> None:
 
 
 def test_an_entry_decision_replays_from_its_stored_trace() -> None:
-    ev = Evidence(forecast=_forecast(), news=[_news()], reasoning=_reasoning(Direction.UP, []))
     args = {"cycle": CYCLE, "costs": COSTS, "symbol": "XAUUSD", "policy_version": "p1"}
-    original = decide(_ctx(), [_proposal()], ev, **args)  # type: ignore[arg-type]
-    trace = DecisionTrace.capture(_ctx(), [_proposal()], ev, **args)  # type: ignore[arg-type]
-    stored = trace.model_dump_json()
-    again = replay(DecisionTrace.model_validate_json(stored))
-    assert again.created == original.created and again.intent == original.intent
+    weak = Evidence(forecast=_forecast(), news=[_news(impact="0.5")],
+                    reasoning=_reasoning(Direction.UP, []))  # fmt: skip
+    strong = Evidence(forecast=_forecast(), news=[_news(impact="0.9")])  # a #115 veto
+    for ev, action in ((weak, DecisionAction.ENTER), (strong, DecisionAction.WAIT)):
+        original = decide(_ctx(), [_proposal()], ev, **args)  # type: ignore[arg-type]
+        assert original.created.action is action
+        trace = DecisionTrace.capture(_ctx(), [_proposal()], ev, **args)  # type: ignore[arg-type]
+        stored = trace.model_dump_json()
+        again = replay(DecisionTrace.model_validate_json(stored))
+        assert again.created == original.created and again.intent == original.intent
 
 
 def test_a_managed_decision_replays_too() -> None:
