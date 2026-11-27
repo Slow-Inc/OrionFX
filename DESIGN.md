@@ -1,5 +1,5 @@
 ---
-status: drafted (M01 PRD #72)
+status: implemented (M01 PRD #72, slices #73–#75)
 owner: M01 Web Dashboard PRD
 stack: Bun, Vite, React, TypeScript, plain CSS variables   # PRD-01 #72 (Tailwind dropped: fewer deps)
 tokens: frontend/src/styles.css   # :root variables, light + dark
@@ -8,10 +8,10 @@ tokens: frontend/src/styles.css   # :root variables, light + dark
 <!-- lang:en -->
 # Design System
 
-> The "how" behind `PRODUCT.md`'s "why". The visual system is drafted by the M01 Web
-> Dashboard PRD (#72); tokens live in `frontend/src/styles.css`.
+> The "how" behind `PRODUCT.md`'s "why". The visual system is set by the M01 Web
+> Dashboard PRD (#72) and built in #73–#75; tokens live in `frontend/src/styles.css`.
 
-## Tokens (drafted)
+## Tokens
 
 - **Palette:** neutral surfaces, one accent (`--accent`), `--ok`, `--warn`, `--danger`;
   light and dark follow `prefers-color-scheme`. `--danger` is reserved for Emergency Stop
@@ -38,10 +38,10 @@ tokens: frontend/src/styles.css   # :root variables, light + dark
 <!-- lang:th -->
 # Design System
 
-> ไฟล์นี้คือ "ทำอย่างไร" ของ "ทำไม" ใน `PRODUCT.md` ระบบหน้าตาร่างไว้แล้วใน PRD ของ M01 Web
-> Dashboard (#72) และ token อยู่ที่ `frontend/src/styles.css`
+> ไฟล์นี้คือ "ทำอย่างไร" ของ "ทำไม" ใน `PRODUCT.md` ระบบหน้าตากำหนดไว้ใน PRD ของ M01 Web
+> Dashboard (#72) และสร้างแล้วใน #73–#75 token อยู่ที่ `frontend/src/styles.css`
 
-## Token (ฉบับร่าง)
+## Token
 
 - **ชุดสี:** พื้นผิวโทนกลาง สีเน้นหนึ่งสี (`--accent`) และ `--ok`, `--warn`, `--danger`
   ใช้ทั้งแบบสว่างและมืดตาม `prefers-color-scheme` โดย `--danger` สงวนไว้สำหรับ Emergency Stop

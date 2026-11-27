@@ -40,20 +40,23 @@ CLAUDE.md  CONTEXT.md  UBIQUITOUS_LANGUAGE.md  PRODUCT.md  DESIGN.md  DONE.md
 docs/plans/master_planV1.1.md     requirements source
 docs/OPEN-WORK-LEDGER.md        open work
 docs/agents/                    domain.md, workflow.md, issue-tracker.md, triage-labels.md
+docs/prd/  docs/contracts/  docs/catalog/   PRD-08/PRD-X01, generated JSON Schemas, CAT coverage matrix
+backend/app/  migrations/  scripts/  tests/   Python backend (M02–M08, X01, X02, runtime loop)
+frontend/                       M01 Web Dashboard (Bun, React/TS)
 docs/adr/  docs/reports/  docs/research/  docs/superpowers/{plans,specs}/
 Obsidian-OrionFX/               team memory vault
 .claude/                        t4.json marker, hooks, settings
 .githooks/                      pre-push guards
-.github/workflows/t4-verify.yml CI: guards + lint/typecheck/test
+.github/workflows/t4-verify.yml CI: guards + lint/typecheck/test + frontend
 ```
 
-Planned code layout: master plan §7.1 (`backend/` Python/FastAPI, `frontend/` React/TS, `mt5/` MQL5). Don't create empty service folders ahead of work.
+Code layout follows master plan §7.1; `mt5/` (MQL5) is still planned (blocked on #17). Don't create empty service folders ahead of work.
 
 ## Commands
 
 Backend (Python 3.13, `uv`): `uv sync` · `uv run ruff check .` · `uv run ruff format --check .` · `uv run mypy` · `uv run pytest`. These four are `.claude/t4.json` `"verify"` and the CI `lint`/`typecheck`/`test` jobs. After a contract change in `backend/app/core/`: `uv run python scripts/gen_schemas.py` (a test fails if `docs/contracts/` is stale). Run the API locally: `uv run python -m app.api set-password` once, then `uv run python -m app.api serve` (binds the configured host, 127.0.0.1 by default).
 
-Frontend (`frontend/`, Bun): `bun install` · `bun run lint` · `bun run typecheck` · `bun run test` · `bun run build`; `bun run dev` serves on :5173 and proxies `/api` and `/ws` to the API on :8000. Not yet in CI (needs an owner-reviewed workflow change).
+Frontend (`frontend/`, Bun): `bun install` · `bun run lint` · `bun run typecheck` · `bun run test` · `bun run build`; `bun run dev` serves on :5173 and proxies `/api` and `/ws` to the API on :8000. These four run in the CI `frontend` job (Bun pinned to 1.4.5, since #80); local `.claude/t4.json` `"verify"` still covers only the backend.
 
 Tooling notes (Windows, checked 2026-11-27): in git-bash `gh` resolves to `/c/Program Files/GitHub CLI/gh` and `python -c` runs; `bun` is at `~/.bun/bin/bun`. Bun for the frontend; `uv` + ruff + mypy (strict) + pytest for the backend.
 
@@ -63,8 +66,8 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 
 - **Claude hooks** (`.claude/settings.json`, marker `.claude/t4.json`): session-start injects `.claude/hooks/t4-directive.md` (a short directive to route through `using-t4`; the plugin, if installed, supplies the same); per-turn reminder; `PreToolUse` gate **blocks `gh pr create` with no referenced issue and dangerous git** (`reset --hard`, force-push, `clean -f`, `branch -D`). Binds Claude only.
 - **git pre-push** (`.githooks/`): issue reference, tree budget, `T4-Gates:` trailer. Binds anyone who enabled `core.hooksPath`.
-- **CI** (`t4-verify.yml`): `guards`, `lint`, `typecheck`, `test`. **Not required checks** — Slow-Inc is on the free plan and private repos can't enforce rulesets. `requireGreenCI: true` makes the agent's `gh pr merge` wait for green CI; **a human merging on the web is not blocked by anything.**
-- Local `verify` is **armed** (ruff + format + mypy + pytest); `t4-gate` runs it before `gh pr merge`.
+- **CI** (`t4-verify.yml`): `guards`, `lint`, `typecheck`, `test`, `frontend`. **Not required checks** — Slow-Inc is on the free plan and private repos can't enforce rulesets. `requireGreenCI: true` makes the agent's `gh pr merge` wait for green CI; **a human merging on the web is not blocked by anything.**
+- Local `verify` is **armed** (ruff + format + mypy + pytest; backend only); `t4-gate` runs it before `gh pr merge`.
 - `.claude/hooks/` holds only the 16 files the wired hooks reach (dependency closure checked 2026-11-27); the unwired `clink`/canary/debt/receipt scripts and the unread `using-t4.snapshot.md` were left out. The scripts are vendored from `xeno-skills` — fix bugs upstream, not here.
 - **Known upstream defects (vendored, not patched here):** `.githooks/check-gate-ledger` reads the **oldest** `T4-Gates:` trailer on the branch (`git log … | tail -n 1`), so put the trailer on the first commit correctly; `t4-gate`'s `mcp__github__merge_pull_request` path skips the `requireGreenCI` check (no GitHub MCP server is configured here, so the path is unreachable today); `gh pr merge --squash <n>` (flag before the number) is not parsed as PR `<n>` — write `gh pr merge <n> --squash`.
 - **Secret scanning / push protection: unavailable** (GitHub 422 on this private free-plan repo). Nothing server-side stops a committed secret — keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
