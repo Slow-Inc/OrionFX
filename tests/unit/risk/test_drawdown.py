@@ -184,3 +184,16 @@ def test_a_full_withdrawal_still_fails_closed(conn: sqlite3.Connection) -> None:
     _observe(t, "1000")
     upd = _observe(t, "0", "-1000")
     assert upd.risk_locked and "LIFETIME_DD_BREACH" in upd.reason_codes
+
+
+def test_a_deposit_into_a_wiped_account_has_no_ratio_and_stays_locked(
+    conn: sqlite3.Connection,
+) -> None:
+    """Equity 0 before the deposit: no ratio to scale by, so the peak moves by the
+    amount (the old rule) instead of dividing by zero."""
+    t = _tracker(conn)
+    _observe(t, "1000")
+    _observe(t, "0")  # lost everything trading
+    upd = _observe(t, "500", "500")
+    assert t.state().lifetime_peak == D("1500")
+    assert upd.risk_locked and "LIFETIME_DD_BREACH" in upd.reason_codes
