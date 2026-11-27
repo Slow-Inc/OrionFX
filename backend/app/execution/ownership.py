@@ -78,7 +78,24 @@ class OwnershipRegistry:
         return row is not None
 
     def bot_positions(self, account: AccountInfo, positions: Iterable[Position]) -> list[Position]:
-        return [p for p in positions if self.is_bot(account, p)]
+        return [p for p, _ in self.bot_positions_with_cycle(account, positions)]
+
+    def bot_positions_with_cycle(
+        self, account: AccountInfo, positions: Iterable[Position]
+    ) -> list[tuple[Position, str | None]]:
+        """The bot's positions (same rule as `is_bot`) with the cycle each was opened
+        for, from one query instead of one per position."""
+        rows = self._conn.execute(
+            "SELECT position_id, symbol, cycle_id FROM bot_positions"
+            " WHERE login = ? AND server = ?",
+            (account.login, account.server),
+        ).fetchall()
+        linked = {(r[0], r[1]): r[2] for r in rows}
+        return [
+            (p, linked[(p.position_id, p.symbol)])
+            for p in positions
+            if p.magic == BOT_MAGIC and (p.position_id, p.symbol) in linked
+        ]
 
     def cycle_of(self, account: AccountInfo, position_id: str) -> str | None:
         row = self._conn.execute(

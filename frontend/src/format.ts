@@ -31,6 +31,11 @@ function render(cents: bigint): string {
   return `${whole}.${(abs % 100n).toString().padStart(2, "0")}`;
 }
 
+/** A price as plain decimal digits (not money: no grouping or currency rules). */
+export function formatPrice(value: string | null | undefined): string {
+  return formatPercent(value);
+}
+
 /** A decimal percent string for display ("0E-8" -> "0"), or "—" when not a decimal. */
 export function formatPercent(value: string | null | undefined): string {
   if (value === null || value === undefined) return "—";

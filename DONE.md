@@ -6,6 +6,35 @@
 
 ---
 
+## X01 follow-up A: bot positions read model (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/82-positions-read-model`)
+
+**Goal:** the owner sees the bot's own positions, never a Manual Position, and never a stale or wrong list shown as fresh (PRD-X01b #81, slice #82; UI-02).
+
+**Shipped:**
+- Contracts `BotPosition` and `PositionsSnapshot`, with the event `positions.snapshot`. The master plan §8.2 row was added under X01 review, since §8 is a PROPOSED baseline.
+- The engine publishes the snapshot every interval and also right after an execution. It never publishes from a disconnected terminal, and skips any snapshot with a position that can't be read cleanly.
+- `OwnershipRegistry.bot_positions_with_cycle` checks ownership with one query, and still requires both the link and the magic number.
+- `/api/positions` and `/api/account` share one helper that judges staleness at a single instant (`SNAPSHOT_STALE_AFTER`).
+- The Trading view lists positions with their side, lot, open price, signed floating profit and freshness. Before the first report it says "not yet known"; it never says "none".
+
+**Validation:**
+- Backend verify green.
+- Frontend tests (58) and build green.
+- Mutation probes: all caught.
+
+**Review fixes:**
+- "Not yet known" is no longer shown as an empty list.
+- A disconnected terminal publishes nothing.
+- A snapshot is taken immediately after an execution.
+- A malformed position can't crash the tick.
+- The old table is hidden while a read error shows.
+- Prices and lots are formatted as plain decimals.
+- Ownership is one query; the dead `available` field is gone.
+
+**Not done:** filtering snapshots by account/bot id is a pre-existing gap; it has a ledger row.
+
+---
+
 ## M01 slice C: AI Insights, History and Settings (2026-11-27, /tdd + /simplify + /code-review + /scrutinize + /security-review, branch `feat/75-m01-insights`)
 
 **Goal:** show what the AI did and why, report results honestly, and edit settings safely (PRD-01 #72, slice #75; UI-03/04/05, UST-09..11).

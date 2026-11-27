@@ -163,6 +163,21 @@ def test_manual_and_spoofed_positions_are_not_bot(
     assert owners.cycle_of(acct, bot[0].position_id) == "cyc-1"
 
 
+def test_bot_positions_with_cycle_needs_both_the_link_and_the_magic(
+    conn: sqlite3.Connection, broker: FakeBroker, ex: Executor
+) -> None:
+    from dataclasses import replace
+
+    owners = OwnershipRegistry(conn)
+    ex.open(_open("req-1"))
+    broker.add_manual_position("XAUUSD", Side.SELL, D("0.05"))
+    acct = broker.account()
+    (pos, cycle) = owners.bot_positions_with_cycle(acct, broker.positions())[0]
+    assert cycle == "cyc-1" and pos.volume == D("0.01")
+    foreign_magic = [replace(p, magic=0) for p in broker.positions()]
+    assert owners.bot_positions_with_cycle(acct, foreign_magic) == []  # a linked id is not enough
+
+
 def test_netting_with_manual_exposure_blocks_open(broker: FakeBroker, ex: Executor) -> None:
     broker.margin_mode = MarginMode.NETTING
     manual = broker.add_manual_position("XAUUSD", Side.BUY, D("0.10"))

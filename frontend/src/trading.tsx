@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp, useNow } from "./app";
 import { type CommandState, runCommand } from "./commands";
-import { formatMoney, formatPercent } from "./format";
+import { formatMoney, formatPercent, formatPrice } from "./format";
 import { freshness } from "./freshness";
 import { useSnapshot } from "./snapshot";
 import type { ControlAction, ControlState, Cycle, Status } from "./types";
@@ -132,8 +132,13 @@ function PositionsCard() {
       <h3 id="pos">Bot positions</h3>
       {positions.loading && <p className="muted">Loading…</p>}
       {positions.error !== null && <ReadError what="positions" />}
-      {data && data.items.length === 0 && <p className="muted">No open bot positions.</p>}
-      {data && data.items.length > 0 && (
+      {data && positions.error === null && data.observed_at === null && (
+        <p className="muted">Positions not yet known: the bot has not reported them.</p>
+      )}
+      {data && positions.error === null && data.observed_at !== null && data.items.length === 0 && (
+        <p className="muted">No open bot positions.</p>
+      )}
+      {data && positions.error === null && data.items.length > 0 && (
         <table>
           <caption>Open bot positions</caption>
           <thead>
@@ -148,8 +153,8 @@ function PositionsCard() {
             {data.items.map((p) => (
               <tr key={p.position_id} aria-label={`Position ${p.position_id}`}>
                 <td>{p.side}</td>
-                <td>{p.volume}</td>
-                <td>{formatMoney(p.open_price)}</td>
+                <td>{formatPrice(p.volume)}</td>
+                <td>{formatPrice(p.open_price)}</td>
                 <td>
                   <Money value={p.profit} />
                 </td>
@@ -158,7 +163,9 @@ function PositionsCard() {
           </tbody>
         </table>
       )}
-      {data && <Fresh asOf={data.observed_at} maxAgeMs={ACCOUNT_MAX_AGE_MS} stale={data.stale} />}
+      {data && positions.error === null && (
+        <Fresh asOf={data.observed_at} maxAgeMs={ACCOUNT_MAX_AGE_MS} stale={data.stale} />
+      )}
     </section>
   );
 }

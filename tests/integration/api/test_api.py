@@ -343,7 +343,7 @@ def test_settings_publish_and_enforce_the_known_strategies(client: TestClient) -
 def test_positions_come_from_the_latest_snapshot(client: TestClient, db: Path) -> None:
     headers = _login(client)
     empty = client.get("/api/positions", headers=headers).json()
-    assert empty["available"] is True and empty["items"] == [] and empty["stale"] is True
+    assert empty["items"] == [] and empty["stale"] is True and empty["observed_at"] is None
     j = Journal(connect(db))
     j.append(
         make_event(

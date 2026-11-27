@@ -789,3 +789,30 @@ def test_positions_snapshot_lists_the_bots_positions_only(
     assert [p.position_id for p in snap.items] == _bot_positions(broker)
     assert snap.items[0].volume == D("0.01") and snap.items[0].side is Side.BUY
     assert snap.items[0].cycle_id is not None
+
+
+def test_positions_snapshot_follows_an_execution_at_once(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#82 review: a just-opened position is never missing from a 'fresh' list."""
+    from app.core.contracts import PositionsSnapshot
+
+    eng = _running(conn, broker, clock)  # took a snapshot with no positions
+    _intent(conn, clock)
+    eng.tick()  # executes within the snapshot interval: a new snapshot anyway
+    (ev,) = Journal(conn).recent(["positions.snapshot"], limit=1)
+    assert len(payload_as(ev, PositionsSnapshot).items) == 1
+
+
+def test_no_positions_snapshot_from_a_disconnected_terminal(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#82 review: an empty list from a dropped terminal is not published as fresh."""
+    eng = _running(conn, broker, clock)
+    _intent(conn, clock)
+    eng.tick()
+    before = Journal(conn).recent(["positions.snapshot"], limit=1)[0].seq
+    broker.connected = False
+    clock.advance(120)
+    eng.tick()
+    assert Journal(conn).recent(["positions.snapshot"], limit=1)[0].seq == before

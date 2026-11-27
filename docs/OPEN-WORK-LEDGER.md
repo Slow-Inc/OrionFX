@@ -46,7 +46,8 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 | Open decisions & safety TBDs | 🔴 | Owner decisions | `docs/plans/master_planV1.1.md` §13 |
 | Same-lot recovery ADD on a losing cycle in Live: only M05 refuses it (M06 veto refuses size-ups only) | 🔴 | Owner decision (RSK-06 scope) | Decide whether M06 should also deny it; then a veto rule + test (found in #54 review) |
 | Frontend CI jobs (lint/typecheck/test/build) + `verify` for `frontend/` | 🟡 | Owner review: touches `.github/workflows` and `.claude/t4.json` (enforcement paths) | Separate PR after M01; run locally meanwhile (`cd frontend && bun run lint && bun run typecheck && bun run test && bun run build`) |
-| Positions read model for the dashboard (`/api/positions` reports `available: false`) | 🔴 | M06/M08 slice | Expose bot positions from the execution ledger; then the Trading view lists them |
+| Positions read model for the dashboard | ✅ | — | #82: `positions.snapshot` (bot only) → `/api/positions` → Trading view |
+| `/api/account` and `/api/positions` read the newest snapshot regardless of account/bot id | 🔴 | M08 slice | Filter by the configured account/bot once multiple logins are supported (found in #82 review; pre-existing) |
 | Runtime orchestrator: M02 ingest → M04 → M05 decide/manage → journal → M06, plus M07 experience recording each tick | 🔴 | Integration slice (X01) | All parts exist and are tested in isolation and in the M05→M06 integration test; nothing runs them on a live clock yet |
 | `available_at` on `LlmReasoning` (no look-ahead guard for reasoning) | 🔴 | Contract change (X01) | Add the field and require it in M05 fusion (found in #53 review) |
 

@@ -74,7 +74,6 @@ function fakeApi(over: Partial<Api> = {}): Api {
     cycles: vi.fn(async () => ({ as_of: NOW, items: [CYCLE] })),
     positions: vi.fn(async () => ({
       as_of: NOW,
-      available: true as const,
       observed_at: NOW,
       stale: false,
       items: [
@@ -186,13 +185,23 @@ describe("Trading view", () => {
     expect(within(row).getByText("loss")).toBeInTheDocument();
   });
 
+  it("before any report, positions are 'not yet known', never 'none'", async () => {
+    renderTrading(
+      fakeApi({
+        positions: vi.fn(async () => ({ as_of: NOW, observed_at: null, stale: true, items: [] })),
+      }),
+    );
+    const card = await screen.findByRole("region", { name: "Bot positions" });
+    expect(await within(card).findByText(/not yet known/)).toBeInTheDocument();
+    expect(within(card).queryByText("No open bot positions.")).not.toBeInTheDocument();
+  });
+
   it("says when the bot holds no positions, and marks a stale list", async () => {
     renderTrading(
       fakeApi({
         positions: vi.fn(async () => ({
           as_of: NOW,
-          available: true as const,
-          observed_at: null,
+          observed_at: "2020-01-01T00:00:00Z",
           stale: true,
           items: [],
         })),

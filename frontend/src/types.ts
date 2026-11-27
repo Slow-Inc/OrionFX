@@ -88,7 +88,6 @@ export interface BotPosition {
 /** The bot's own positions from M06's latest snapshot (never Manual Positions). */
 export interface Positions {
   as_of: string;
-  available: true;
   observed_at: string | null;
   stale: boolean;
   items: BotPosition[];
