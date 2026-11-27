@@ -214,3 +214,60 @@ dd {
 .money.loss > span:first-child {
   color: var(--danger);
 }
+
+.list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space);
+}
+.refs {
+  margin: 0;
+  padding-left: 1em;
+}
+code {
+  font-size: 0.875em;
+  overflow-wrap: anywhere;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+}
+caption {
+  text-align: left;
+  color: var(--muted);
+  padding: 4px 0;
+}
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.settings {
+  display: grid;
+  gap: var(--space);
+  max-width: 560px;
+}
+fieldset {
+  display: grid;
+  gap: var(--space);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.field-error {
+  color: var(--danger);
+  font-size: 0.875rem;
+}
+@media (max-width: 640px) {
+  table {
+    display: block;
+    overflow-x: auto;
+  }
+}
