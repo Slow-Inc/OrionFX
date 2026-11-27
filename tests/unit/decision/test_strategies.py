@@ -115,6 +115,30 @@ def test_hybrid_needs_two_allowed_strategies_to_agree() -> None:
     assert _side("hybrid", replace(_ctx(**weak), allowed=ALL)) is None
 
 
+def test_a_hybrid_majority_is_not_blocked_by_the_member_it_outvoted() -> None:
+    """#121: trend and scalping UP, breakout DOWN (price below support). Hybrid votes UP
+    2 vs 1; the outvoted member's own proposal must not turn that into
+    CONFLICT_STRATEGIES. Agreeing members stay (the H1 one prices the H1 forecast)."""
+    from tests.support.decision import COSTS, CYCLE, _forecast
+
+    from app.core.enums import DecisionAction
+    from app.decision.decide import decide
+    from app.decision.fusion import Evidence
+    from app.decision.strategies import propose_all
+
+    ctx = replace(_ctx(price="1980"), allowed=ALL | {"hybrid"})
+    props = {p.strategy_id: p for p in propose_all(list(STRATEGIES.values()), ctx)}
+    assert set(props) == {"trend_following", "scalping", "hybrid"}
+    assert props["hybrid"].composition_id == "hybrid:scalping+trend_following"
+    d = decide(ctx, list(props.values()), Evidence(forecast=_forecast()), cycle=CYCLE,
+               costs=COSTS, symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert d.created.action is DecisionAction.ENTER
+    assert d.created.strategy_id == "trend_following"
+    # without hybrid nothing is dropped: the members still conflict
+    plain = propose_all([STRATEGIES[s] for s in sorted(ALL)], replace(ctx, allowed=ALL))
+    assert {p.strategy_id for p in plain} == {"trend_following", "scalping", "breakout"}
+
+
 def test_hybrid_ignores_members_the_gate_did_not_allow() -> None:
     assert _side("hybrid", _ctx()) is None  # nothing allowed: no votes
     assert _side("hybrid", replace(_ctx(), allowed=frozenset({"trend_following"}))) is None

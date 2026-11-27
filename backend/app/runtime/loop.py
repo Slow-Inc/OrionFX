@@ -51,6 +51,7 @@ from app.decision.decide import decide
 from app.decision.fusion import Costs, CycleView, Decision, Evidence, to_events
 from app.decision.gate import Strategy, eligible
 from app.decision.manage import Held, manage
+from app.decision.strategies import propose_all
 from app.learning.experience import ExperienceLog
 from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot
 from app.market_data.session import SessionSchedule
@@ -231,7 +232,7 @@ class DecisionLoop:
         gate = eligible(self._strategies, ctx, enabled=cfg.trading.strategies_enabled,
                         registry=self._registry)  # fmt: skip
         ctx = gate.with_allowed(ctx)
-        proposals = [p for s in gate.allowed if (p := s.propose(ctx)) is not None]
+        proposals = propose_all(gate.allowed, ctx)
         evidence = self._evidence(now)
         upd, cycle_id, closed_at = self._cycle()
         if upd is not None and upd.state is CycleState.CLOSING:

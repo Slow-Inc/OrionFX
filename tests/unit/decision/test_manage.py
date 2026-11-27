@@ -231,11 +231,30 @@ def test_a_managed_decision_bets_on_the_held_side_and_an_exit_against_it() -> No
     assert add.horizon is Timeframe.H1
 
 
-def test_the_news_veto_never_touches_managing_a_held_basket() -> None:
-    """#115: the veto guards entries only. Strong news against a held BUY still counts as
-    one exit vote exactly as before, and an add is never answered with NEWS_VETO."""
+def test_the_news_veto_blocks_an_add_but_never_an_exit() -> None:
+    """#121 (MAJ-05.1, owner decision): the #115 veto also guards ADD. Forecast and chart
+    UP against strong DOWN news is 2 vs 1, which would add; the veto turns it into WAIT.
+    Strong news against a held BUY still counts as one exit vote exactly as before."""
     strong = Evidence(forecast=_forecast(), news=[_news(impact="1")])
     d = _manage(evidence=strong)
-    assert "NEWS_VETO" not in _reasons(d)
+    assert d.created.action is DecisionAction.WAIT and _reasons(d) == ["NEWS_VETO"]
+    assert d.intent is None
+    weak = _manage(evidence=Evidence(forecast=_forecast(), news=[_news(impact="0.5")]))
+    assert weak.created.action is DecisionAction.ADD  # below the threshold: no veto
     alone = _manage([], Evidence(news=[_news(impact="1")]))
     assert alone.created.action is DecisionAction.EXIT  # the news still calls the exit
+
+
+def test_an_exit_on_a_stale_snapshot_is_not_born_expired() -> None:
+    """#121: the snapshot's validity must not clamp an EXIT intent, or the loop drops it
+    from `pending` at once and re-proposes CLOSE_ALL every tick."""
+    from app.decision.fusion import INTENT_TTL
+
+    later = NOW.replace(hour=13)
+    down = Direction.DOWN
+    ev = Evidence(forecast=_forecast(direction=down, valid_until=later),
+                  news=[_news(down, valid_until=later)])  # fmt: skip
+    stale = _ctx(now=NOW.replace(minute=30))
+    d = _manage([], ev, ctx=stale)
+    assert d.created.action is DecisionAction.EXIT and d.intent is not None
+    assert d.intent.valid_until == stale.now + INTENT_TTL

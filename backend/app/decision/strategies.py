@@ -19,12 +19,12 @@ Machine Learning Trading (CAT-S01-07) is blocked: it needs a trained model.
 - scalping: M5 direction == M15 direction (non-zero) and spread <= 0.30; M5
   horizon.
 - hybrid: among the members the gate allowed, at least two agree on a direction
-  and outnumber the opposing votes.
+  and outnumber the opposing votes; `propose_all` then drops the outvoted members.
 """
 
 import inspect
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -32,6 +32,7 @@ from app.core.contracts import StrategyManifest, StrategyProposal, sha256_ref
 from app.core.enums import Direction, IntentAction, Mode, Timeframe
 from app.core.ids import new_id
 from app.decision.context import DecisionContext
+from app.decision.gate import Strategy
 from app.market_data.features import feature_key
 from app.prediction.card import unique_leader
 
@@ -230,6 +231,31 @@ STRATEGIES: dict[str, RuleStrategy | Hybrid] = {s.manifest.strategy_id: s for s 
 STRATEGIES["hybrid"] = Hybrid(
     _manifest("hybrid", "CAT-S01-06", [H1, M15, M5], _HYBRID_HASH, []), tuple(_RULES)
 )
+
+
+def propose_all(strategies: Sequence[Strategy], ctx: DecisionContext) -> list[StrategyProposal]:
+    """Every proposal from `strategies` (the gate's allowed ones), the one place the
+    decision loop and replay collect them. When a Hybrid proposes, the members it
+    outvoted are dropped: their own proposals would otherwise always conflict with the
+    majority, so Hybrid could never win a 2 vs 1 (#121). The agreeing members stay (one
+    may match the forecast's horizon), and the Hybrid proposal records them (AT-41)."""
+    proposals = [p for s in strategies if (p := s.propose(ctx)) is not None]
+    by_id = {p.strategy_id: p for p in proposals}
+    for s in strategies:
+        h = by_id.get(s.manifest.strategy_id)
+        if not isinstance(s, Hybrid) or h is None:
+            continue
+        members = {m.manifest.strategy_id for m in s.members}
+        outvoted = {p.strategy_id for p in proposals
+                    if p.strategy_id in members and p.direction is not h.direction}  # fmt: skip
+        agree = sorted((members & by_id.keys()) - outvoted)
+        composed = h.model_copy(update={
+            "composition_id": f"{h.strategy_id}:{'+'.join(agree)}",
+            "rationale": f"{h.rationale} ({', '.join(agree)})",
+        })  # fmt: skip
+        proposals = [composed if p is h else p for p in proposals
+                     if p.strategy_id not in outvoted]  # fmt: skip
+    return proposals
 
 
 def catalog_ids() -> set[str]:

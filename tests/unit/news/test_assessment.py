@@ -264,6 +264,51 @@ def test_assessment_is_stamped_when_the_answer_returned_and_refused_if_news_expi
     assert gone.assessment is None and gone.health.status is HealthStatus.DEGRADED
 
 
+@pytest.mark.parametrize(
+    ("direction", "stances"),
+    [
+        ("UP", {"n1": "DOWN"}),  # the only cited item disagrees
+        ("UP", {"n1": "NEUTRAL"}),  # nothing cited supports UP
+        ("DOWN", {"n1": "UP", "n2": "UP"}),
+    ],
+)
+def test_an_overall_direction_its_cited_stances_do_not_support_is_neutral(
+    direction: str, stances: dict[str, str]
+) -> None:
+    """#121: the overall direction must agree with the cited items' stances, else it is
+    treated as conflicting news (NEUTRAL, capped confidence)."""
+    answer = _answer(direction=direction, confidence=0.9, cited_ids=list(stances),
+                     item_directions=stances)  # fmt: skip
+    r = assess_news([FED, CPI], FakeProvider([answer]), now=NOW)
+    a = r.assessment
+    assert a is not None and a.direction is Direction.NEUTRAL
+    assert a.score.value <= Decimal("0.3") and r.health.detail == "conflicting news"
+
+
+def test_a_cited_item_without_a_stance_is_rejected() -> None:
+    """#121: "UP" citing items with no per-item stance at all ({}) passed as UP."""
+    for stances in ({}, {"n1": "UP"}):
+        bad = _answer(cited_ids=["n1", "n2"], item_directions=stances)
+        r = assess_news([FED, CPI], FakeProvider([bad, bad]), now=NOW)
+        assert r.assessment is None and r.health.status is HealthStatus.DEGRADED
+
+
+def test_two_sources_sharing_an_item_id_stay_distinct() -> None:
+    """#121 (MAJ-05.5): items are keyed by (source, item_id), as the cache keys them. Two
+    sources may reuse an id; the model must be able to cite one without the other."""
+    other = FED.model_copy(update={
+        "source": "wire-b", "sources": ("wire-b",), "url": "https://wire-b.example/n1",
+        "title": "Gold slips on strong dollar", "body": "Gold slips. Yields climb.",
+    })  # fmt: skip
+    provider = FakeProvider([_answer(direction="DOWN", cited_ids=["n1@2"],
+                                     item_directions={"n1@2": "DOWN"})])  # fmt: skip
+    r = assess_news([FED, other], provider, now=NOW)
+    assert "id='n1'" in provider.prompts[0] and "id='n1@2'" in provider.prompts[0]
+    a = r.assessment
+    assert a is not None and a.direction is Direction.DOWN
+    assert a.source_refs == [other.url] and a.news_ids == ["n1"]
+
+
 def test_a_rate_limit_is_not_retried_at_once() -> None:
     """Retrying straight after a 429 only hits the limit again (#100)."""
     from app.news.provider import ProviderRateLimited

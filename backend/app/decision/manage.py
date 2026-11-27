@@ -16,7 +16,12 @@
     M05 is the only layer refusing a same-lot Live recovery add: M06's veto refuses
     only a size-up on a losing cycle (MARTINGALE_BEHAVIOR). Whether M06 should also
     refuse same-lot adds is an open question (docs/OPEN-WORK-LEDGER.md);
-  - an unknown Cycle Net fails closed, and a pending ADD blocks another (DUPLICATE).
+  - an unknown Cycle Net fails closed, and a pending ADD blocks another (DUPLICATE);
+  - the #115 news veto applies (NEWS_VETO; owner decision MAJ-05.1, #121). It never
+    blocks an exit;
+  - EV is the entry formula: it still counts the full TARGET_ATR move although the
+    cycle closes at its Profit Target, so an ADD near the target is over-valued. Capping
+    it needs the target, which `CycleView`/`Held` do not carry (open, #121).
 - Otherwise WAIT: HOLD when the chart points against the position but the evidence
   is not strong enough to exit.
 
@@ -40,6 +45,7 @@ from app.decision.fusion import (
     direction_of,
     expected_value,
     gather,
+    news_veto,
     snapshot_live,
     wait,
 )
@@ -104,6 +110,8 @@ def manage(
     losing = held.cycle_net_usd < 0
     if losing and ctx.mode is Mode.LIVE:
         return waiting(WaitReason.NO_LIVE_RECOVERY)
+    if news_veto(evidence, held_dir, ctx.now):
+        return waiting(WaitReason.NEWS_VETO)
     if against >= support:
         return waiting(WaitReason.CONFLICT_EVIDENCE)
     ev, confidence = expected_value(ctx, inp, costs)
