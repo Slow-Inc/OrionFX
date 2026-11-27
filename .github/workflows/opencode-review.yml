@@ -101,7 +101,7 @@ jobs:
       - name: Run OpenCode
         uses: ./_trusted/actions/opencode-run
         with:
-          client-id: sk_dcae4ec7-d3b6-4328-92a0-b14ae60dfad8  # "OrionFX PR Review"; not a secret
+          client-id: ${{ vars.OPENCODE_PR_CLIENT_ID }}  # "OrionFX PR Review"; a credential ID, not a secret
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           timeout-minutes: '11'

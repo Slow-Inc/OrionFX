@@ -13,7 +13,9 @@ inputs:
     description: >-
       OpenCode Console service-account credential ID. NOT a secret: it only
       works with an OIDC token from this repo, on the event the account allows.
-      Its `sk_` prefix may trip secret scanners; that is a false positive.
+      Callers pass it from a repo variable (vars.OPENCODE_PR_CLIENT_ID or
+      vars.OPENCODE_AUTOMATION_CLIENT_ID), never as a literal, because secret
+      scanners misread its prefix as a payment key.
     required: true
   prompt-file:
     description: Path to the prompt text.

@@ -99,7 +99,7 @@ jobs:
         uses: ./_trusted/actions/opencode-run
         with:
           # issue_comment -> "OrionFX Automation" (main); review comment -> "OrionFX PR Review". Not secrets.
-          client-id: ${{ github.event_name == 'issue_comment' && 'sk_a7b3d9af-0863-4e01-8a87-02901ef4c78e' || 'sk_dcae4ec7-d3b6-4328-92a0-b14ae60dfad8' }}
+          client-id: ${{ github.event_name == 'issue_comment' && vars.OPENCODE_AUTOMATION_CLIENT_ID || vars.OPENCODE_PR_CLIENT_ID }}
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           timeout-minutes: '9'

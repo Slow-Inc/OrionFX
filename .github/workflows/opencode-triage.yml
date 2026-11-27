@@ -58,7 +58,7 @@ jobs:
       - name: Run OpenCode
         uses: ./.github/actions/opencode-run
         with:
-          client-id: sk_a7b3d9af-0863-4e01-8a87-02901ef4c78e  # "OrionFX Automation"; not a secret
+          client-id: ${{ vars.OPENCODE_AUTOMATION_CLIENT_ID }}  # "OrionFX Automation"; a credential ID, not a secret
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           timeout-minutes: '7'

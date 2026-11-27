@@ -54,10 +54,10 @@ Each job's context is pre-fetched into `.git/opencode-ctx/`. The model is set in
 
 Service accounts (OpenCode Console, created 2026-11-28). Both are OIDC, pinned to repo ID 1473623856, Models: Request only, any IP:
 
-- **"OrionFX PR Review"**, `sk_dcae4ec7-…`: runs from pull requests. It serves `opencode-review` and `/oc` on PR review comments.
-- **"OrionFX Automation"**, `sk_a7b3d9af-…`: runs from branch `main` only. It serves `/oc` on issue comments, audit, triage and dispatch.
+- **"OrionFX PR Review"**, client ID in repo variable `OPENCODE_PR_CLIENT_ID`: runs from pull requests. It serves `opencode-review` and `/oc` on PR review comments.
+- **"OrionFX Automation"**, client ID in repo variable `OPENCODE_AUTOMATION_CLIENT_ID`: runs from branch `main` only. It serves `/oc` on issue comments, audit, triage and dispatch.
 
-The client IDs are credential IDs, not secrets. A scanner flagging their `sk_` prefix is a false positive. To revoke access, disable the account in the Console.
+The client IDs are credential IDs, not secrets: each works only with an OIDC token from this repo on the allowed ref. They live in repo variables, not in code, because secret scanning flagged them as payment keys (both alerts resolved as false positives on 2026-11-28). To revoke access, disable the account in the Console.
 
 ### Gate before `gh pr merge`
 

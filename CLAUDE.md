@@ -82,7 +82,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
   - "OrionFX PR Review" runs from pull requests;
   - "OrionFX Automation" runs from `main` only.
 
-  Their `sk_…` client IDs are credential IDs, not secrets.
+  Their client IDs live in repo variables `OPENCODE_PR_CLIENT_ID` and `OPENCODE_AUTOMATION_CLIENT_ID`. They are credential IDs, not secrets, and are kept out of the code because secret scanning misreads them as payment keys.
 
   **Free models are refused from CI**, so billing goes to the owner's Go plan. The model is `opencode-go/deepseek-v4.1-flash`, set in one place (the action's `model` default). Every job has a hard timeout.
 
@@ -90,7 +90,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 - Local `verify` is **armed** (ruff + format + mypy + pytest; backend only); `t4-gate` runs it before `gh pr merge`.
 - `.claude/hooks/` holds only the 16 files the wired hooks reach (dependency closure checked 2026-11-27); the unwired `clink`/canary/debt/receipt scripts and the unread `using-t4.snapshot.md` were left out. The scripts are vendored from `xeno-skills` — fix bugs upstream, not here.
 - **Known upstream defects (vendored, not patched here):** `.githooks/check-gate-ledger` reads the **oldest** `T4-Gates:` trailer on the branch (`git log … | tail -n 1`), so put the trailer on the first commit correctly; `t4-gate`'s `mcp__github__merge_pull_request` path skips the `requireGreenCI` check (no GitHub MCP server is configured here, so the path is unreachable today); `gh pr merge --squash <n>` (flag before the number) is not parsed as PR `<n>` — write `gh pr merge <n> --squash`.
-- **Secret scanning / push protection: available but OFF** (the repo is public; `security_and_analysis` shows both disabled on 2026-11-28 — an owner decision, see the ledger). Until enabled, nothing server-side stops a committed secret — keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
+- **Secret scanning + push protection: ON** (the repo is public; the owner enabled both on 2026-11-28). Push protection blocks known secret patterns server-side; still keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
 
 ## Training-loop research autonomy (owner grant, 2026-11-28)
 
