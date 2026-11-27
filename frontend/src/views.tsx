@@ -1,19 +1,13 @@
-// Route views. Trading (#74), Insights, History and Settings (#75) replace these.
+// Route views (M01 #72).
 import type { Route } from "./app";
+import { HistoryView } from "./history";
+import { InsightsView } from "./insights";
+import { SettingsView } from "./settings";
 import { TradingView } from "./trading";
-
-function NotYet({ name }: { name: string }) {
-  return (
-    <section aria-labelledby="h">
-      <h2 id="h">{name}</h2>
-      <p className="muted">This view is not built yet.</p>
-    </section>
-  );
-}
 
 export const VIEWS: Record<Route, () => React.ReactElement> = {
   trading: TradingView,
-  insights: () => <NotYet name="AI Insights" />,
-  history: () => <NotYet name="History" />,
-  settings: () => <NotYet name="Settings" />,
+  insights: InsightsView,
+  history: HistoryView,
+  settings: SettingsView,
 };
