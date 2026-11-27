@@ -22,6 +22,18 @@ from app.core.contracts import (
 from app.core.enums import Direction, ForecastLineage, Mode, Timeframe
 from app.storage.registry import subject_ref
 
+BRIER = "brier"
+BASELINE_BRIER = "baseline_brier"
+
+
+def unique_leader(scores: Mapping[Direction, Decimal]) -> tuple[Direction, Decimal] | None:
+    """The direction with the strictly highest score, or None on a tie or no scores."""
+    if not scores:
+        return None
+    top = max(scores.values())
+    leaders = [d for d, s in scores.items() if s == top]
+    return (leaders[0], top) if len(leaders) == 1 else None
+
 
 class ModelCard(ContractModel):
     model_id: str = Field(pattern=r"^[^@\s]+$")
@@ -52,6 +64,15 @@ class ModelCard(ContractModel):
     @property
     def ref(self) -> str:
         return subject_ref(self.model_id, self.model_version)
+
+    @property
+    def skill(self) -> Decimal:
+        """Validation skill over the baseline: `baseline_brier - brier` (0 when either is
+        missing or the model is no better). The card owns its metric names."""
+        brier, base = self.validation.get(BRIER), self.validation.get(BASELINE_BRIER)
+        if brier is None or base is None:
+            return Decimal(0)
+        return max(base - brier, Decimal(0))
 
     def manifest(self) -> StrategyManifest:
         """The registry entry for this model's artifact: the registration contract M07
