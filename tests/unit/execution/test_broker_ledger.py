@@ -324,13 +324,18 @@ def test_reconcile_reports_volume_weighted_price(broker: FakeBroker, ex: Executo
 
 
 class UnpricedDealBroker(FakeBroker):
-    """Reports one more deal of the request without a price, as a terminal may."""
+    """Reports the request's fill as two deals of half the volume each, one of them
+    without a price, as a terminal may."""
 
     def find_by_request(self, request_id: str) -> list[Deal]:
         deals = super().find_by_request(request_id)
-        if not deals:
+        if len(deals) != 1:
             return deals
-        return [*deals, replace(deals[0], deal_id="deal-unpriced", price=None)]
+        half = deals[0].volume / 2
+        return [
+            replace(deals[0], volume=half),
+            replace(deals[0], deal_id="deal-unpriced", volume=half, price=None),
+        ]
 
 
 def test_reconcile_vwap_divides_by_the_priced_volume_only(conn: sqlite3.Connection) -> None:
@@ -341,4 +346,5 @@ def test_reconcile_vwap_divides_by_the_priced_volume_only(conn: sqlite3.Connecti
     b.script(Outcome.TIMEOUT_FILLED)
     ex.open(_open("req-1", volume="0.02"))
     (u,) = ex.reconcile()
+    assert u.filled_lot == D("0.02") and u.state is ExecutionState.FILLED
     assert u.fill_price == D("2000.20")

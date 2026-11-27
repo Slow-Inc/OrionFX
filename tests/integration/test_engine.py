@@ -895,9 +895,16 @@ def test_an_exit_naming_no_cycle_or_another_cycle_closes_nothing(
     for iid in (stale, unnamed):
         decision = _decision(conn, iid)
         assert decision.verdict is Verdict.DENY and "CYCLE_MISMATCH" in decision.reason_codes
-    assert len(_bot_positions(broker)) == 2
     filed = Journal(conn).find("risk.decision", "intent_id", stale)
     assert filed is not None and filed.envelope.cycle_id == "cycle-closed-earlier"
+    # A denied exit never latches the open cycle CLOSING (the AI_EXIT latch comes after
+    # the veto), so a later tick's close workflow does not close the basket either.
+    book = CycleBook(conn, account=broker.account())
+    cid = book.open_cycle_id()
+    assert cid is not None
+    eng.tick()
+    assert book.open_cycle_id() == cid and book.snapshot(cid).state is CycleState.ACTIVE
+    assert len(_bot_positions(broker)) == 2
 
 
 def test_an_exit_closes_only_positions_of_the_cycle_it_names(
@@ -966,6 +973,33 @@ def test_an_ai_exit_closes_the_cycle_so_the_cooldown_and_a_new_cycle_follow(
     assert closed.envelope.occurred_at == clock()
     second = book.open_cycle_id()
     assert second is not None and second != first  # RUNNING: the next cycle is a fresh one
+
+
+def test_a_rejected_ai_exit_is_retried_by_the_close_workflow_until_closed(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """B1 retry path: the cycle stays CLOSING(AI_EXIT) while the broker rejects, entries
+    are refused meanwhile, and a later tick closes it. Manual Positions are untouched."""
+    eng = _running(conn, broker, clock)
+    book = CycleBook(conn, account=broker.account())
+    cycle = book.open_cycle_id() or ""
+    _intent(conn, clock)
+    eng.tick()
+    manual = broker.add_manual_position("XAUUSD", Side.SELL, D("0.05"))
+    broker.script(Outcome.REJECT, Outcome.REJECT, Outcome.REJECT)
+    _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None)
+    eng.tick()  # rejected by the exit itself, then by the close workflow's pass
+    snap = book.snapshot(cycle)
+    assert snap.state is CycleState.CLOSING and snap.close_reason is CloseReason.AI_EXIT
+    add = _intent(conn, clock, action=IntentAction.ADD)
+    eng.tick()  # the third rejection; the ADD is decided while the cycle is CLOSING
+    assert "CYCLE_NOT_ACTIVE" in _decision(conn, add).reason_codes
+    assert book.snapshot(cycle).state is CycleState.CLOSING and len(_bot_positions(broker)) == 1
+    eng.tick()  # the broker accepts now: the retry closes the cycle
+    assert book.snapshot(cycle).state is CycleState.CLOSED
+    assert _bot_positions(broker) == []
+    assert [p.position_id for p in broker.positions()] == [manual.position_id]
+    assert broker.positions()[0].volume == D("0.05")
 
 
 def test_a_rejected_close_does_not_use_up_the_close_budget(
