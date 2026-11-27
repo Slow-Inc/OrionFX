@@ -7,8 +7,9 @@ codebase** (unless marked *pending*), so a new maintainer — human or agent —
 
 | # | Title | Area | Status |
 |---|-------|------|--------|
+| [0001](0001-policy-gated-autonomous-promotion.md) | Policy-gated autonomous model promotion to Shadow and Demo | M07/X02/M06 | Accepted 2026-11-28 (implementation pending, PRD #120) |
 
-_No ADRs yet. Master plan §10 P0 expects ADRs alongside the module PRDs (e.g. EA/Python bridge protocol, DB migration tool, vector index — all [PROPOSED]/[TBD] in master plan §5.2)._
+_Earlier note: Master plan §10 P0 expects ADRs alongside the module PRDs (e.g. EA/Python bridge protocol, DB migration tool, vector index — all [PROPOSED]/[TBD] in master plan §5.2)._
 
 ## Conventions
 
