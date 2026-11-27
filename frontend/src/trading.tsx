@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp, useNow } from "./app";
 import { type CommandState, runCommand } from "./commands";
-import { formatMoney, formatPercent } from "./format";
+import { formatMoney, formatPercent, formatPrice } from "./format";
 import { freshness } from "./freshness";
 import { useSnapshot } from "./snapshot";
 import type { ControlAction, ControlState, Cycle, Status } from "./types";
@@ -124,12 +124,48 @@ function CycleCard() {
 }
 
 function PositionsCard() {
-  // `/api/positions` reports `available: false` until M06's position read model is
-  // exposed: nothing to fetch yet, so nothing is fetched.
+  // The bot's own positions only (M06 checks ownership): Manual Positions never appear.
+  const positions = useSnapshot((api) => api.positions());
+  const data = positions.data;
   return (
     <section className="card" aria-labelledby="pos">
       <h3 id="pos">Bot positions</h3>
-      <p className="muted">Position list is not available yet.</p>
+      {positions.loading && <p className="muted">Loading…</p>}
+      {positions.error !== null && <ReadError what="positions" />}
+      {data && positions.error === null && data.observed_at === null && (
+        <p className="muted">Positions not yet known: the bot has not reported them.</p>
+      )}
+      {data && positions.error === null && data.observed_at !== null && data.items.length === 0 && (
+        <p className="muted">No open bot positions.</p>
+      )}
+      {data && positions.error === null && data.items.length > 0 && (
+        <table>
+          <caption>Open bot positions</caption>
+          <thead>
+            <tr>
+              <th scope="col">Side</th>
+              <th scope="col">Lot</th>
+              <th scope="col">Open price</th>
+              <th scope="col">Floating profit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((p) => (
+              <tr key={p.position_id} aria-label={`Position ${p.position_id}`}>
+                <td>{p.side}</td>
+                <td>{formatPrice(p.volume)}</td>
+                <td>{formatPrice(p.open_price)}</td>
+                <td>
+                  <Money value={p.profit} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {data && positions.error === null && (
+        <Fresh asOf={data.observed_at} maxAgeMs={ACCOUNT_MAX_AGE_MS} stale={data.stale} />
+      )}
     </section>
   );
 }

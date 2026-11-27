@@ -11,7 +11,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -37,6 +37,7 @@ from app.core.contracts import (
     ControlCompleted,
     ControlRequested,
     HealthUpdated,
+    PositionsSnapshot,
     RiskUpdated,
 )
 from app.core.enums import CommandStatus, ControlCommand, ControlState, Mode
@@ -52,7 +53,7 @@ from app.storage.db import connect, transaction
 from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag
 from app.storage.journal import Journal, payload_as
 
-ACCOUNT_STALE_AFTER = timedelta(seconds=60)
+SNAPSHOT_STALE_AFTER = timedelta(seconds=60)
 HEALTH_TTL = timedelta(seconds=60)
 WS_POLL_SECONDS = 0.5
 
@@ -209,22 +210,36 @@ def create_app(settings: ApiSettings, *, clock: Clock = utc_now) -> FastAPI:
             "latest_seq": journal.latest_seq(),
         }
 
+    def _latest[T: AccountSnapshot | PositionsSnapshot](
+        conn: sqlite3.Connection, event_type: str, model: type[T]
+    ) -> tuple[datetime, T | None, bool]:
+        """(now, the latest snapshot or None, stale), judged at one instant."""
+        now = clock()
+        latest = Journal(conn).recent([event_type], limit=1)
+        if not latest:
+            return now, None, True
+        snap = payload_as(latest[0], model)
+        return now, snap, now - snap.observed_at > SNAPSHOT_STALE_AFTER
+
     @private.get("/api/account")
     def account(conn: Db) -> dict[str, Any]:
-        latest = Journal(conn).recent(["account.snapshot"], limit=1)
-        if not latest:
-            return {"as_of": clock().isoformat(), "snapshot": None, "stale": True}
-        snap = payload_as(latest[0], AccountSnapshot)
+        now, snap, stale = _latest(conn, "account.snapshot", AccountSnapshot)
         return {
-            "as_of": clock().isoformat(),
-            "snapshot": snap.model_dump(mode="json"),
-            "stale": clock() - snap.observed_at > ACCOUNT_STALE_AFTER,
+            "as_of": now.isoformat(),
+            "snapshot": None if snap is None else snap.model_dump(mode="json"),
+            "stale": stale,
         }
 
     @private.get("/api/positions")
-    def positions() -> dict[str, Any]:
-        # The authoritative position read model belongs to M06 (#4 plan order).
-        return {"as_of": clock().isoformat(), "available": False, "items": []}
+    def positions(conn: Db) -> dict[str, Any]:
+        """The bot's own positions from M06's latest `positions.snapshot` (#82)."""
+        now, snap, stale = _latest(conn, "positions.snapshot", PositionsSnapshot)
+        return {
+            "as_of": now.isoformat(),
+            "observed_at": None if snap is None else snap.observed_at.isoformat(),
+            "stale": stale,
+            "items": [] if snap is None else [p.model_dump(mode="json") for p in snap.items],
+        }
 
     @private.get("/api/cycles")
     def cycles(conn: Db, limit: Limit = 50) -> dict[str, Any]:

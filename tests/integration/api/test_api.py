@@ -338,3 +338,37 @@ def test_settings_publish_and_enforce_the_known_strategies(client: TestClient) -
     )
     assert r.status_code == 422
     assert r.json()["detail"][0]["loc"] == ["trading", "strategies_enabled"]
+
+
+def test_positions_come_from_the_latest_snapshot(client: TestClient, db: Path) -> None:
+    headers = _login(client)
+    empty = client.get("/api/positions", headers=headers).json()
+    assert empty["items"] == [] and empty["stale"] is True and empty["observed_at"] is None
+    j = Journal(connect(db))
+    j.append(
+        make_event(
+            "positions.snapshot",
+            source="M06",
+            payload={
+                "items": [{
+                    "position_id": "p-1", "symbol": "XAUUSD", "side": "BUY", "volume": "0.01",
+                    "open_price": "2000.00", "profit": "1.20", "commission": "-0.04",
+                    "swap": "0", "cycle_id": "cyc-1",
+                }],
+                "observed_at": datetime.now(UTC).isoformat(),
+            },
+            account_id="local-account", bot_id="bot-1", mode=Mode.DEMO,
+        )
+    )  # fmt: skip
+    body = client.get("/api/positions", headers=headers).json()
+    assert body["stale"] is False and body["items"][0]["position_id"] == "p-1"
+    assert body["observed_at"] is not None
+    j.append(
+        make_event(
+            "positions.snapshot",
+            source="M06",
+            payload={"items": [], "observed_at": "2020-01-01T00:00:00+00:00"},
+            account_id="local-account", bot_id="bot-1", mode=Mode.DEMO,
+        )
+    )  # fmt: skip
+    assert client.get("/api/positions", headers=headers).json()["stale"] is True

@@ -1,0 +1,96 @@
+{
+  "$defs": {
+    "BotPosition": {
+      "additionalProperties": false,
+      "description": "One of the bot's own positions (ownership-checked; never a Manual Position).",
+      "properties": {
+        "commission": {
+          "title": "Commission",
+          "type": "string"
+        },
+        "cycle_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cycle Id"
+        },
+        "open_price": {
+          "gt": 0,
+          "title": "Open Price",
+          "type": "string"
+        },
+        "position_id": {
+          "title": "Position Id",
+          "type": "string"
+        },
+        "profit": {
+          "title": "Profit",
+          "type": "string"
+        },
+        "side": {
+          "$ref": "#/$defs/Side"
+        },
+        "swap": {
+          "title": "Swap",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        },
+        "volume": {
+          "gt": 0,
+          "title": "Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "position_id",
+        "symbol",
+        "side",
+        "volume",
+        "open_price",
+        "profit",
+        "commission",
+        "swap",
+        "cycle_id"
+      ],
+      "title": "BotPosition",
+      "type": "object"
+    },
+    "Side": {
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "title": "Side",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/$defs/BotPosition"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "observed_at": {
+      "format": "date-time",
+      "title": "Observed At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "items",
+    "observed_at"
+  ],
+  "title": "PositionsSnapshot",
+  "type": "object"
+}

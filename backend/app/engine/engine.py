@@ -24,13 +24,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from pydantic import ValidationError
+
 from app.core.config import UserConfig, missing_for_start
 from app.core.contracts import (
     AccountSnapshot,
+    BotPosition,
     ContractModel,
     ControlCompleted,
     ControlRequested,
     ExecutionUpdated,
+    PositionsSnapshot,
     RiskDecision,
     RiskUpdated,
     TradeIntent,
@@ -51,7 +55,7 @@ from app.core.events import make_event
 from app.core.ids import new_id
 from app.core.states import ControlStatus, IllegalTransition
 from app.core.time import Clock, utc_now
-from app.execution.broker import BrokerPort, CloseRequest, OpenRequest, Position
+from app.execution.broker import AccountInfo, BrokerPort, CloseRequest, OpenRequest, Position
 from app.execution.executor import DispatchBlocked, Executor
 from app.execution.ledger import ExecutionLedger
 from app.execution.ownership import OwnershipRegistry
@@ -167,7 +171,7 @@ class Engine:
             self._journal.commit_offset(CONSUMER, events[-1].seq)
         if executed:
             self._protect(cfg, version)  # an exit may have emptied the cycle
-        self._snapshot(cfg)
+        self._snapshot(cfg, force=executed)
 
     # --- infrastructure -----------------------------------------------------------------
 
@@ -618,9 +622,14 @@ class Engine:
 
     # --- snapshots ----------------------------------------------------------------------------
 
-    def _snapshot(self, cfg: UserConfig) -> None:
+    def _snapshot(self, cfg: UserConfig, *, force: bool = False) -> None:
+        """Every SNAPSHOT_EVERY, and at once after an execution (`force`), so positions
+        that just opened or closed are never shown from an older reading."""
         now = self._clock()
-        if self._last_snapshot_at is not None and now - self._last_snapshot_at < SNAPSHOT_EVERY:
+        recent = (
+            self._last_snapshot_at is not None and now - self._last_snapshot_at < SNAPSHOT_EVERY
+        )
+        if recent and not force:
             return
         self._last_snapshot_at = now
         a = self._broker.account()
@@ -640,3 +649,25 @@ class Engine:
             ),
             cfg,
         )
+        self._positions_snapshot(cfg, a, now)
+
+    def _positions_snapshot(self, cfg: UserConfig, a: AccountInfo, now: datetime) -> None:
+        """The bot's own positions, by the same ownership rule M06 acts on (same reading as
+        account.snapshot). Nothing is published from a disconnected terminal, or when a
+        position cannot be read cleanly: the dashboard's list then turns stale instead of
+        showing a wrong list as fresh."""
+        if not a.connected:
+            return
+        mine = self._owners.bot_positions_with_cycle(a, self._broker.positions())
+        try:
+            items = [
+                BotPosition(
+                    position_id=p.position_id, symbol=p.symbol, side=p.side, volume=p.volume,
+                    open_price=p.open_price, profit=p.profit, commission=p.commission,
+                    swap=p.swap, cycle_id=cycle_id,
+                )
+                for p, cycle_id in mine
+            ]  # fmt: skip
+        except ValidationError:
+            return
+        self._emit("positions.snapshot", PositionsSnapshot(items=items, observed_at=now), cfg)
