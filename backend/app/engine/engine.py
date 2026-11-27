@@ -467,18 +467,30 @@ class Engine:
         )
 
     def _exit_targets(self, intent: TradeIntent) -> list[Position]:
-        bot = self._owners.bot_positions(self._broker.account(), self._broker.positions())
-        bot = [p for p in bot if p.symbol == intent.symbol]
+        """The bot's positions this exit may close, on its symbol: the named cycle's only.
+        An exit naming no cycle (allowed only while no cycle is open) may close any of them,
+        so leftovers of a closed cycle can always be closed (risk can always be reduced)."""
+        linked = self._owners.bot_positions_with_cycle(
+            self._broker.account(), self._broker.positions()
+        )
+        bot = [
+            p
+            for p, c in linked
+            if p.symbol == intent.symbol and (intent.cycle_id is None or c == intent.cycle_id)
+        ]
         if intent.action is IntentAction.CLOSE_ALL:
             return bot
         return [p for p in bot if p.position_id in intent.position_refs]
 
     def _engine_reasons(self, intent: TradeIntent, cfg: UserConfig) -> list[str]:
         """Checks only the engine can make: mode, cycle, basket, reconcile state, exit
-        targets. An entry (OPEN/ADD) is refused in Shadow (no broker order, master plan
-        §13), when it names no cycle or another cycle, when an OPEN would start a second
-        basket, or when an ADD is on the other side of the bot's basket."""
+        targets. An exit must name the open cycle (or no cycle when none is open), so a late
+        exit never closes another cycle's basket. An entry (OPEN/ADD) is refused in Shadow
+        (no broker order, master plan §13), when it names no cycle or another cycle, when an
+        OPEN would start a second basket, or when an ADD is on the other side of the basket."""
         if intent.action in EXITS:
+            if intent.cycle_id != self._book.open_cycle_id():
+                return ["CYCLE_MISMATCH"]
             return [] if self._exit_targets(intent) else ["NOTHING_TO_CLOSE"]
         reasons = []
         if Mode(cfg.trading.account_mode) is Mode.SHADOW:
@@ -559,9 +571,11 @@ class Engine:
                 }
             )
         cycle_id = self._book.open_cycle_id()
+        # filed under the cycle the intent named (the open one whenever it was allowed)
         self._emit(
-            "risk.decision", decision, cfg, cycle_id=cycle_id, causation=ev.envelope.event_id
-        )
+            "risk.decision", decision, cfg, cycle_id=intent.cycle_id,
+            causation=ev.envelope.event_id,
+        )  # fmt: skip
         if decision.verdict is not Verdict.ALLOW:
             return False
         for update in self._execute(intent, decision, cycle_id):

@@ -6,7 +6,8 @@ is reported (not just the first). Entries fail closed on any missing, stale,
 mismatched or malformed input. Exits (CLOSE/CLOSE_ALL) are never blocked by
 entry checks — not by locks, pauses, stale data, Live revocation, a mislabelled
 mode or an old intent — so the bot can always reduce risk; a partial close is
-still checked against the broker's lot rules.
+still checked against the broker's lot rules. M06's engine adds the cycle checks the
+veto cannot make (see `Engine._engine_reasons`).
 """
 
 from dataclasses import dataclass

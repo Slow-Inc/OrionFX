@@ -869,3 +869,60 @@ def test_m06_events_carry_the_engine_clock(
     eng.tick()
     found = Journal(conn).find("risk.decision", "intent_id", iid)
     assert found is not None and found.envelope.occurred_at == broker.now
+
+
+def test_an_exit_naming_no_cycle_or_another_cycle_closes_nothing(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#89: a late CLOSE_ALL written for an old cycle never closes the new cycle's basket."""
+    eng = _two_positions(conn, broker, clock)
+    stale = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None,
+                    cycle_id="cycle-closed-earlier")  # fmt: skip
+    unnamed = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None,
+                      cycle_id=None)  # fmt: skip
+    eng.tick()
+    for iid in (stale, unnamed):
+        decision = _decision(conn, iid)
+        assert decision.verdict is Verdict.DENY and "CYCLE_MISMATCH" in decision.reason_codes
+    assert len(_bot_positions(broker)) == 2
+    filed = Journal(conn).find("risk.decision", "intent_id", stale)
+    assert filed is not None and filed.envelope.cycle_id == "cycle-closed-earlier"
+
+
+def test_an_exit_closes_only_positions_of_the_cycle_it_names(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _two_positions(conn, broker, clock)
+    _, b = _bot_positions(broker)
+    with conn:
+        conn.execute("UPDATE bot_positions SET cycle_id = 'cycle-other' WHERE position_id = ?",
+                     (b,))  # fmt: skip
+    by_ref = _intent(conn, clock, action=IntentAction.CLOSE, lot=None, side=None, refs=[b])
+    eng.tick()
+    assert "NOTHING_TO_CLOSE" in _decision(conn, by_ref).reason_codes  # b is not this cycle's
+    _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None)
+    eng.tick()
+    assert _bot_positions(broker) == [b]  # only this cycle's position closed
+
+
+def test_with_no_cycle_open_leftovers_of_a_closed_cycle_can_still_be_closed(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """Risk can always be reduced: positions still tagged with a closed cycle, and no
+    cycle open, are closed by an exit naming no cycle; one naming the old cycle is not."""
+    eng = _two_positions(conn, broker, clock)
+    _command(conn, ControlCommand.PAUSE)  # paused: no next cycle opens
+    eng.tick()
+    book = CycleBook(conn, account=broker.account())
+    old = book.open_cycle_id()
+    assert old is not None
+    book.begin_closing(old, CloseReason.FINISH_CYCLE)
+    book.mark_closed(old, final_net=Decimal("0"))
+    late = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None, cycle_id=old)
+    eng.tick()
+    assert "CYCLE_MISMATCH" in _decision(conn, late).reason_codes
+    clock.advance(1)
+    iid = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None, cycle_id=None)
+    eng.tick()
+    assert _decision(conn, iid).verdict is Verdict.ALLOW
+    assert _bot_positions(broker) == []
