@@ -21,7 +21,7 @@ _Avoid_: override
 
 ---
 
-## System Architecture — 2026-11-27 (planned; no code yet)
+## System Architecture — 2026-11-27 (backend + dashboard built; MT5 adapter and MQL5 EA not yet, #17)
 
 ### Modules
 Eight product modules plus two support roles (master plan §2): M01 Web Dashboard, M02 Market Data, M03 LLM & News, M04 Prediction, M05 Adaptive Decision, M06 Risk & Execution (critical path), M07 Learning & Memory, M08 System Core; X01 Architecture & Integration, X02 Validation & QA.
@@ -37,7 +37,7 @@ all modules → M08 core → M01 dashboard (read models); M01 → M08 → M06 (c
 ### Truth Hierarchy
 ```
 MT5 terminal/broker   — source of truth: account, positions, orders, deals
-Local durable ledger  — intent/state/history (SQLite, planned); reconcile before trusting
+Local durable ledger  — intent/state/history (SQLite); reconcile before trusting
 Dashboard (M01)       — display + control commands only; not safety-critical, need not stay open
 ```
 
@@ -67,7 +67,7 @@ _ห้ามใช้แทน_: override
 
 ---
 
-## สถาปัตยกรรมระบบ — 2026-11-27 (ยังเป็นแผน ยังไม่มีโค้ด)
+## สถาปัตยกรรมระบบ — 2026-11-27 (มี backend และ dashboard แล้ว ยังไม่มี MT5 adapter และ MQL5 EA, #17)
 
 ### โมดูล
 โมดูลผลิตภัณฑ์แปดตัว กับบทบาทสนับสนุนสองตัว (master plan §2): M01 Web Dashboard, M02 Market Data, M03 LLM & News, M04 Prediction, M05 Adaptive Decision, M06 Risk & Execution (critical path), M07 Learning & Memory, M08 System Core · X01 Architecture & Integration, X02 Validation & QA
@@ -83,7 +83,7 @@ all modules → M08 core → M01 dashboard (read models); M01 → M08 → M06 (c
 ### ลำดับความจริง
 ```
 MT5 terminal/broker   — ความจริง: account, positions, orders, deals
-Local durable ledger  — intent/state/history (SQLite ตามแผน) ต้อง reconcile ก่อนเชื่อ
+Local durable ledger  — intent/state/history (SQLite) ต้อง reconcile ก่อนเชื่อ
 Dashboard (M01)       — แสดงผลและส่ง control command เท่านั้น ไม่ใช่ส่วน safety-critical ไม่ต้องเปิดค้าง
 ```
 

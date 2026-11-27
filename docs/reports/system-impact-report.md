@@ -5,4 +5,4 @@
 > section per significant batch; keep entries terse + linkable. Write "not measured" / "N/A"
 > honestly — never fabricate numbers.
 
-_No entries yet — there is no running system (phase P0)._
+_No entries yet — the system runs only against the fake broker and historical replay; no MT5 Demo run yet (#17)._

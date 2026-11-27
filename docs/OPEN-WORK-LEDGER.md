@@ -8,7 +8,7 @@
 > (for anything non-trivial) file an issue so it doesn't vanish into MD again.
 
 **Legend:** ✅ done, pending merge · 🟢 buildable now · 🟡 gated (needs merge / resource /
-decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
+decision) · ⛔ blocked (needs an external resource) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 
 ---
 
@@ -16,9 +16,11 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 
 | Item | Status | Gate | Next action |
 |---|---|---|---|
-| T4 bootstrap: hooks, guards, CI `guards` job, memory, records, governance docs | ✅ | PR merge | Merge the bootstrap PR |
-| `docs/agents/issue-tracker.md` + `docs/agents/triage-labels.md` + labels | ✅ | PR merge | Done 2026-11-27 via `/setup-matt-pocock-skills` + T4 delta |
-| CI `lint`/`typecheck`/`test` (backend) + local `verify` | ✅ | — | #5. Frontend jobs land with M01 |
+| T4 bootstrap: hooks, guards, CI `guards` job, memory, records, governance docs | ✅ | — | #1, merged via PR #2 |
+| `docs/agents/issue-tracker.md` + `docs/agents/triage-labels.md` + labels | ✅ | — | Done 2026-11-27 via `/setup-matt-pocock-skills` + T4 delta |
+| CI `lint`/`typecheck`/`test` (backend) + local `verify` | ✅ | — | #5 |
+| CI `frontend` job (Bun 1.4.5: lint/typecheck/test/build) | ✅ | — | #79 / PR #80. Local `.claude/t4.json` `verify` still covers only the backend |
+| Dependabot PRs fail the `guards` job (no issue ref / `T4-Gates:` trailer) | 🟡 | Owner review: touches `.github/workflows` (enforcement path) | #93 / PR #94 open, not merged; Dependabot PR #3 (`actions/checkout` v7) waits on it |
 | Upstream defects in vendored hook/guard scripts (see `CLAUDE.md` → Enforcement) | 🔴 | Report to `xenodeve/xeno-skills` | Not patched locally, to keep the scripts in sync with upstream |
 | `.claude/t4.json` `autoMerge: true` (set 2026-11-27 at the developer's request for the AFK batch) | 🟡 | AFK batch end | Set back to `false` when the developer returns, unless they say to keep it |
 | Secret scanning + push protection | 🔴 | GitHub returned 422 "not available for this repository" (private, free plan) | No server-side secret gate exists; rely on `.gitignore` + `/security-review`. Revisit with the plan/visibility |
@@ -28,24 +30,26 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 
 | Item | Status | Gate | Next action |
 |---|---|---|---|
-| Adopt V1.1 in repo docs | ✅ | PR merge | #19 |
+| Adopt V1.1 in repo docs | ✅ | — | #19 |
 | M08 follow-up: catalog storage, trusted artifact loading, isolation, audit (UST-01,07–10) | ✅ | — | #20 — sandboxing beyond a time budget stays ADV (UST-07) |
 | X01 follow-up: strategy/technique contracts + consolidated CAT coverage matrix (UST-01–04,11; AT-37) | ✅ | — | #21 — `docs/catalog/coverage.json`; update a row's state whenever its implementation lands |
-| M06 V1.1 obligations (UST-03,04,06–09,11,13; CAT-R01-*, CAT-X02-*) | 🟢 | — | folded into PRD-06 #12 |
+| M06 V1.1 obligations (UST-03,04,06–09,11,13; CAT-R01-*, CAT-X02-*) | ✅ | — | folded into PRD-06 #12 (closed); MT5/EA parts wait on #17 |
 | ADV catalog rows (P6–P8) | 🟡 | Phase P6+ | Tracked as `planned` in the coverage matrix (#21); not implemented in this run |
 
 ## Track 1 — P0: PRDs & contracts (master plan §10)
 
 | Item | Status | Gate | Next action |
 |---|---|---|---|
-| 8 module PRDs (M01–M08) + PRD-X01 integration + PRD-X02 validation | 🟢 | — | Tracking issue #4; one sub-issue per PRD, filed as each starts. X01 ✅ #5 |
+| 8 module PRDs (M01–M08) + PRD-X01 integration + PRD-X02 validation | ✅ | — | All closed: M01 #72, M02 #28, M03 #37, M04 #45, M05 #51, M06 #12, M07 #58, M08 #7, X01 #5 (+ X01b #81, X01c #88), X02 #65. Umbrella #4 stays open for the blocked slices below |
 | Shared schemas: event envelope, money/time conventions, cycle/risk states | ✅ | — | #5 (PRD-X01). Broker adapter interface lands with M06 |
 | M08 System Core (PRD #7): storage/journal/config/lease/backup (#8), API/auth/WS (#9) | ✅ | — | Done |
 | M06 Risk & Execution (PRD #12): broker port + fake broker (#13), risk veto + DD (#14), cycle/target/trailing/close (#15), engine loop (#16) | ✅ | — | Done against the fake broker |
-| M06 slice E: real MT5 adapter + MQL5 Execution EA, broker-side Emergency SL (AT-09, AT-10) | 🟡 | Needs an MT5 terminal + demo account | #17 — not done; engine runs only against the fake broker |
+| M06 slice E: real MT5 adapter + MQL5 Execution EA, broker-side Emergency SL (AT-09, AT-10) | ⛔ | Needs an MT5 terminal + demo account | #17 — not done; engine runs only against the fake broker |
+| M03 slice D: real LLM provider + news/calendar adapters | ⛔ | Needs provider/news API keys | #41 — not done; M03 runs on fakes |
+| M04 slice C: trained XGBoost/LightGBM artifacts + adapters | ⛔ | Needs training data and trained models | #48 — not done; M04 has the baseline and ensemble only |
 | Open decisions & safety TBDs | 🔴 | Owner decisions | `docs/plans/master_planV1.1.md` §13 |
 | Same-lot recovery ADD on a losing cycle in Live: only M05 refuses it (M06 veto refuses size-ups only) | 🔴 | Owner decision (RSK-06 scope) | Decide whether M06 should also deny it; then a veto rule + test (found in #54 review) |
-| Frontend CI jobs (lint/typecheck/test/build) + `verify` for `frontend/` | 🟡 | Owner review: touches `.github/workflows` and `.claude/t4.json` (enforcement paths) | Separate PR after M01; run locally meanwhile (`cd frontend && bun run lint && bun run typecheck && bun run test && bun run build`) |
+| Local `verify` for `frontend/` (`.claude/t4.json`) | 🟡 | Owner review: `.claude/t4.json` is an enforcement path | CI `frontend` job landed in #80; locally run `cd frontend && bun run lint && bun run typecheck && bun run test && bun run build` |
 | Positions read model for the dashboard | ✅ | — | #82: `positions.snapshot` (bot only) → `/api/positions` → Trading view |
 | `/api/account` and `/api/positions` read the newest snapshot regardless of account/bot id | 🔴 | M08 slice | Filter by the configured account/bot once multiple logins are supported (found in #82 review; pre-existing) |
 | Runtime decision loop: M02 → evidence → M05 decide/manage → journal → M06, plus M07 experience and labels each tick | ✅ | — | #84: `app.runtime.loop.DecisionLoop`, tested against replayed bars and the real M06 engine on the fake broker |
@@ -62,9 +66,9 @@ decision) · 🔴 **UNTRACKED** (MD-only, no GitHub issue — highest miss-risk)
 
 ## Management Plan — phased execution order
 
-**Phase 0 — Unblock tracking.** ✅ Done 2026-11-27 — triage labels exist; merge PR #2.
-**Phase 1 — Tracking hygiene.** File issues for the 🔴 rows in Track 1 (one per PRD, one for shared contracts).
-**Phase 2 — P0 PRDs.** Contracts first (X01 + M06/M08), then module PRDs in parallel.
-**Phase 3 — P1 Foundation.** First code lands → install the real CI jobs and arm `verify` in the same PR.
+**Phase 0 — Unblock tracking.** ✅ Done 2026-11-27 — triage labels exist; PR #2 merged.
+**Phase 1 — Tracking hygiene.** ✅ Done — one issue per PRD and slice (see Track 1).
+**Phase 2 — P0 PRDs.** ✅ Done — every module PRD plus X01/X02 is closed.
+**Phase 3 — P1 Foundation.** ✅ Done — backend CI jobs + local `verify` (#5), frontend CI job (#80).
 
-**Gating summary:** Phase 1 is now the multiplier — without an issue per PRD, no PRD work can pass `check-issue-ref`.
+**Gating summary:** what remains is blocked on external resources — MT5 + demo account (#17), LLM/news keys (#41), trained models (#48) — plus the 🔴 owner-decision rows above.

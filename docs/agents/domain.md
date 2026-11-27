@@ -12,7 +12,7 @@ One `CONTEXT.md` at the root covers the whole codebase.
 ├── UBIQUITOUS_LANGUAGE.md        ← canonical term glossary
 ├── docs/plans/master_planV1.1.md   ← requirements source ([LOCKED] / [PROPOSED] / [TBD])
 ├── docs/adr/                     ← architectural decision records
-└── backend/ frontend/ mt5/       ← (planned, master plan §7.1)
+└── backend/ frontend/ mt5/       ← code (master plan §7.1); mt5/ still planned (#17)
 ```
 
 (Revisit as multi-context — a root `CONTEXT-MAP.md` pointing at one `CONTEXT.md` per

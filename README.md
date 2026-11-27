@@ -5,6 +5,7 @@ Personal XAUUSD AI auto-trading bot on MT5. **Demo/Shadow only** — Live stays 
 ## Layout
 
 - `backend/app/` — Python package (`app`). `core/` holds the shared contracts (PRD-X01); each module owns its subpackage (master plan §7.1).
+- `frontend/` — M01 Web Dashboard (Bun, Vite, React, TypeScript): `bun install`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run build`, `bun run dev`.
 - `tests/` — `unit/`, `contract/`, `integration/`, … (pytest).
 - `docs/` — master plan, PRDs (`docs/prd/`), generated JSON Schemas (`docs/contracts/`), ADRs, records.
 

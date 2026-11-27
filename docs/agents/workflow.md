@@ -29,4 +29,4 @@ Hard ordering: **PRD → issues → PR**. Never open a PR without a referenced i
 
 ## Verification mandate
 
-There is no app yet (phase P0). Once P1 Foundation lands, the E2E/verify command goes here and in `.claude/t4.json` `"verify"`. Every M01 dashboard change is verified end-to-end in a real browser — unit tests can't see real layout or live WebSocket updates. Trading-path changes are verified only against fake broker, historical replay, or MT5 Demo — never real funds (master plan §0.2, §11).
+Local verify is `.claude/t4.json` `"verify"` (backend: ruff, format, mypy, pytest); the CI `frontend` job adds `bun run lint`, `typecheck`, `test`, `build` in `frontend/`. Every M01 dashboard change is verified end-to-end in a real browser — unit tests can't see real layout or live WebSocket updates. Trading-path changes are verified only against fake broker, historical replay, or MT5 Demo — never real funds (master plan §0.2, §11).
