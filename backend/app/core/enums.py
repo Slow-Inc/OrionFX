@@ -117,6 +117,8 @@ class WaitReason(StrEnum):
     POSITION_OPEN = "POSITION_OPEN"
     COOLDOWN = "COOLDOWN"
     NEWS_VETO = "NEWS_VETO"
+    NEWS_VETO_ADD = "NEWS_VETO_ADD"
+    """The same veto refusing an ADD (#121); its own code keeps the #116 report apart."""
     CONFLICT_EVIDENCE = "CONFLICT_EVIDENCE"
     EV_UNKNOWN = "EV_UNKNOWN"
     EV_NOT_POSITIVE = "EV_NOT_POSITIVE"

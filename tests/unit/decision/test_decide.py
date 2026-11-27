@@ -409,3 +409,11 @@ def test_conflicting_proposals_credit_the_one_agreeing_with_the_forecast() -> No
     up, down = _proposal("trend_following"), _proposal("breakout", Direction.DOWN)
     d = _decide([down, up], Evidence(forecast=_forecast()))
     assert d.created.action is DecisionAction.WAIT and d.created.strategy_id == "trend_following"
+
+
+def test_the_decision_horizon_is_the_chosen_proposals_horizon() -> None:
+    """#121 (M1): the trade prices the H1 proposal, so replay and M07 must see H1, not the
+    alphabetically first same-side proposal (breakout, M15)."""
+    m15 = _proposal("breakout").model_copy(update={"horizon": Timeframe.M15})
+    d = _decide([m15, _proposal("trend_following")])
+    assert d.created.strategy_id == "trend_following" and d.horizon is Timeframe.H1

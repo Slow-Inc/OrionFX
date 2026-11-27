@@ -53,8 +53,10 @@ class UserConfig(ContractModel):
 class ProtectedPolicy(ContractModel):
     """Not editable from settings (VAL-06). Changing it is a reviewed code/policy change."""
 
-    policy_version: str = "policy-0.2"
-    """0.2: M05 news veto (#115)."""
+    policy_version: str = "policy-0.3"
+    """0.2: M05 news veto (#115). 0.3: the veto also guards ADD (NEWS_VETO_ADD), a
+    Hybrid majority drops the members it outvoted for entries only, the decision horizon
+    is the chosen proposal's, EXIT intents ignore a stale snapshot's expiry (#121)."""
     live_allowed: bool = False
 
 

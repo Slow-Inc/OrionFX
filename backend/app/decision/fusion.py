@@ -55,7 +55,7 @@ from app.core.events import EventEnvelope, make_event
 from app.core.ids import stable_id
 from app.core.time import live
 from app.decision.context import DecisionContext
-from app.decision.strategies import ATR_M15
+from app.decision.strategies import ATR_M15, drop_outvoted
 from app.execution.broker import SymbolSpec
 from app.market_data.features import USABLE_QUALITY
 
@@ -63,7 +63,8 @@ D = Decimal
 CENT = D("0.01")
 TARGET_ATR = D(1)
 NEWS_VETO_IMPACT = D("0.6")
-"""Net opposing news impact at or above which an entry is refused (#115) [PROPOSED]."""
+"""Net opposing news impact at or above which an entry or ADD is refused (#115, #121)
+[PROPOSED]."""
 INTENT_TTL = timedelta(seconds=30)
 SOURCE = "m05"
 EXIT_STRATEGY = "m05.exit"
@@ -109,7 +110,8 @@ class Decision:
     """The side it bet on: the agreed chart side when entering, the held side when
     holding or adding, against the held side for an EXIT; None when it leaned nowhere."""
     horizon: Timeframe | None = None
-    """The horizon of a usable proposal on that side, if any."""
+    """The chosen proposal's horizon when it is on that side, else that of another usable
+    proposal on that side, if any."""
 
 
 @dataclass(frozen=True)
@@ -180,13 +182,14 @@ def _live_news(ev: Evidence, now: datetime) -> list[NewsAssessment]:
 
 
 def news_veto(ev: Evidence, side: Direction, now: datetime) -> bool:
-    """Whether news vetoes an entry on `side` (#115, PRD #114).
+    """Whether news vetoes an entry or an ADD on `side` (#115, PRD #114; ADD since #121,
+    owner decision MAJ-05.1).
 
     Live, source-cited assessments are netted by impact, exactly as the news vote is
-    (NEUTRAL adds nothing); the entry is refused if the net opposes `side` with
+    (NEUTRAL adds nothing); the entry or ADD is refused if the net opposes `side` with
     magnitude >= NEWS_VETO_IMPACT. The same news is already cited in the decision's
-    evidence refs. A guard, not a vote: it can only turn an entry into WAIT, it ignores
-    the forecast's lineage, it never touches exits, and no news means no veto.
+    evidence refs. A guard, not a vote: it can only turn an entry or ADD into WAIT, it
+    ignores the forecast's lineage, it never touches exits, and no news means no veto.
     """
     net = sum((_signed(n.direction, n.impact) for n in _live_news(ev, now)), D(0))
     against = -net if side is Direction.UP else net if side is Direction.DOWN else D(0)
@@ -244,10 +247,14 @@ def gather(
     held: Side | None = None,
 ) -> Inputs:
     usable = usable_proposals(proposals, ctx.now)
+    if held is None:  # an entry; managing keeps every vote so an exit never weakens
+        usable = drop_outvoted(usable)
     directions = {p.direction for p in usable}
     forecast = _live_forecast(evidence, ctx.now)
     votes, refs = _votes(evidence, forecast, ctx.now)
-    strategy_refs = [f"{p.strategy_id}@{p.strategy_version}" for p in usable]
+    strategy_refs = [ref for p in usable
+                     for ref in (f"{p.strategy_id}@{p.strategy_version}", p.composition_id)
+                     if ref]  # a composition is cited with its exact members (AT-41)  # fmt: skip
     evidence_refs = [ctx.snapshot.ref, *strategy_refs, *refs]
     cost_basis = None if costs is None else [costs.contract_size, costs.commission_per_lot]
     basis: list[object] = [evidence_refs, cycle.cycle_id, ctx.mode, symbol, policy_version,
@@ -323,9 +330,14 @@ def build(
     )  # fmt: skip
     intent = None
     if order is not None:
-        bounds = [ctx.now + INTENT_TTL, ctx.snapshot.valid_until]
-        if order.side is not None and chosen is not None:
-            bounds.append(chosen.valid_until)
+        # only an order that opens exposure rests on the snapshot and proposal; an exit
+        # may run on a stale snapshot (#121), and clamping it would make the intent
+        # expire at birth and CLOSE_ALL repeat every tick
+        bounds = [ctx.now + INTENT_TTL]
+        if order.side is not None:
+            bounds.append(ctx.snapshot.valid_until)
+            if chosen is not None:
+                bounds.append(chosen.valid_until)
         intent = TradeIntent(
             intent_id=stable_id("int", decision_id), decision_id=decision_id,
             action=order.action, side=order.side, symbol=symbol, requested_lot=order.lot,
@@ -334,13 +346,15 @@ def build(
             prediction_ids=[inp.forecast.prediction_id] if inp.forecast else [],
             position_refs=order.position_refs, valid_until=min(bounds),
         )  # fmt: skip
-    # what M07 scores: an EXIT bets against the held side; the horizon is that of a
+    # what M07 scores: an EXIT bets against the held side; the horizon is the chosen
+    # (priced) proposal's when it is on that side (#121), else that of the first
     # proposal on the same side, if any (never an opposing proposal's)
     direction = inp.leaning
     if action is DecisionAction.EXIT and direction is not None:
         direction = Direction.DOWN if direction is Direction.UP else Direction.UP
-    same_side = [p for p in inp.usable if p.direction is direction]
-    horizon = same_side[0].horizon if direction is not None and same_side else None
+    pick = next((p for p in (chosen, *inp.usable) if p is not None and p.direction is direction),
+                None)  # fmt: skip
+    horizon = pick.horizon if pick is not None else None
     return Decision(created, intent, ctx.now, ctx.mode, cycle.cycle_id, direction, horizon)
 
 

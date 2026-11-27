@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.contracts import EligibilityRecord, FeatureSnapshot
+from app.core.contracts import EligibilityRecord, FeatureSnapshot, StrategyManifest
 from app.core.enums import DataQuality, Direction, Eligibility, Mode, Timeframe
 from app.decision.context import DecisionContext
 from app.decision.gate import eligible
@@ -115,6 +115,105 @@ def test_hybrid_needs_two_allowed_strategies_to_agree() -> None:
     assert _side("hybrid", replace(_ctx(**weak), allowed=ALL)) is None
 
 
+def _split_ctx(allowed: frozenset[str] = ALL | {"hybrid"}) -> DecisionContext:
+    """trend and scalping UP, breakout DOWN (price below support): Hybrid votes UP 2 vs 1."""
+    return replace(_ctx(price="1980"), allowed=allowed)
+
+
+def _loop_proposals(ctx: DecisionContext):  # type: ignore[no-untyped-def]
+    """What the decision loop and replay collect: every allowed strategy's proposal."""
+    return [p for s in STRATEGIES.values()
+            if s.manifest.strategy_id in ctx.allowed and (p := s.propose(ctx))]  # fmt: skip
+
+
+COMPOSITION = "hybrid:scalping@1.0.0+trend_following@1.0.0"
+
+
+def test_a_hybrid_majority_is_not_blocked_by_the_member_it_outvoted() -> None:
+    """#121: the outvoted member's own proposal must not turn a Hybrid 2 vs 1 into
+    CONFLICT_STRATEGIES for an entry. Agreeing members stay (the H1 one prices the H1
+    forecast), and the decision cites the exact composition (AT-41)."""
+    from tests.support.decision import COSTS, CYCLE, _forecast
+
+    from app.core.enums import DecisionAction
+    from app.decision.decide import decide
+    from app.decision.fusion import Evidence
+
+    ctx = _split_ctx()
+    props = {p.strategy_id: p for p in _loop_proposals(ctx)}
+    assert set(props) == {"trend_following", "scalping", "breakout", "hybrid"}
+    assert props["hybrid"].composition_id == COMPOSITION
+    d = decide(ctx, list(props.values()), Evidence(forecast=_forecast()), cycle=CYCLE,
+               costs=COSTS, symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert d.created.action is DecisionAction.ENTER
+    assert d.created.strategy_id == "trend_following"
+    assert COMPOSITION in d.created.evidence_refs
+    assert "breakout@1.0.0" not in d.created.evidence_refs
+    # without hybrid nothing is dropped: the members still conflict
+    plain = replace(ctx, allowed=ALL)
+    d = decide(plain, _loop_proposals(plain), Evidence(forecast=_forecast()), cycle=CYCLE,
+               costs=COSTS, symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert d.created.reason_codes == ["CONFLICT_STRATEGIES"]
+
+
+def test_a_hybrid_majority_never_weakens_an_exit() -> None:
+    """#121 review blocker: holding BUY with an opposing forecast and no news, the split
+    chart casts no vote, so the forecast alone (1 vs 0) exits. Dropping the outvoted
+    member would make the chart an UP vote and turn the exit into CONFLICT_EVIDENCE."""
+    from tests.support.decision import COSTS, CYCLE, _forecast
+
+    from app.core.enums import DecisionAction, IntentAction, Side
+    from app.decision.fusion import Evidence
+    from app.decision.manage import Held, manage
+
+    ctx = _split_ctx()
+    held = Held(side=Side.BUY, positions=1, cycle_net_usd=D("2"), position_refs=["pos-1"])
+    d = manage(ctx, _loop_proposals(ctx), Evidence(forecast=_forecast(direction=Direction.DOWN)),
+               cycle=replace(CYCLE, open_positions=1), held=held, max_positions=3, costs=COSTS,
+               symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert d.created.action is DecisionAction.EXIT
+    assert d.created.reason_codes == ["EVIDENCE_REVERSED", "VOTES_1_AGAINST_0"]
+    assert d.intent is not None and d.intent.action is IntentAction.CLOSE_ALL
+
+
+PRE_121_HYBRID_HASH = "sha256:91dd5baa12b8a755e9531b91b664d2f896b2a5834ed54b7b088484e719b586f1"
+
+
+def test_the_hybrid_composition_change_requires_requalification() -> None:
+    """#121 (AT-41): Hybrid now trades differently (it records its composition and its
+    outvoted members are dropped for entries), so its artifact hash changed. An approval
+    of the earlier code no longer matches and the gate refuses Hybrid until re-approved."""
+    from app.decision.strategies import _RULES, Hybrid, _rule_hash, drop_outvoted
+
+    h = STRATEGIES["hybrid"].manifest.artifact_hash
+    assert h != PRE_121_HYBRID_HASH
+    # the hash covers the dropping rule too, not only Hybrid.propose
+    ids = tuple(m.manifest.strategy_id for m in _RULES)
+    assert h == _rule_hash(Hybrid.propose, ids, drop_outvoted) != _rule_hash(Hybrid.propose, ids)
+
+
+def test_the_changed_hybrid_is_a_new_version_that_can_be_requalified(tmp_path: Path) -> None:
+    """#121 re-review: a registry already holding the approved pre-#121 hybrid@1.0.0 must
+    accept the new Hybrid as a new version (one version names one behaviour, AT-41),
+    keep refusing it on the old approval, and allow it once that version is approved."""
+    c = connect(tmp_path / "requalify.db")
+    migrate(c)
+    reg = ArtifactRegistry(c, clock=lambda: T0 - timedelta(hours=1))
+    new = STRATEGIES["hybrid"].manifest
+    old = new.model_copy(update={"version": "1.0.0", "artifact_hash": PRE_121_HYBRID_HASH})
+    reg.register("strategy", old, actor="m07")
+    _approve_manifest(reg, old)
+    reg.register("strategy", new, actor="m07")  # no RegistryConflict: a new version
+    assert new.version != old.version
+    ctx = replace(_ctx(), allowed=ALL)
+    hybrid_only = [STRATEGIES["hybrid"]]
+    refused = eligible(hybrid_only, ctx, enabled=["hybrid"], registry=reg)
+    assert refused.refused == {"hybrid": "not approved for DEMO"}  # the old approval
+    _approve_manifest(reg, new)
+    assert eligible(hybrid_only, ctx, enabled=["hybrid"], registry=reg).allowed == hybrid_only
+    c.close()
+
+
 def test_hybrid_ignores_members_the_gate_did_not_allow() -> None:
     assert _side("hybrid", _ctx()) is None  # nothing allowed: no votes
     assert _side("hybrid", replace(_ctx(), allowed=frozenset({"trend_following"}))) is None
@@ -154,11 +253,20 @@ def registry(tmp_path: Path) -> Iterator[ArtifactRegistry]:
 
 
 def _approve(reg: ArtifactRegistry, sid: str, modes: list[Mode], **over: object) -> None:
-    m = STRATEGIES[sid].manifest
+    _approve_manifest(reg, STRATEGIES[sid].manifest, modes, **over)
+
+
+def _approve_manifest(
+    reg: ArtifactRegistry,
+    m: StrategyManifest,
+    modes: list[Mode] | None = None,
+    **over: object,
+) -> None:
     record: dict[str, object] = {
         "subject_hash": m.artifact_hash, "subject_kind": "strategy",
         "subject_ref": f"{m.strategy_id}@{m.version}", "user_enabled": True,
-        "eligibility": Eligibility.DEMO_ELIGIBLE, "approved_modes": modes, "context": {},
+        "eligibility": Eligibility.DEMO_ELIGIBLE,
+        "approved_modes": modes or [Mode.SHADOW, Mode.DEMO], "context": {},
         "evidence_refs": ["x02"], "policy_version": "p", "expires_at": None, "revoked_at": None,
     }  # fmt: skip
     record.update(over)

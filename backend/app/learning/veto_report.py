@@ -1,7 +1,10 @@
 """How the M05 news veto is doing (#116, PRD #114).
 
 Every entry refused with NEWS_VETO is an M07 experience carrying the side it refused
-(the chart side) and, once known, the market's move over its horizon. Per veto:
+(the chart side) and, once known, the market's move over its horizon. An ADD refused
+by the same veto is NEWS_VETO_ADD (#121; the side is the held one) and is reported only
+when asked with `reason=WaitReason.NEWS_VETO_ADD`, never mixed into the entry report.
+Per veto:
 - saved: the market moved against the refused side (the trade would have lost);
 - missed: it moved with the refused side (the trade would have gained);
 - flat: no move; unknown: no label known at `as_of` yet.
@@ -35,17 +38,23 @@ class VetoReport:
 
 
 def veto_report(
-    log: ExperienceLog, *, start: datetime, end: datetime, as_of: datetime
+    log: ExperienceLog,
+    *,
+    start: datetime,
+    end: datetime,
+    as_of: datetime,
+    reason: WaitReason = WaitReason.NEWS_VETO,
 ) -> VetoReport:
-    """NEWS_VETO decisions made in `[start, end)` and by `as_of`, judged on labels known
-    at `as_of`."""
+    """`reason` decisions (entry vetoes by default; NEWS_VETO_ADD for ADD vetoes, #121,
+    never mixed in) made in `[start, end)` and by `as_of`, judged on labels known at
+    `as_of`."""
     labels = log.labels(as_of=as_of)
     saved = missed = flat = unknown = 0
     favour: list[Decimal] = []
     vetoes = [
         e for e in log.experiences()
         if start <= e.as_of < end and e.as_of <= as_of
-        and WaitReason.NEWS_VETO.value in e.reason_codes
+        and reason.value in e.reason_codes
         and e.direction in (Direction.UP, Direction.DOWN)
     ]  # fmt: skip
     for e in vetoes:

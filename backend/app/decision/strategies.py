@@ -19,7 +19,8 @@ Machine Learning Trading (CAT-S01-07) is blocked: it needs a trained model.
 - scalping: M5 direction == M15 direction (non-zero) and spread <= 0.30; M5
   horizon.
 - hybrid: among the members the gate allowed, at least two agree on a direction
-  and outnumber the opposing votes.
+  and outnumber the opposing votes; it records the agreeing members and versions as
+  its composition, and for an entry `drop_outvoted` drops the outvoted members.
 """
 
 import inspect
@@ -37,6 +38,10 @@ from app.prediction.card import unique_leader
 
 D = Decimal
 VERSION = "1.0.0"
+HYBRID_VERSION = "1.1.0"
+"""1.1.0 (#121): records its composition; its outvoted members are dropped for entries.
+One version names one behaviour (AT-41), so the changed Hybrid is re-qualified under a
+new version; an approval of hybrid@1.0.0 never covers it."""
 H1, M15, M5 = Timeframe.H1, Timeframe.M15, Timeframe.M5
 
 DIR_H1 = feature_key(H1, "CAT-T03-07", "direction")
@@ -107,19 +112,26 @@ def _scalp(ctx: DecisionContext, f: dict[str, Decimal]) -> Direction | None:
     return _sign(f[DIR_M5])
 
 
-def _rule_hash(rule: Callable[..., object], required: tuple[str, ...]) -> str:
+def _rule_hash(
+    rule: Callable[..., object], required: tuple[str, ...], *also: Callable[..., object]
+) -> str:
     thresholds = (TREND_ADX, PULLBACK_ADX, PULLBACK_LOW, PULLBACK_HIGH, RANGE_EDGE_ATR,
                   SCALP_MAX_SPREAD)  # fmt: skip
-    source = inspect.getsource(rule).replace("\r\n", "\n")
+    source = "".join(inspect.getsource(f) for f in (rule, *also)).replace("\r\n", "\n")
     return sha256_ref(f"{source}|{required}|{thresholds}".encode())
 
 
 def _manifest(
-    sid: str, catalog_id: str, tfs: list[Timeframe], artifact_hash: str, refs: list[str]
+    sid: str,
+    catalog_id: str,
+    tfs: list[Timeframe],
+    artifact_hash: str,
+    refs: list[str],
+    version: str = VERSION,
 ) -> StrategyManifest:
     return StrategyManifest(
         strategy_id=sid,
-        version=VERSION,
+        version=version,
         artifact_hash=artifact_hash,
         family="S01",
         catalog_ids=[catalog_id],
@@ -138,13 +150,15 @@ def _proposal(
     ctx: DecisionContext,
     direction: Direction,
     refs: list[str],
+    composition_id: str | None = None,
 ) -> StrategyProposal:
+    rationale = f"{manifest.strategy_id} rule v{manifest.version} -> {direction}"
     return StrategyProposal(
         proposal_id=new_id("prop"),
         strategy_id=manifest.strategy_id,
         strategy_version=manifest.version,
         technique_refs=refs,
-        composition_id=None,
+        composition_id=composition_id,
         decision_id=None,
         direction=direction,
         action=IntentAction.OPEN,
@@ -153,7 +167,7 @@ def _proposal(
         cost_estimate_usd=None,
         requested_lot=ctx.initial_lot,
         valid_until=ctx.snapshot.valid_until,
-        rationale=f"{manifest.strategy_id} rule v{manifest.version} -> {direction}",
+        rationale=f"{rationale} ({composition_id})" if composition_id else rationale,
         constraints=[],
     )
 
@@ -222,13 +236,38 @@ class Hybrid:
         if lead is None or lead[1] < 2:
             return None
         refs = list(dict.fromkeys(k for m, d in votes if d is lead[0] for k in m.required))
-        return _proposal(self.manifest, self.horizon, ctx, lead[0], refs)
+        agree = sorted(f"{m.manifest.strategy_id}@{m.manifest.version}"
+                       for m, d in votes if d is lead[0])  # fmt: skip
+        composition = f"{self.manifest.strategy_id}:{'+'.join(agree)}"  # exact versions, AT-41
+        return _proposal(self.manifest, self.horizon, ctx, lead[0], refs, composition)
 
 
-_HYBRID_HASH = _rule_hash(Hybrid.propose, tuple(m.manifest.strategy_id for m in _RULES))
+# For an entry only (#121): when a Hybrid proposes, drop its members' proposals on the
+# other side. They would always conflict with the majority, so Hybrid could never win a
+# 2 vs 1. Agreeing members stay (one may match the forecast's horizon). Never used while
+# managing a basket (`fusion.gather` applies it only without a held side): there a split
+# chart must stay no vote, or an exit could weaken. This is a comment, not a docstring,
+# so the Hybrid hash covers only the code that decides behaviour.
+def drop_outvoted(proposals: list[StrategyProposal]) -> list[StrategyProposal]:
+    kept = proposals
+    for h in proposals:
+        s = STRATEGIES.get(h.strategy_id)
+        if isinstance(s, Hybrid):
+            members = {m.manifest.strategy_id for m in s.members}
+            kept = [p for p in kept if p.strategy_id not in members or p.direction is h.direction]
+    return kept
+
+
+# Hybrid's behaviour is its vote and the entry-time dropping rule: both are hashed. Where
+# the rule applies (entries only, in `fusion.gather`) is decision policy, versioned by
+# `ProtectedPolicy.policy_version`, not by this hash.
+_HYBRID_HASH = _rule_hash(
+    Hybrid.propose, tuple(m.manifest.strategy_id for m in _RULES), drop_outvoted
+)
 STRATEGIES: dict[str, RuleStrategy | Hybrid] = {s.manifest.strategy_id: s for s in _RULES}
 STRATEGIES["hybrid"] = Hybrid(
-    _manifest("hybrid", "CAT-S01-06", [H1, M15, M5], _HYBRID_HASH, []), tuple(_RULES)
+    _manifest("hybrid", "CAT-S01-06", [H1, M15, M5], _HYBRID_HASH, [], HYBRID_VERSION),
+    tuple(_RULES),
 )
 
 
