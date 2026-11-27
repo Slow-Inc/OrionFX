@@ -27,6 +27,10 @@ Hard ordering: **PRD → issues → PR**. Never open a PR without a referenced i
 | Touching a security boundary | `/security-review` | Every change crossing auth, secrets, broker credentials, the MT5/EA bridge, or LLM/news input handling |
 | After implementation | `/verify` | Confirm the feature works in the app |
 
+## Training-loop research
+
+The agent may research and improve M04 models and the training process on its own, within PRD #120's protocol and ADR 0001. The limits are in `CLAUDE.md` → "Training-loop research autonomy". Each research change is still a normal unit of work: issue → TDD → gates → PR. Findings go to `docs/research/`.
+
 ## Verification mandate
 
 Local verify is `.claude/t4.json` `"verify"` (backend: ruff, format, mypy, pytest); the CI `frontend` job adds `bun run lint`, `typecheck`, `test`, `build` in `frontend/`. Every M01 dashboard change is verified end-to-end in a real browser — unit tests can't see real layout or live WebSocket updates. Trading-path changes are verified only against fake broker, historical replay, or MT5 Demo — never real funds (master plan §0.2, §11).

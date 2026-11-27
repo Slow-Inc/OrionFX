@@ -72,6 +72,26 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 - **Known upstream defects (vendored, not patched here):** `.githooks/check-gate-ledger` reads the **oldest** `T4-Gates:` trailer on the branch (`git log … | tail -n 1`), so put the trailer on the first commit correctly; `t4-gate`'s `mcp__github__merge_pull_request` path skips the `requireGreenCI` check (no GitHub MCP server is configured here, so the path is unreachable today); `gh pr merge --squash <n>` (flag before the number) is not parsed as PR `<n>` — write `gh pr merge <n> --squash`.
 - **Secret scanning / push protection: unavailable** (GitHub 422 on this private free-plan repo). Nothing server-side stops a committed secret — keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
 
+## Training-loop research autonomy (owner grant, 2026-11-28)
+
+The owner has authorised the agent to **research independently inside the M04 training loop** (PRD #120, ADR 0001): to improve models and the training process itself, from the data the system collects, without asking first. This covers:
+- features and transforms;
+- labels;
+- model families and hyperparameters;
+- calibration;
+- regime rules;
+- sample weighting;
+- validation tooling;
+- data sources the plan already lists;
+- the training pipeline's own code.
+
+The freedom stops at these limits, which are not optional:
+- **Protocol first.** Exploration runs on development data: the walk-forward folds and the debug window. A result becomes a claim only under a pre-registered, hashed protocol version (PRD #120 slice 5). Never tune on the final holdout or the unread slice. An opened holdout becomes development data, so the next claim needs fresh forward data. Report best-of-N with N, and keep every run as evidence, including failures.
+- **The goalposts are the owner's.** Targets, readiness thresholds and the holdout window change only when the owner certifies a new policy version. Research may *propose* a new version, with its evidence. It never adopts one.
+- **Promotion follows ADR 0001.** Autonomous promotion and rollback are allowed in Shadow/Demo only, under a certified policy. Real-money Live stays owner-only.
+- **Generated code is untrusted** (master plan §15.5 item 6). It goes through PR review, the T4 gates and tests. It runs in a training environment such as Colab with no broker, LLM or GitHub credentials and no production write access. Model weights load only through the trusted adapter, never by pickle.
+- **Honesty.** Write findings up in `docs/research/`: what was tried, what failed, and who verified it. Never present a backtest as a real-market result or an offline metric as profit.
+
 ## Developer notification
 
 On long/AFK work, notify when a task completes, when a confirm is needed (before closing issues / merging), or when an AFK batch is done — not for routine progress.
