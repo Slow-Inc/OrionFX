@@ -6,6 +6,34 @@
 
 ---
 
+## M07 dataset slice B: recorded model predictions, kept out of trading (2026-11-28, /tdd + review subagent (code-review + simplify + scrutinize lens), security-review n-a, branch `feat/109-recorded-predictions`)
+
+**Goal:** keep what each M04 model said on every recorded bar, joined later to that bar's outcome, without it ever reaching trading (#109, PRD #107).
+
+**Shipped:**
+- Migration 0012: `learning_predictions`, append-only, one row per (bar, model version), with the bar's provenance.
+- `MarketRecorder(predictors=...)`:
+  - runs `predict(..., now=bar close)` on each newly recorded snapshot;
+  - skips `Refused`;
+  - runs each model in its own savepoint, so one failing model never stops the snapshot or the other models.
+- `BarLog.predictions()` and `prediction_outcomes()`:
+  - the outcome is joined on the model's own horizon;
+  - optional `model_version` filter.
+- Nothing is journaled as `prediction.generated`: `journal_evidence` is unchanged.
+
+**Review fixes:**
+- A model raising a non-`Refused` error rolled back the whole pass and stalled recording.
+- A BACKFILL prediction can be in-sample, so each row now carries provenance. Cards have no training cutoff yet.
+- Readers had no model-version filter.
+
+**Not wired:** nothing constructs `MarketRecorder` in the app yet (#17). A model added later predicts only bars recorded after it.
+
+**Validation:**
+- Backend verify green; 8 prediction tests.
+- Mutation probes: 6 caught. Three equivalent survivors: the redundant skip/`ON CONFLICT`, and the savepoint around a side-effect-free `predict`.
+
+---
+
 ## M07 dataset slice A: per-bar feature snapshots and outcome labels with backfill (2026-11-27, /tdd + review subagent (code-review + simplify + scrutinize lens) + advisor, security-review n-a, branch `feat/108-bar-recorder`)
 
 **Goal:** keep the bot's real per-bar view as a training dataset for M04 later, without training and without feeding trading (#108, PRD #107).
