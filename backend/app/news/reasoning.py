@@ -39,7 +39,7 @@ from app.news.provider import Provider
 
 __all__ = ["REASONING_PROMPT_VERSION", "ReasoningResult", "reason"]
 
-REASONING_PROMPT_VERSION = "m03.reason.v1"
+REASONING_PROMPT_VERSION = "m03.reason.v2"
 SEMANTICS = "uncalibrated LLM confidence in the combined XAUUSD direction"
 USABLE = USABLE_QUALITY
 ANSWER_FORMAT = (
@@ -72,10 +72,16 @@ def _prompt(
     predictions: Sequence[PredictionGenerated],
     features: dict[str, str],
 ) -> str:
+    def ids(items: Sequence[str]) -> str:
+        return ", ".join(items) or "none"
+
     lines = [
         f"[{REASONING_PROMPT_VERSION}] Combine the evidence below into one view of the",
-        "XAUUSD direction. Cite only ids listed here. Answer with one JSON object:",
+        "XAUUSD direction. Answer with one JSON object:",
         ANSWER_FORMAT,
+        f"Citable assessment ids: {ids([a.assessment_id for a in assessments])}",
+        f"Citable prediction ids: {ids([p.prediction_id for p in predictions])}",
+        "Cite no other id.",
         "News assessments:",
         *(
             f"- {a.assessment_id}: {a.direction} impact={a.impact} "
@@ -88,7 +94,7 @@ def _prompt(
             f"score={p.probability.value} ({p.probability.semantics})"
             for p in predictions
         ),
-        "Chart summary:",
+        "Chart summary (context for your reasoning; these keys are not ids, never cite them):",
         *(f"- {k} = {v}" for k, v in features.items()),
     ]
     return "\n".join(lines)

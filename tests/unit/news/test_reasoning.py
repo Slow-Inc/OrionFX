@@ -204,3 +204,23 @@ def test_evidence_that_expires_during_the_call_gives_no_reasoning() -> None:
     result = reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, FakeProvider([_answer()]),
                     now=NOW, clock=lambda: too_late)  # fmt: skip
     assert result.reasoning is None and result.health.status is HealthStatus.DEGRADED
+
+
+def test_the_prompt_separates_citable_ids_from_chart_context() -> None:
+    """Models cited chart feature keys as ids, which invalidated whole answers (#99):
+    the prompt names the citable ids and marks the chart summary as context only."""
+    provider = FakeProvider([_answer()])
+    reason([_assessment("a1")], [_prediction("p1")], SNAPSHOT, provider, now=NOW)
+    prompt = provider.prompts[0]
+    assert REASONING_PROMPT_VERSION == "m03.reason.v2"
+    assert "Citable assessment ids: a1" in prompt
+    assert "Citable prediction ids: p1" in prompt
+    context = prompt.index("never cite")
+    assert prompt.index("H1.direction_10.direction") > context  # chart keys only as context
+    assert prompt.index("Citable assessment ids") < context
+
+
+def test_with_no_forecast_the_prompt_says_there_is_none_to_cite() -> None:
+    provider = FakeProvider([_answer(cited_prediction_ids=[])])
+    reason([_assessment("a1")], [], SNAPSHOT, provider, now=NOW)
+    assert "Citable prediction ids: none" in provider.prompts[0]
