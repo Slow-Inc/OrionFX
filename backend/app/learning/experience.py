@@ -19,7 +19,7 @@ market data (a gap, a weekend) means no label, never a stretched or guessed one.
 """
 
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 
@@ -109,6 +109,13 @@ def regime_of(snapshot: FeatureSnapshot) -> str:
     return "TREND" if trend == 1 else "RANGE" if rng == 1 else "NEUTRAL"
 
 
+def _utc(t: datetime) -> str:
+    """Stored times are UTC ISO text, compared as strings: queries must be too."""
+    if t.tzinfo is None:
+        raise ValueError("naive datetime: pass an aware UTC time")
+    return t.astimezone(UTC).isoformat()
+
+
 def _direction(x: Decimal) -> Direction:
     return Direction.UP if x > 0 else Direction.DOWN if x < 0 else Direction.NEUTRAL
 
@@ -120,10 +127,6 @@ class ExperienceLog:
         self._conn = conn
         self._candles = candles
         self._clock = clock
-
-    @property
-    def candles(self) -> CandleStore:
-        return self._candles
 
     # --- recording ---------------------------------------------------------------------
 
@@ -180,9 +183,24 @@ class ExperienceLog:
     def labels(self, *, as_of: datetime) -> dict[str, Label]:
         """Labels already known at `as_of`, by decision id (point-in-time)."""
         rows = self._conn.execute(
-            "SELECT body FROM learning_labels WHERE available_at <= ?", (as_of.isoformat(),)
+            "SELECT body FROM learning_labels WHERE available_at <= ?", (_utc(as_of),)
         ).fetchall()
         return {(lab := Label.model_validate_json(r[0])).decision_id: lab for r in rows}
+
+    def known(
+        self, *, as_of: datetime, regime: str | None = None
+    ) -> list[tuple[Experience, Label]]:
+        """Experiences whose label was known at `as_of` (so they also happened before
+        it), with that label, oldest first; optionally one regime only."""
+        rows = self._conn.execute(
+            "SELECT e.body, l.body FROM learning_experiences e"
+            " JOIN learning_labels l ON l.decision_id = e.decision_id"
+            " WHERE l.available_at <= ? AND (? IS NULL OR e.regime = ?)"
+            " ORDER BY e.as_of, e.rowid",
+            (_utc(as_of), regime, regime),
+        ).fetchall()
+        return [(Experience.model_validate_json(e), Label.model_validate_json(lab))
+                for e, lab in rows]  # fmt: skip
 
     # --- labelling ---------------------------------------------------------------------
 

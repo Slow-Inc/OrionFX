@@ -6,6 +6,38 @@
 
 ---
 
+## M07 slice B: point-in-time similarity retrieval, semantic memory, RAG context (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/60-m07-memory`)
+
+**Goal:** recall similar past situations without look-ahead, and never present similarity as a win probability (PRD-07 #58, slice #60; LRN-01/02/03, AT-15).
+
+**Shipped:**
+- `backend/app/learning/memory.py`:
+  - `similar`: RMS distance over the shared non-regime dimensions, in the same regime, needing at least 2 dimensions. It carries `SIMILARITY_SEMANTICS`.
+  - `summarize`: kept apart by label kind, with moves counted relative to the side the decision took.
+  - `rag_context`: a cited block that states each decision's side and whether the outcome went its way.
+  - `with_side`.
+- `ExperienceLog.known(as_of, regime)`: a SQL join, point-in-time, with UTC enforced.
+- `migrations/0008_learning_one_label.sql`: at most one label per experience.
+- Catalog: CAT-A04-03 is implemented, with no validated-edge claim. CAT-A04-04..07 are blocked, because they need training or simulation. CAT-A04-01 and A04-02 stay planned.
+
+**Validation:**
+- `uv run pytest`: all pass, including 14 memory tests.
+- Mutation probes: all caught.
+
+**Review fixes:**
+- Regime flags no longer give free similarity.
+- RMS distance, so matches with more shared features are not penalised.
+- Context and summary judge outcomes against the side the decision took, not raw up/down.
+- `k` < 1 is refused.
+- A naive `as_of` is refused.
+- One label per decision.
+- An experience with no strategy is grouped under None, not '-'.
+- The DTW catalog ref is corrected.
+- The `candles` property added for tests is removed.
+- A04-01 is not claimed, because its only evidence was vector similarity.
+
+---
+
 ## M07 slice A: experience log and point-in-time outcome labels (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/59-m07-experience`)
 
 **Goal:** turn every decision, WAIT included, into an experience with honest, point-in-time outcome labels (PRD-07 #58, slice #59; LRN-02/06, AT-15).
