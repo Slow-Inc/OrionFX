@@ -7,6 +7,7 @@ belongs to which event. Delivery is at-least-once: consumers deduplicate by
 `event_id`.
 """
 
+from datetime import datetime
 from typing import Annotated, Any, Literal, Self, Union, cast
 
 from pydantic import Field, TypeAdapter, create_model, model_validator
@@ -98,13 +99,17 @@ def make_event(
     correlation_id: str | None = None,
     causation_id: str | None = None,
     cycle_id: str | None = None,
+    event_id: str | None = None,
+    occurred_at: datetime | None = None,
 ) -> EventEnvelope:
+    """`event_id` defaults to a fresh id; pass a deterministic one to make a
+    republish idempotent (the journal ignores a repeated id)."""
     now = utc_now()
     return parse_event(
         {
-            "event_id": new_id("evt"),
+            "event_id": event_id or new_id("evt"),
             "event_type": event_type,
-            "occurred_at": now,
+            "occurred_at": occurred_at or now,
             "recorded_at": now,
             "source": source,
             "correlation_id": correlation_id or new_id("corr"),

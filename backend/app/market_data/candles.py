@@ -45,6 +45,9 @@ class Issue(StrEnum):
 class ClosedBar:
     event: CandleClosed
     """Validated contract (OHLC range, no look-ahead), quality flags included."""
+    partial: bool = False
+    """The engine started inside this interval (first bar after a start or resume),
+    so it may have missed ticks: usable live, never stored as a complete bar."""
 
     @property
     def timeframe(self) -> Timeframe:
@@ -61,6 +64,7 @@ class _Open:
     ticks: int
     max_spread: Decimal
     gap: bool
+    partial: bool
 
 
 def _floor(t: datetime, size: timedelta) -> datetime:
@@ -120,7 +124,15 @@ class CandleEngine:
                 cur = None
             if cur is None:
                 self._open[tf] = _Open(
-                    _floor(tick.time, size), tick.bid, tick.bid, tick.bid, tick.bid, 1, spread, hole
+                    _floor(tick.time, size),
+                    tick.bid,
+                    tick.bid,
+                    tick.bid,
+                    tick.bid,
+                    1,
+                    spread,
+                    hole,
+                    last is None,
                 )
             else:
                 cur.high = max(cur.high, tick.bid)
@@ -150,7 +162,8 @@ class CandleEngine:
                 spread=cur.max_spread,
                 available_at=at,
                 quality_flags=[Issue.GAP.value] if cur.gap else [],
-            )
+            ),
+            partial=cur.partial,
         )
 
     def snapshot(self, now: datetime) -> MarketSnapshot:

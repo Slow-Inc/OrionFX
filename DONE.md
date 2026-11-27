@@ -6,6 +6,20 @@
 
 ---
 
+## M02 slice D — point-in-time candle store and replay (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/32-m02-store-replay`)
+
+**Goal:** "what did we know at T" for backtests, and replays that reproduce live features (PRD-02 #28, slice #32; DAT-04, AT-15).
+
+**Shipped:** `migrations/0006_candles.sql` (per dataset version; UPDATE/DELETE/REPLACE blocked); `backend/app/market_data/store.py` (`CandleStore.save/bars(as_of=)`, `event_id`); `backend/app/market_data/service.py` (`ingest`: one transaction per tick, deterministic `candle.closed` id and `occurred_at`); `make_event(event_id=, occurred_at=)`; `ClosedBar.partial`.
+
+**Validation:** `uv run pytest` → all pass (AT-15: two replays and a live engine give identical snapshots; identical events across replays). Tests written first. 16 mutation probes caught (survivors on the first pass fixed with a crash-repair test and an H1-conflict atomicity test).
+
+**Review fixes:** a bar the engine started mid-interval is partial and never stored (resume cannot freeze a truncated bar); a conflict rolls back the whole tick; `as_of` normalized to UTC, naive refused, `limit=0` means none; as-of query served by the index; INSERT … ON CONFLICT path.
+
+**Config (developer request):** `.claude/t4.json` `autoMerge: true` so AFK merges do not stop to confirm (verify + green CI still enforced). Ledger row added to turn it back off when the AFK batch ends.
+
+---
+
 ## M02 slice C — price-action techniques CAT-T03 + feature snapshot (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/31-m02-price-action`)
 
 **Goal:** non-repainting price action and one versioned, point-in-time feature snapshot for M04/M05 (PRD-02 #28, slice #31; DAT-02, DAT-04, UST-03).
