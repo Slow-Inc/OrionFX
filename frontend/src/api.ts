@@ -15,7 +15,17 @@ import type {
   UserConfig,
 } from "./types";
 
-export type ApiErrorKind = "unauthorized" | "conflict" | "validation" | "unavailable" | "other";
+/** The API origin. Empty in development (the Vite proxy forwards /api and /ws); set
+ * `VITE_API_BASE` (e.g. http://127.0.0.1:8000) when the built app is served apart. */
+export const API_BASE: string = import.meta.env.VITE_API_BASE ?? "";
+
+export type ApiErrorKind =
+  | "unauthorized"
+  | "conflict"
+  | "validation"
+  | "rate_limited"
+  | "unavailable"
+  | "other";
 
 export class ApiError extends Error {
   constructor(
@@ -23,6 +33,8 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly fields: Record<string, string> = {},
+    /** The server's own `detail`, e.g. `{missing: [...]}` when Start lacks settings. */
+    readonly detail: unknown = null,
   ) {
     super(message);
   }
@@ -51,7 +63,7 @@ function fieldErrors(detail: unknown): Record<string, string> {
 
 export function createApi(opts: ApiOptions) {
   const doFetch = opts.fetch ?? fetch.bind(globalThis);
-  const base = opts.base ?? "";
+  const base = opts.base ?? API_BASE;
 
   async function call<T>(path: string, init: RequestInit = {}, auth = true): Promise<T> {
     const headers = new Headers(init.headers);
@@ -65,13 +77,16 @@ export function createApi(opts: ApiOptions) {
     const detail = (body as { detail?: unknown } | null)?.detail;
     const message = typeof detail === "string" ? detail : `HTTP ${res.status}`;
     if (res.status === 401) {
-      opts.onUnauthorized();
-      throw new ApiError("unauthorized", 401, message);
+      if (auth && token) opts.onUnauthorized(); // a failed sign-in is not a lost session
+      throw new ApiError("unauthorized", 401, message, {}, detail);
     }
-    if (res.status === 409) throw new ApiError("conflict", 409, message);
-    if (res.status === 422) throw new ApiError("validation", 422, message, fieldErrors(detail));
+    if (res.status === 409) throw new ApiError("conflict", 409, message, {}, detail);
+    if (res.status === 422) {
+      throw new ApiError("validation", 422, message, fieldErrors(detail), detail);
+    }
+    if (res.status === 429) throw new ApiError("rate_limited", 429, message, {}, detail);
     if (res.status === 503) throw new ApiError("unavailable", 503, "storage unavailable");
-    throw new ApiError("other", res.status, message);
+    throw new ApiError("other", res.status, message, {}, detail);
   }
 
   return {

@@ -1,22 +1,37 @@
-// The app shell (#73): login, hash routes, the always-visible status bar, and the live
-// feed. The session token lives in memory only: closing the tab logs out, and closing
+// The app shell (#73): sign-in, hash routes, the always-visible status bar, and the live
+// feed. The session token lives in memory only: closing the tab signs out, and closing
 // the browser never affects the bot (the dashboard is not safety-critical).
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { type Api, ApiError, createApi } from "./api";
+//
+// Freshness: the status is re-read on a coalesced refresh after live events, and polled
+// every STATUS_POLL_MS when the market is quiet; the clock ticks every second so an
+// ageing status turns STALE on screen without waiting for an event.
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { API_BASE, type Api, ApiError, createApi } from "./api";
 import { freshness } from "./freshness";
 import { type FeedState, LiveFeed, type SocketLike } from "./live";
 import type { Status } from "./types";
+import { VIEWS } from "./views";
 
 export const ROUTES = ["trading", "insights", "history", "settings"] as const;
 export type Route = (typeof ROUTES)[number];
-const STATUS_MAX_AGE_MS = 30_000;
+export const STATUS_MAX_AGE_MS = 30_000;
+const STATUS_POLL_MS = 15_000;
+const REFRESH_COALESCE_MS = 250;
 
 export interface AppContextValue {
   api: Api;
   status: Status | null;
   feed: FeedState;
-  /** Bumped on every live event and reconnect: views refetch their snapshots. */
-  tick: number;
+  /** Revision bumped (coalesced) by live events and reconnects: views refetch on it. */
+  revision: number;
   refresh: () => void;
 }
 
@@ -28,6 +43,16 @@ export function useApp(): AppContextValue {
   return ctx;
 }
 
+/** The current time, re-read every `everyMs`: time-based labels stay honest. */
+export function useNow(everyMs = 1_000): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), everyMs);
+    return () => clearInterval(id);
+  }, [everyMs]);
+  return now;
+}
+
 function routeFromHash(hash: string): Route {
   const r = hash.replace(/^#\/?/, "");
   return (ROUTES as readonly string[]).includes(r) ? (r as Route) : "trading";
@@ -37,53 +62,48 @@ export interface AppProps {
   fetch?: typeof fetch;
   wsUrl?: string;
   socket?: (url: string) => SocketLike;
-  views: Record<Route, () => React.ReactElement>;
 }
 
-export function App({ fetch, wsUrl, socket, views }: AppProps) {
+type SignedOut = "fresh" | "expired" | "signed-out";
+
+export function App({ fetch, wsUrl, socket }: AppProps) {
   const [token, setToken] = useState<string | null>(null);
-  const [expired, setExpired] = useState(false);
-  const logout = useCallback(() => {
+  const [signedOut, setSignedOut] = useState<SignedOut>("fresh");
+  const end = useCallback((why: SignedOut) => {
     setToken(null);
-    setExpired(true);
+    setSignedOut(why);
   }, []);
   const api = useMemo(
-    () => createApi({ ...(fetch ? { fetch } : {}), token: () => token, onUnauthorized: logout }),
-    [fetch, token, logout],
+    () =>
+      createApi({
+        ...(fetch ? { fetch } : {}),
+        token: () => token,
+        onUnauthorized: () => end("expired"),
+      }),
+    [fetch, token, end],
   );
-  if (!token) {
-    return (
-      <Login
-        api={api}
-        expired={expired}
-        onToken={(t) => {
-          setExpired(false);
-          setToken(t);
-        }}
-      />
-    );
-  }
+  if (!token) return <Login api={api} why={signedOut} onToken={setToken} />;
   return (
-    <Shell api={api} token={token} wsUrl={wsUrl} socket={socket} views={views} onLogout={logout} />
+    <Shell
+      api={api}
+      token={token}
+      wsUrl={wsUrl ?? defaultWsUrl()}
+      socket={socket}
+      onSignOut={() => end("signed-out")}
+      onExpired={() => end("expired")}
+    />
   );
 }
 
-function Login({
-  api,
-  expired,
-  onToken,
-}: {
-  api: Api;
-  expired: boolean;
-  onToken: (t: string) => void;
-}) {
+function Login({ api, why, onToken }: { api: Api; why: SignedOut; onToken: (t: string) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <main className="login">
       <h1>OrionFX</h1>
-      {expired && <p role="status">Your session ended. Please sign in again.</p>}
+      {why === "expired" && <p role="status">Your session ended. Please sign in again.</p>}
+      {why === "signed-out" && <p role="status">You signed out.</p>}
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -93,7 +113,7 @@ function Login({
             onToken((await api.login(password)).token);
           } catch (err) {
             setError(
-              err instanceof ApiError && err.status === 429
+              err instanceof ApiError && err.kind === "rate_limited"
                 ? "Too many failed attempts. Wait a minute."
                 : "Sign-in failed.",
             );
@@ -122,8 +142,8 @@ function Login({
 }
 
 function defaultWsUrl(): string {
-  const { protocol, host } = window.location;
-  return `${protocol === "https:" ? "wss" : "ws"}://${host}/ws/live`;
+  const origin = API_BASE || window.location.origin;
+  return `${origin.replace(/^http/, "ws")}/ws/live`;
 }
 
 function Shell({
@@ -131,21 +151,36 @@ function Shell({
   token,
   wsUrl,
   socket,
-  views,
-  onLogout,
+  onSignOut,
+  onExpired,
 }: {
   api: Api;
   token: string;
-  wsUrl: string | undefined;
+  wsUrl: string;
   socket: ((url: string) => SocketLike) | undefined;
-  views: Record<Route, () => React.ReactElement>;
-  onLogout: () => void;
+  onSignOut: () => void;
+  onExpired: () => void;
 }) {
   const [route, setRoute] = useState<Route>(() => routeFromHash(window.location.hash));
   const [status, setStatus] = useState<Status | null>(null);
   const [feed, setFeed] = useState<FeedState>("CONNECTING");
-  const [tick, setTick] = useState(0);
-  const refresh = useCallback(() => setTick((t) => t + 1), []);
+  const [revision, setRevision] = useState(0);
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Many events in a burst (a replay, a busy tick) become one refresh.
+  const refresh = useCallback(() => {
+    if (pending.current) return;
+    pending.current = setTimeout(() => {
+      pending.current = null;
+      setRevision((r) => r + 1);
+    }, REFRESH_COALESCE_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (pending.current) clearTimeout(pending.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash(window.location.hash));
@@ -153,37 +188,53 @@ function Shell({
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  useEffect(() => {
-    const live = new LiveFeed({
-      url: wsUrl ?? defaultWsUrl(),
-      token: () => token,
-      ...(socket ? { socket } : {}),
-      onEvent: () => refresh(),
-      onState: (s) => {
-        setFeed(s);
-        if (s === "LIVE") refresh(); // reconnected: re-read the snapshots
-      },
-      onUnauthorized: onLogout,
-    });
-    live.start();
-    return () => live.stop();
-  }, [token, wsUrl, socket, refresh, onLogout]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `tick` is the refetch signal
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `revision` is the refetch signal
   useEffect(() => {
     let alive = true;
-    api
-      .status()
-      .then((s) => alive && setStatus(s))
-      .catch(() => alive && setStatus(null));
+    api.status().then(
+      (s) => alive && setStatus(s),
+      () => alive && setStatus(null),
+    );
     return () => {
       alive = false;
     };
-  }, [api, tick]);
+  }, [api, revision]);
 
-  const View = views[route];
+  useEffect(() => {
+    const id = setInterval(refresh, STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  // The feed starts once, from the journal position of the first status: no replay of
+  // history the snapshots already reflect.
+  const since = status?.latest_seq;
+  const started = since !== undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: start once, from the first `since`
+  useEffect(() => {
+    if (!started) return;
+    const live = new LiveFeed({
+      url: wsUrl,
+      token,
+      since,
+      ...(socket ? { socket } : {}),
+      onEvent: refresh,
+      onState: (s) => {
+        setFeed(s);
+        if (s === "LIVE") refresh(); // (re)connected: re-read the snapshots
+      },
+      onUnauthorized: onExpired,
+    });
+    live.start();
+    return () => live.stop();
+  }, [started, token, wsUrl, socket, refresh, onExpired]);
+
+  const value = useMemo(
+    () => ({ api, status, feed, revision, refresh }),
+    [api, status, feed, revision, refresh],
+  );
+  const View = VIEWS[route];
   return (
-    <AppContext.Provider value={{ api, status, feed, tick, refresh }}>
+    <AppContext.Provider value={value}>
       <StatusBar status={status} feed={feed} />
       <nav aria-label="Sections">
         {ROUTES.map((r) => (
@@ -191,7 +242,16 @@ function Shell({
             {r[0]?.toUpperCase() + r.slice(1)}
           </a>
         ))}
-        <button type="button" className="quiet" onClick={() => api.logout().finally(onLogout)}>
+        <button
+          type="button"
+          className="quiet"
+          onClick={() =>
+            api
+              .logout()
+              .catch(() => undefined)
+              .finally(onSignOut)
+          }
+        >
           Sign out
         </button>
       </nav>
@@ -202,19 +262,20 @@ function Shell({
   );
 }
 
+const FEED_LABEL: Record<FeedState, string> = {
+  LIVE: "Live",
+  CONNECTING: "Connecting…",
+  DISCONNECTED: "Disconnected",
+};
+
 export function StatusBar({ status, feed }: { status: Status | null; feed: FeedState }) {
-  const fresh = freshness(status?.as_of ?? null, new Date(), STATUS_MAX_AGE_MS);
-  const live = feed === "LIVE" && fresh === "LIVE";
+  const now = useNow();
+  const stale = freshness(status?.as_of ?? null, now, STATUS_MAX_AGE_MS) === "STALE";
+  const label = feed === "LIVE" && stale ? "Stale" : FEED_LABEL[feed];
   return (
     <header className="statusbar">
-      <span className={`pill ${live ? "ok" : "warn"}`} role="status">
-        {feed === "LIVE"
-          ? fresh === "LIVE"
-            ? "Live"
-            : "Stale"
-          : feed === "CONNECTING"
-            ? "Connecting…"
-            : "Disconnected"}
+      <span className={`pill ${label === "Live" ? "ok" : "warn"}`} role="status">
+        {label}
       </span>
       {status && (
         <>

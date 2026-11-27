@@ -6,6 +6,46 @@
 
 ---
 
+## M01 slice A: frontend foundation (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/73-m01-foundation`)
+
+**Goal:** a dashboard foundation that never pretends. Stale is never shown as Live, a failed sign-in is never shown as a lost session, and money never drifts (PRD-01 #72, slice #73; UI-01, UST-01).
+
+**Shipped:** `frontend/`, a Bun + Vite + React 19 + TypeScript (strict) app with Biome and Vitest.
+- `api.ts`: typed client with bearer auth. Errors have kinds (unauthorized / conflict / validation with fields / rate_limited / unavailable) and carry the server's own `detail`. `VITE_API_BASE` sets the API origin for builds.
+- `live.ts`: `LiveFeed`.
+  - Reports Live only after the hello is accepted.
+  - Reconnects with backoff and resumes from the last seq.
+  - 4401 and 4400 are final.
+  - Malformed frames are ignored.
+- `freshness.ts` (5 s skew tolerance), `format.ts` (integer cents, exponent notation, sign + word).
+- `app.tsx`:
+  - In-memory session; sign-in, sign-out and expiry are told apart.
+  - Hash routes and a status bar that re-checks freshness every second.
+  - Status is polled; refreshes are coalesced; the feed starts from `latest_seq`.
+- DESIGN.md tokens drafted; CLAUDE.md frontend commands.
+
+**Validation:**
+- `bun run lint && bun run typecheck && bun run test && bun run build`: green, 19 tests.
+- 16 mutation probes, all caught.
+
+**Review fixes:**
+- No full-journal replay on sign-in.
+- Refresh storms are coalesced.
+- An ageing status turns Stale on screen.
+- A wrong password no longer shows "session ended".
+- Live is not reported before the hello is accepted, and 4400 is not retried forever.
+- "0E-8" money no longer crashes a view.
+- Clock skew is tolerated.
+- The API base is configurable.
+- Sign-out is told apart from expiry.
+- The 409 `detail` is kept for Start.
+
+**Not done:**
+- **Frontend CI jobs.** They need a `.github/workflows` and `.claude/t4.json` change, which are enforcement paths the owner reviews, so they go in a separate PR.
+- Generating the TS types from `docs/contracts` schemas. The types are hand-mirrored for now; this is a follow-up.
+
+---
+
 ## X02 slice C: evidence store, protected readiness gate, live qualifications (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/68-x02-readiness`)
 
 **Goal:** Live approval rests on stored, protected evidence that nobody can type in or edit (PRD-X02 #65, slice #68; VAL-04/05/06, AT-16, AT-24).

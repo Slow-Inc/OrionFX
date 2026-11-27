@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import { App, StatusBar } from "../src/app";
 import type { SocketLike } from "../src/live";
 import type { Status } from "../src/types";
-import { VIEWS } from "../src/views";
 
 const STATUS: Status = {
   as_of: new Date().toISOString(),
@@ -41,7 +40,7 @@ describe("app shell", () => {
         ? json(200, { token: "t", expires_at: "x" })
         : json(200, STATUS),
     ) as unknown as typeof globalThis.fetch;
-    render(<App fetch={fetch} views={VIEWS} socket={() => new QuietSocket()} wsUrl="ws://x" />);
+    render(<App fetch={fetch} socket={() => new QuietSocket()} wsUrl="ws://x" />);
     await userEvent.type(screen.getByLabelText("Password"), "pw");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByText("Mode: DEMO")).toBeInTheDocument();
@@ -58,7 +57,7 @@ describe("app shell", () => {
       }
       return signedIn ? json(401, { detail: "authentication required" }) : json(200, STATUS);
     }) as unknown as typeof globalThis.fetch;
-    render(<App fetch={fetch} views={VIEWS} socket={() => new QuietSocket()} wsUrl="ws://x" />);
+    render(<App fetch={fetch} socket={() => new QuietSocket()} wsUrl="ws://x" />);
     await userEvent.type(screen.getByLabelText("Password"), "pw");
     await act(async () => {
       await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -70,10 +69,27 @@ describe("app shell", () => {
     const fetch = vi.fn(async () =>
       json(401, { detail: "invalid password" }),
     ) as unknown as typeof globalThis.fetch;
-    render(<App fetch={fetch} views={VIEWS} socket={() => new QuietSocket()} wsUrl="ws://x" />);
+    render(<App fetch={fetch} socket={() => new QuietSocket()} wsUrl="ws://x" />);
     await userEvent.type(screen.getByLabelText("Password"), "bad");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Sign-in failed.");
+    expect(screen.queryByText(/session ended/)).not.toBeInTheDocument();
+  });
+});
+
+describe("sign out", () => {
+  it("says you signed out, not that the session ended", async () => {
+    const fetch = vi.fn(async (url: string) =>
+      url.endsWith("/api/auth/login")
+        ? json(200, { token: "t", expires_at: "x" })
+        : json(200, STATUS),
+    ) as unknown as typeof globalThis.fetch;
+    render(<App fetch={fetch} socket={() => new QuietSocket()} wsUrl="ws://x" />);
+    await userEvent.type(screen.getByLabelText("Password"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByText("You signed out.")).toBeInTheDocument();
+    expect(screen.queryByText(/session ended/)).not.toBeInTheDocument();
   });
 });
 
