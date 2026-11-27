@@ -6,6 +6,22 @@
 
 ---
 
+## X01c slice A: an exit closes only the cycle it names (2026-11-27, /tdd + /code-review + /scrutinize, simplify n-a (6-line change), security-review n-a, branch `feat/89-exit-cycle-guard`)
+
+**Goal:** a late exit decided for an old cycle never closes the new cycle's positions, and risk can still always be reduced (PRD-X01c #88, slice #89).
+
+**Shipped:**
+- M06 refuses an exit (CLOSE/CLOSE_ALL) that doesn't name the open cycle (`CYCLE_MISMATCH`). The refusal is journaled under the cycle the exit named.
+- An allowed exit closes only positions linked to the cycle it names.
+- With no cycle open, an exit naming no cycle still closes cycle-less Bot Positions.
+- The veto docstring now states the rule.
+
+**Validation:**
+- Backend verify green.
+- Mutation probes: guard removed, None refused, and targets from any cycle are all caught.
+
+---
+
 ## X01 follow-up C: runtime decision loop, plus the M06 entry guards it exposed (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/84-decision-loop`)
 
 **Goal:** one tick runs M02 → evidence → M05 → journal → M06 → M07, never calls the broker, and decides nothing it cannot trust (PRD-X01b #81, slice #84; DEC-01, LRN-02, AT-14, AT-15).

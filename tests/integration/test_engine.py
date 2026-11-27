@@ -885,3 +885,40 @@ def test_an_exit_naming_no_cycle_or_another_cycle_closes_nothing(
         decision = _decision(conn, iid)
         assert decision.verdict is Verdict.DENY and "CYCLE_MISMATCH" in decision.reason_codes
     assert len(_bot_positions(broker)) == 2
+    from app.storage.journal import Journal
+
+    filed = Journal(conn).find("risk.decision", "intent_id", stale)
+    assert filed is not None and filed.envelope.cycle_id == "cycle-closed-earlier"
+
+
+def test_an_exit_closes_only_positions_of_the_cycle_it_names(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _two_positions(conn, broker, clock)
+    _, b = _bot_positions(broker)
+    with conn:
+        conn.execute("UPDATE bot_positions SET cycle_id = 'cycle-other' WHERE position_id = ?",
+                     (b,))  # fmt: skip
+    by_ref = _intent(conn, clock, action=IntentAction.CLOSE, lot=None, side=None, refs=[b])
+    eng.tick()
+    assert "NOTHING_TO_CLOSE" in _decision(conn, by_ref).reason_codes  # b is not this cycle's
+    _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None)
+    eng.tick()
+    assert _bot_positions(broker) == [b]  # only this cycle's position closed
+
+
+def test_with_no_cycle_open_an_exit_naming_none_still_closes(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """Risk can always be reduced: cycle-less Bot Positions with no open cycle can close."""
+    eng = _two_positions(conn, broker, clock)
+    with conn:
+        conn.execute("UPDATE bot_positions SET cycle_id = NULL")
+    book = CycleBook(conn, account=broker.account())
+    open_id = book.open_cycle_id()
+    eng._book.open_cycle_id = lambda: None  # type: ignore[method-assign]
+    iid = _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None, cycle_id=None)
+    eng.tick()
+    assert open_id is not None
+    assert _decision(conn, iid).verdict is Verdict.ALLOW
+    assert _bot_positions(broker) == []
