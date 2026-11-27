@@ -14,7 +14,7 @@ from app.core.enums import Timeframe
 from app.core.time import TIMEFRAME_DURATION
 from app.market_data.store import CandleStore
 
-__all__ = ["FINEST_FIRST", "bars_closing_at", "moved_past"]
+__all__ = ["FINEST_FIRST", "bars_closing_at", "data_frontier"]
 
 FINEST_FIRST = (Timeframe.M5, Timeframe.M15, Timeframe.H1)
 
@@ -34,8 +34,11 @@ def bars_closing_at(
     return None
 
 
-def moved_past(candles: CandleStore, symbol: str, t: datetime, *, now: datetime) -> bool:
-    """Whether the data known at `now` already goes beyond the instant `t`: a bar that
-    should close at or before `t` and is still missing will not arrive."""
-    latest = candles.latest_open(symbol, as_of=now)
-    return latest is not None and latest >= t
+def data_frontier(candles: CandleStore, symbol: str, *, now: datetime) -> datetime | None:
+    """How far every stored timeframe's data reaches at `now`: the earliest of their
+    newest bar opens. A bar that should close at or before the frontier and is still
+    missing will not arrive. Taking the earliest means one timeframe running ahead of
+    another (an import or repair done per timeframe) cannot make a late bar look lost."""
+    opens = [o for tf in FINEST_FIRST
+             if (o := candles.latest_open(symbol, tf, as_of=now)) is not None]  # fmt: skip
+    return min(opens, default=None)

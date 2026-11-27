@@ -10,10 +10,12 @@ Nothing here trains, and nothing here feeds trading: these rows are learning dat
 - An outcome row is the raw close-to-close move over a horizon from the bar closing at
   `as_of` to the bar closing `horizon_bars` later (the same rule as M07's MARKET_MOVE
   experience labels). It is stamped with the end bar's `available_at`, the moment the
-  move became known, and carries the start bar's spread when known. A missing start or
-  end bar gives no label, never a stretched one (such rows, mostly next to weekends, are
-  re-checked each pass; there are only a few per week). No neutral threshold is applied:
-  that is a training choice.
+  move became known, and carries the start bar's spread when known. The move is read on
+  the finest timeframe with bars closing at both ends (#125), so `spread` is that bar's
+  max spread: since #125 usually the M5 bar's, before it the horizon bar's. A missing
+  start or end bar gives no label, never a stretched one: once every stored timeframe has
+  moved past the end, the row is marked unlabellable (decided at `now`) and not asked
+  again. No neutral threshold is applied: that is a training choice.
 - A prediction row is what one loaded M04 model said about one recorded bar (#109),
   made at that bar's close. It is learning data only, never `prediction.generated`, so
   it never reaches trading. Its outcome is the bar's label for the model's horizon.
@@ -30,7 +32,7 @@ from app.core.contracts import ContractModel, FeatureSnapshot, PredictionGenerat
 from app.core.enums import Mode, Timeframe
 from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.core.types import Dec, UtcDatetime
-from app.learning.moves import bars_closing_at, moved_past
+from app.learning.moves import bars_closing_at, data_frontier
 from app.market_data.store import CandleStore
 from app.storage.db import transaction
 
@@ -143,6 +145,7 @@ class BarLog:
         recorder that was down, still labels everything."""
         new: list[BarOutcome] = []
         version = candles.dataset_version
+        frontier = data_frontier(candles, symbol, now=now)
         for h in horizons:
             rows = self._conn.execute(
                 "SELECT DISTINCT s.as_of FROM learning_snapshots s WHERE s.symbol = ?"
@@ -152,9 +155,10 @@ class BarLog:
                 " AND o.dataset_version = s.dataset_version) AND NOT EXISTS"
                 " (SELECT 1 FROM learning_unlabellable u WHERE u.symbol = s.symbol"
                 " AND u.as_of = s.as_of AND u.horizon = ? AND u.horizon_bars = ?"
-                " AND u.dataset_version = s.dataset_version) ORDER BY s.as_of",
+                " AND u.dataset_version = s.dataset_version AND u.decided_at <= ?)"
+                " ORDER BY s.as_of",
                 (symbol, version, _ts(now - h.length), h.timeframe.value, h.bars,
-                 h.timeframe.value, h.bars),
+                 h.timeframe.value, h.bars, _ts(now)),
             ).fetchall()  # fmt: skip
             for (as_of_text,) in rows:
                 as_of = datetime.fromisoformat(as_of_text)
@@ -162,30 +166,37 @@ class BarLog:
                 if outcome is not None:
                     if self._store(outcome):
                         new.append(outcome)
-                elif moved_past(candles, symbol, as_of + h.length, now=now):
-                    self._mark_unlabellable(symbol, h, as_of, version, "MISSING_BAR")
+                elif frontier is not None and frontier >= as_of + h.length:
+                    self._mark_unlabellable(symbol, h, as_of, version, "MISSING_BAR", now)
         return new
 
     def _mark_unlabellable(
-        self, symbol: str, h: Horizon, as_of: datetime, version: str, reason: str
+        self,
+        symbol: str,
+        h: Horizon,
+        as_of: datetime,
+        version: str,
+        reason: str,
+        now: datetime,
     ) -> None:
         """The data has moved past a missing start or end bar: this row will never be
         labelled, so stop asking."""
         with transaction(self._conn):
             self._conn.execute(
                 "INSERT INTO learning_unlabellable (symbol, as_of, horizon, horizon_bars,"
-                " dataset_version, reason, marked_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-                " ON CONFLICT DO NOTHING",
-                (symbol, _ts(as_of), h.timeframe.value, h.bars, version, reason,
+                " dataset_version, reason, decided_at, marked_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                (symbol, _ts(as_of), h.timeframe.value, h.bars, version, reason, _ts(now),
                  _ts(self._clock())),
             )  # fmt: skip
 
-    def unlabellable(self, symbol: str, h: Horizon) -> list[datetime]:
-        """Recorded bars marked as never labellable for this horizon, oldest first."""
+    def unlabellable(self, symbol: str, h: Horizon, *, dataset_version: str) -> list[datetime]:
+        """Recorded bars of one dataset version marked never labellable for this horizon,
+        oldest first."""
         rows = self._conn.execute(
             "SELECT as_of FROM learning_unlabellable WHERE symbol = ? AND horizon = ?"
-            " AND horizon_bars = ? ORDER BY as_of",
-            (symbol, h.timeframe.value, h.bars),
+            " AND horizon_bars = ? AND dataset_version = ? ORDER BY as_of",
+            (symbol, h.timeframe.value, h.bars, dataset_version),
         ).fetchall()
         return [datetime.fromisoformat(r[0]) for r in rows]
 

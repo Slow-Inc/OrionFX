@@ -8,6 +8,7 @@ CREATE TABLE learning_unlabellable (
     horizon_bars    INTEGER NOT NULL CHECK (horizon_bars > 0),
     dataset_version TEXT NOT NULL,
     reason          TEXT NOT NULL,
+    decided_at      TEXT NOT NULL, -- the `now` the mark was judged at (point in time)
     marked_at       TEXT NOT NULL,
     PRIMARY KEY (symbol, as_of, horizon, horizon_bars, dataset_version)
 );

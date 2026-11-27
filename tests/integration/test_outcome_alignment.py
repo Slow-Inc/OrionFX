@@ -97,7 +97,7 @@ def test_a_row_past_a_hole_is_marked_once_and_a_row_not_yet_due_is_left_alone(
     now = T0 + 30 * FIVE
     new = log.label_due(candles, symbol="XAUUSD", horizons=h, now=now)
     assert T0 + 10 * FIVE not in {o.as_of for o in new}  # needs bar 12
-    assert log.unlabellable("XAUUSD", h[0]) == [T0 + 10 * FIVE]
+    assert log.unlabellable("XAUUSD", h[0], dataset_version="v1") == [T0 + 10 * FIVE]
     # a mark is final and stops the re-query: even a late bar does not reopen the row
     _m5_bars_at(candles, 12)
     assert log.label_due(candles, symbol="XAUUSD", horizons=h, now=now) == []
@@ -105,7 +105,7 @@ def test_a_row_past_a_hole_is_marked_once_and_a_row_not_yet_due_is_left_alone(
     log.record(_snapshot(T0 + 28 * FIVE), timeframe=M5, provenance=Provenance.BACKFILL,
                mode=None, dataset_version="v1")  # fmt: skip
     log.label_due(candles, symbol="XAUUSD", horizons=h, now=now + timedelta(days=1))
-    assert log.unlabellable("XAUUSD", h[0]) == [T0 + 10 * FIVE]
+    assert log.unlabellable("XAUUSD", h[0], dataset_version="v1") == [T0 + 10 * FIVE]
 
 
 def test_an_experience_with_an_m15_horizon_off_the_m15_grid_is_labelled(
@@ -123,3 +123,66 @@ def test_an_experience_with_an_m15_horizon_off_the_m15_grid_is_labelled(
                    intent_id=None, direction=Direction.UP, horizon=M15, horizon_bars=1)  # fmt: skip
     (label,) = exp_log.label_due(now=T0 + 20 * FIVE)
     assert label.value == _close(4) - _close(1)
+
+
+def _bar(candles: CandleStore, tf: Timeframe, t: datetime, close: Decimal,
+         available_at: datetime | None = None) -> None:  # fmt: skip
+    size = {M5: FIVE, M15: 3 * FIVE, H1: 12 * FIVE}[tf]
+    candles.save(CandleClosed(symbol="XAUUSD", timeframe=tf, open_time=t, close_time=t + size,
+                              open=close, high=close, low=close, close=close, volume=None,
+                              available_at=available_at or t + size))  # fmt: skip
+
+
+def test_a_missing_m5_end_falls_back_to_a_coarser_timeframe_with_both_bars(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    _m5_bars(candles, 24, skip=frozenset({23}))  # the M5 bar closing at 12:00 is missing
+    _bar(candles, H1, T0 - 12 * FIVE, D(1999))  # closes at 10:00
+    _bar(candles, H1, T0 + 12 * FIVE, D(2077))  # closes at 12:00
+    log = BarLog(conn)
+    log.record(_snapshot(T0), timeframe=M5, provenance=Provenance.BACKFILL, mode=None,
+               dataset_version="v1")  # fmt: skip
+    (o,) = log.label_due(candles, symbol="XAUUSD", horizons=[Horizon(H1, 2)],
+                         now=T0 + timedelta(hours=3))  # fmt: skip
+    assert o.move == D(2077) - D(1999)  # both legs from H1, never M5 start with H1 end
+
+
+def test_a_timeframe_running_ahead_does_not_mark_a_late_bar_lost(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    _m5_bars(candles, 6)  # M5 covers 10:00-10:30 only
+    _bar(candles, H1, T0 + 12 * FIVE, D(2050))  # an H1 bar opening at 11:00 is already in
+    log = BarLog(conn)
+    log.record(_snapshot(T0 + FIVE), timeframe=M5, provenance=Provenance.BACKFILL, mode=None,
+               dataset_version="v1")  # fmt: skip
+    h = Horizon(M15, 2)  # end 10:35: the M5 bar is simply not here yet
+    assert log.label_due(candles, symbol="XAUUSD", horizons=[h], now=T0 + 2 * 12 * FIVE) == []
+    assert log.unlabellable("XAUUSD", h, dataset_version="v1") == []
+
+
+def test_a_bar_not_yet_available_is_neither_used_nor_counted_as_past(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    _m5_bars(candles, 3)
+    late = T0 + 24 * FIVE
+    _bar(candles, M5, T0 + 20 * FIVE, D(1), available_at=late)  # known only at 11:40
+    log = BarLog(conn)
+    log.record(_snapshot(T0 + FIVE), timeframe=M5, provenance=Provenance.BACKFILL, mode=None,
+               dataset_version="v1")  # fmt: skip
+    h = Horizon(M15, 1)  # end 10:20: bar 3 is missing
+    log.label_due(candles, symbol="XAUUSD", horizons=[h], now=late - FIVE)
+    assert log.unlabellable("XAUUSD", h, dataset_version="v1") == []
+    log.label_due(candles, symbol="XAUUSD", horizons=[h], now=late)
+    assert log.unlabellable("XAUUSD", h, dataset_version="v1") == [T0 + FIVE]
+
+
+def test_the_row_is_marked_as_soon_as_a_bar_opens_at_its_end(
+    conn: sqlite3.Connection, candles: CandleStore
+) -> None:
+    _m5_bars(candles, 14, skip=frozenset({12}))  # the newest bar opens exactly at 11:05
+    log = BarLog(conn)
+    log.record(_snapshot(T0 + 10 * FIVE), timeframe=M5, provenance=Provenance.BACKFILL,
+               mode=None, dataset_version="v1")  # fmt: skip
+    h = Horizon(M15, 1)  # end 11:05, which needed bar 12 (11:00-11:05)
+    log.label_due(candles, symbol="XAUUSD", horizons=[h], now=T0 + 20 * FIVE)
+    assert log.unlabellable("XAUUSD", h, dataset_version="v1") == [T0 + 10 * FIVE]
