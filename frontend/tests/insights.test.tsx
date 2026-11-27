@@ -72,7 +72,14 @@ const SETTINGS: Settings = {
       risk_profile: "LOW",
       strategies_enabled: ["trend_following"],
     },
-    llm: { provider: "anthropic", model: "m", api_key_ref: "***", news_handling: "adaptive" },
+    llm: {
+      provider: "anthropic",
+      model: "m",
+      base_url: null,
+      reasoning_effort: null,
+      api_key_ref: "***",
+      news_handling: "adaptive",
+    },
     system: {
       deployment: "local",
       storage: "local",
@@ -177,6 +184,19 @@ describe("Settings", () => {
     const config = (api.saveSettings as ReturnType<typeof vi.fn>).mock
       .calls[0]?.[1] as Settings["config"];
     expect(config.llm.api_key_ref).toBe("env:ANTHROPIC_API_KEY");
+  });
+
+  it("edits the provider base URL and reasoning effort (#100)", async () => {
+    const api = fakeApi();
+    renderIn(<SettingsView />, api);
+    const url = await screen.findByLabelText("Base URL");
+    await userEvent.type(url, "https://opencode.ai/inference/go/openai/v1");
+    await userEvent.type(screen.getByLabelText("Reasoning effort"), "xhigh");
+    await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    const config = (api.saveSettings as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[1] as Settings["config"];
+    expect(config.llm.base_url).toBe("https://opencode.ai/inference/go/openai/v1");
+    expect(config.llm.reasoning_effort).toBe("xhigh");
   });
 
   it("offers Live only as a disabled, explained option", async () => {

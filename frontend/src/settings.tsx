@@ -29,6 +29,8 @@ const PLACED = new Set([
   "trading.strategies_enabled",
   "llm.provider",
   "llm.model",
+  "llm.base_url",
+  "llm.reasoning_effort",
   "llm.api_key_ref",
 ]);
 
@@ -252,6 +254,22 @@ export function SettingsView() {
             <input
               value={draft.llm.model ?? ""}
               onChange={(e) => setLlm({ model: e.target.value || null })}
+            />
+          </Field>
+          <Field label="Base URL" error={errors["llm.base_url"]}>
+            <input
+              type="url"
+              inputMode="url"
+              placeholder="https://…/openai/v1"
+              value={draft.llm.base_url ?? ""}
+              onChange={(e) => setLlm({ base_url: e.target.value.trim() || null })}
+            />
+          </Field>
+          <Field label="Reasoning effort" error={errors["llm.reasoning_effort"]}>
+            <input
+              placeholder="e.g. low, high, max (depends on the model)"
+              value={draft.llm.reasoning_effort ?? ""}
+              onChange={(e) => setLlm({ reasoning_effort: e.target.value.trim() || null })}
             />
           </Field>
           <Field
