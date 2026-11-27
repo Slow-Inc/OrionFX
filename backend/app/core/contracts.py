@@ -430,6 +430,23 @@ class StrategyProposal(ContractModel):
         return self
 
 
+ELIGIBILITY_MODES: dict[Eligibility, frozenset[Mode]] = {
+    Eligibility.DISABLED: frozenset(),
+    Eligibility.SHADOW_ONLY: frozenset({Mode.SHADOW}),
+    Eligibility.DEMO_ELIGIBLE: frozenset({Mode.SHADOW, Mode.DEMO}),
+    Eligibility.LIVE_ELIGIBLE: frozenset({Mode.SHADOW, Mode.DEMO, Mode.LIVE}),
+}
+"""The modes each eligibility tier may approve (§16.4), lowest tier first."""
+
+
+def minimum_eligibility(modes: list[Mode]) -> Eligibility:
+    """The lowest tier that allows every mode in `modes`."""
+    for tier, allowed in ELIGIBILITY_MODES.items():
+        if set(modes) <= allowed:
+            return tier
+    raise ValueError(f"no eligibility tier allows {sorted(modes)}")
+
+
 class EligibilityRecord(ContractModel):
     subject_hash: Sha256Ref
     subject_kind: SubjectKind
@@ -450,12 +467,7 @@ class EligibilityRecord(ContractModel):
             self.eligibility is not Eligibility.DISABLED
         ):
             raise ValueError("a revoked or owner-disabled subject is DISABLED")
-        allowed = {
-            Eligibility.DISABLED: set(),
-            Eligibility.SHADOW_ONLY: {Mode.SHADOW},
-            Eligibility.DEMO_ELIGIBLE: {Mode.SHADOW, Mode.DEMO},
-            Eligibility.LIVE_ELIGIBLE: {Mode.SHADOW, Mode.DEMO, Mode.LIVE},
-        }[self.eligibility]
+        allowed = ELIGIBILITY_MODES[self.eligibility]
         if not modes <= allowed:
             raise ValueError(f"{self.eligibility} does not allow {sorted(modes - allowed)}")
         if self.eligibility is Eligibility.LIVE_ELIGIBLE and not self.evidence_refs:

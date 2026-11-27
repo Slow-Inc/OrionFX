@@ -6,6 +6,45 @@
 
 ---
 
+## M07 slice C: dataset manifests, evidenced promotion, rollback and drift (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/61-m07-lifecycle`)
+
+**Goal:** a controlled path from a trained model to the champion, without training anything and without anything promoting itself (PRD-07 #58, slice #61; LRN-04/05/06, AT-13, AT-16, AT-35).
+
+**Shipped:**
+- `migrations/0009_learning_lifecycle.sql`: datasets, candidates and promotions, all append-only.
+- `backend/app/learning/lifecycle.py`:
+  - `DatasetManifest`: splits must run train → validation → holdout in time order.
+  - `DatasetStore`, which audits every save.
+  - `ModelLifecycle` with:
+    - `propose_candidate(ModelCard)`, which needs at least one dataset;
+    - `promote`, owner only, which needs evidence and a policy, and a separate `x02:live-qualification:` ref for LIVE;
+    - `rollback` over a champion stack, which refuses an expired approval;
+    - `record_drift`.
+  - `psi` and `drift_report`. A feature missing from either window counts as drift.
+- `core.contracts`: `ELIGIBILITY_MODES` and `minimum_eligibility`, so there is one mode ladder.
+
+**Validation:**
+- `uv run pytest`: all pass, including 19 lifecycle tests.
+- 21 mutation probes, all caught.
+
+**Review fixes:**
+- Owner check:
+  - It is an allow-list (`owner`) instead of a deny-list.
+  - It refuses m09, scheduler, owner-bot, "OWNER ".
+- The LIVE gate uses a structured prefix ref, not a substring match.
+- Split order is enforced.
+- Candidates:
+  - They are stored with their datasets.
+  - A model that is registered but was never proposed cannot be promoted.
+- Rollback:
+  - A second rollback does not restore the version just rolled away from.
+  - Rolling back to an expired approval is refused.
+- An unsupported mode raises `LifecycleRefused`.
+- PSI counts with bisect and Counter.
+- `champion()` uses `LIMIT 1`.
+
+---
+
 ## M07 slice B: point-in-time similarity retrieval, semantic memory, RAG context (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/60-m07-memory`)
 
 **Goal:** recall similar past situations without look-ahead, and never present similarity as a win probability (PRD-07 #58, slice #60; LRN-01/02/03, AT-15).
