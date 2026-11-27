@@ -20,7 +20,7 @@ decision) · ⛔ blocked (needs an external resource) · 🔴 **UNTRACKED** (MD-
 | `docs/agents/issue-tracker.md` + `docs/agents/triage-labels.md` + labels | ✅ | — | Done 2026-11-27 via `/setup-matt-pocock-skills` + T4 delta |
 | CI `lint`/`typecheck`/`test` (backend) + local `verify` | ✅ | — | #5 |
 | CI `frontend` job (Bun 1.4.5: lint/typecheck/test/build) | ✅ | — | #79 / PR #80. Local `.claude/t4.json` `verify` still covers only the backend |
-| Dependabot PRs fail the `guards` job (no issue ref / `T4-Gates:` trailer) | 🟡 | Owner review: touches `.github/workflows` (enforcement path) | #93 / PR #94 open, not merged; Dependabot PR #3 (`actions/checkout` v7) waits on it |
+| Dependabot PRs pass the `guards` job (gate-ledger and issue-ref skipped only while Dependabot opened the PR and triggered the run) | ✅ | — | #93 / PR #94 (owner-approved); Dependabot PR #3 (`actions/checkout` v7) merged after it |
 | Upstream defects in vendored hook/guard scripts (see `CLAUDE.md` → Enforcement) | 🔴 | Report to `xenodeve/xeno-skills` | Not patched locally, to keep the scripts in sync with upstream |
 | `.claude/t4.json` `autoMerge: true` (set 2026-11-27 at the developer's request for the AFK batch) | 🟡 | AFK batch end | Set back to `false` when the developer returns, unless they say to keep it |
 | Secret scanning + push protection | 🔴 | GitHub returned 422 "not available for this repository" (private, free plan) | No server-side secret gate exists; rely on `.gitignore` + `/security-review`. Revisit with the plan/visibility |
