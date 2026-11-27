@@ -27,6 +27,19 @@ DEFAULT_TECHNIQUES: tuple[Technique, ...] = (
     *make_price_action().values(),
 )
 
+SUMMARY_CATALOG_IDS = ("CAT-T03-04", "CAT-T03-06", "CAT-T03-07")
+"""Structure, regime and multi-bar direction: the chart summary other modules may read."""
+SUMMARY_KEYS: frozenset[str] = frozenset(
+    {
+        f"{tf}.{t.technique_id}.{key}"
+        for tf in Timeframe
+        for t in DEFAULT_TECHNIQUES
+        if t.catalog_id in SUMMARY_CATALOG_IDS
+        for key in t.outputs
+    }
+    | {"mtf.aligned"}
+)
+
 
 def build_feature_snapshot(
     symbol: str,

@@ -45,3 +45,8 @@ TIMEFRAME_DURATION = {
     Timeframe.M15: timedelta(minutes=15),
     Timeframe.H1: timedelta(hours=1),
 }
+
+
+def live(start: datetime, end: datetime, now: datetime) -> bool:
+    """Known at `now` (no look-ahead) and not yet expired."""
+    return start <= now < end

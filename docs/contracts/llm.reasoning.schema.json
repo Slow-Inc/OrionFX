@@ -43,6 +43,18 @@
     "direction": {
       "$ref": "#/$defs/Direction"
     },
+    "feature_snapshot_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Feature Snapshot Ref"
+    },
     "news_assessment_ids": {
       "items": {
         "type": "string"

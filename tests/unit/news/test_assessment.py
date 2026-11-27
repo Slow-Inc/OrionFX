@@ -252,4 +252,4 @@ def test_prompt_answer_format_matches_the_validator() -> None:
 def test_stances_for_items_it_was_not_given_are_rejected() -> None:
     answer = _answer(item_directions={"n1": "UP", "n2": "UP", "n77": "DOWN"})
     result = assess_news([FED, CPI], FakeProvider([answer, answer]), now=NOW)
-    assert result.assessment is None and "n77" in (result.health.detail or "")
+    assert result.assessment is None and "not given" in (result.health.detail or "")
