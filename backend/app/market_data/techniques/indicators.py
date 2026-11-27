@@ -271,7 +271,11 @@ def observe(
         blockers.append(QualityFlag.GAP_IN_WINDOW)  # no indicator spans missing data
     if technique.needs_volume and last.volume is None:
         blockers.append(QualityFlag.MISSING_INPUT)
-    valid_until = next_slot(session, last.open_time, size) + size  # the next bar replaces it
+    # The next bar replaces this one. Across a scheduled closure it is valid only until
+    # the market reopens: after that, the next bar must close before it counts as fresh
+    # (safety over availability; the reopen is when spreads are widest).
+    reopen = next_slot(session, last.open_time, size)
+    valid_until = reopen + size if reopen == last.close_time else reopen
     if now >= valid_until:
         blockers.append(QualityFlag.STALE)
         # TechniqueObservation needs valid_until > available_at even when stale.

@@ -3,7 +3,7 @@ and at weekends on purpose: a technique window spanning a scheduled closure is s
 contiguous, the first bar after it is not a gap, and the last bar before it stays valid
 until the next expected bar closes. Holes while the market is open remain gaps."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from itertools import pairwise
 
@@ -51,6 +51,29 @@ def test_the_next_expected_bar_skips_scheduled_closures_only() -> None:
     assert S.next_open_slot(WED_JAN.replace(hour=21, minute=55), M5) == WED_JAN.replace(hour=23)
 
 
+def test_a_schedule_off_the_5_minute_grid_is_refused() -> None:
+    with pytest.raises(ValueError, match="5-minute"):
+        SessionSchedule("x", "America/New_York", time(17, 3), time(18, 0))
+
+
+def test_m15_windows_span_the_break_and_dst_weekends() -> None:
+    m15 = timedelta(minutes=15)
+    # the US spring-forward weekend: Sunday 2026-03-08 reopens at 22:00 UTC (18:00 EDT)
+    assert S.next_open_slot(datetime(2026, 3, 6, 21, 45, tzinfo=UTC), m15) == datetime(
+        2026, 3, 8, 22, 0, tzinfo=UTC)  # fmt: skip
+    assert S.next_open_slot(datetime(2026, 10, 30, 20, 45, tzinfo=UTC), m15) == datetime(
+        2026, 11, 1, 23, 0, tzinfo=UTC)  # fall back: 18:00 EST  # fmt: skip
+    t, bars = datetime(2026, 3, 5, 12, tzinfo=UTC), []
+    while len(bars) < 120:
+        c = D(2000) + D(len(bars) % 7)
+        bars.append(CandleClosed(symbol="XAUUSD", timeframe=Timeframe.M15, open_time=t,
+                                 close_time=t + m15, open=c, high=c + 1, low=c - 1, close=c,
+                                 volume=D(5), available_at=t + m15))  # fmt: skip
+        t = S.next_open_slot(t, m15)
+    obs = observe(make_library(atr_n=10)["atr_10"], bars, bars[-1].available_at, session=S)
+    assert "atr" in obs.values
+
+
 def test_a_bad_schedule_is_refused() -> None:
     with pytest.raises(ValueError):
         SessionSchedule("x", "America/New_York", daily_close=S.daily_reopen,
@@ -59,22 +82,21 @@ def test_a_bad_schedule_is_refused() -> None:
         SessionSchedule("x", "Nowhere/Nothing", S.daily_close, S.daily_reopen)
 
 
-def _session_bars(start: datetime, n: int, size: timedelta, *, skip: int | None = None,
-                  flag_first_after_break: bool = False) -> list[CandleClosed]:  # fmt: skip
+def _session_bars(
+    start: datetime, n: int, size: timedelta, *, skip: int | None = None
+) -> list[CandleClosed]:
     """`n` bars on the schedule from `start`, optionally dropping the `skip`-th one."""
     out: list[CandleClosed] = []
     t, i, price = start, 0, 2000.0
     while len(out) < n:
         if i != skip:
-            prev_close = out[-1].close_time if out else None
-            after_break = prev_close is not None and t > prev_close
             price += 0.5 if i % 3 else -0.3
             c = D(str(round(price, 2)))
             out.append(CandleClosed(
                 symbol="XAUUSD", timeframe=Timeframe.H1 if size == H1 else Timeframe.M5,
                 open_time=t, close_time=t + size, open=c, high=c + 1, low=c - 1, close=c,
                 volume=D(10), spread=D("0.2"), available_at=t + size + timedelta(seconds=1),
-                quality_flags=["GAP"] if flag_first_after_break and after_break else [],
+                quality_flags=[],
             ))  # fmt: skip
         i += 1
         t = S.next_open_slot(t, size)
@@ -98,13 +120,14 @@ def test_a_hole_while_the_market_is_open_is_still_a_gap() -> None:
     assert obs.values == {} and "GAP_IN_WINDOW" in obs.quality_flags
 
 
-def test_the_last_bar_before_a_break_stays_valid_until_the_next_bar_closes() -> None:
+def test_the_last_bar_before_a_break_is_valid_only_until_the_market_reopens() -> None:
     bars = _session_bars(datetime(2026, 1, 7, 0, tzinfo=UTC), 22, H1)  # last bar 21:00-22:00 UTC
     assert bars[-1].close_time == WED_JAN.replace(hour=22)
-    reopen_bar_close = WED_JAN.replace(hour=23) + H1
-    obs = observe(make_library(atr_n=5)["atr_5"], bars, WED_JAN.replace(hour=23, minute=30),
-                  session=S)  # fmt: skip
-    assert obs.valid_until == reopen_bar_close and "STALE" not in obs.quality_flags
+    atr = make_library(atr_n=5)["atr_5"]
+    during = observe(atr, bars, WED_JAN.replace(hour=22, minute=30), session=S)
+    assert during.valid_until == WED_JAN.replace(hour=23) and "STALE" not in during.quality_flags
+    after = observe(atr, bars, WED_JAN.replace(hour=23, minute=30), session=S)
+    assert "STALE" in after.quality_flags  # Wednesday's bar is not fresh after the reopen
 
 
 def test_a_snapshot_across_a_weekend_is_ok_with_the_schedule() -> None:
@@ -132,6 +155,8 @@ def test_the_candle_engine_flags_open_market_holes_but_not_scheduled_breaks() ->
     strict.on_tick(_tick(after_break))
     nxt = strict.on_tick(_tick(after_break + M5))
     assert any(c.event.quality_flags == ["GAP"] for c in nxt)
+    first_after = eng.on_tick(_tick(after_break + M5))  # closes the first bar after the break
+    assert first_after and all(c.event.quality_flags == [] for c in first_after)
     open_hole = CandleEngine("XAUUSD", {"XAUUSD": "XAUUSD"}, clock=lambda: later, session=S)
     open_hole.on_tick(_tick(WED_JAN.replace(hour=10)))
     open_hole.on_tick(_tick(WED_JAN.replace(hour=10, minute=31)))

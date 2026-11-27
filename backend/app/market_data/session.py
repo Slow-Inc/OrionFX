@@ -18,6 +18,7 @@ symbol specification and the data (`audit`) before relying on it.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from app.core.contracts import CandleClosed
@@ -44,6 +45,9 @@ class SessionSchedule:
         ZoneInfo(self.tz)  # an unknown zone fails here, not on the first bar
         if not self.daily_close < self.daily_reopen:
             raise ValueError("daily_close must be before daily_reopen on the same day")
+        for t in (self.daily_close, self.daily_reopen):
+            if t.minute % 5 or t.second or t.microsecond:
+                raise ValueError("closures must start and end on 5-minute boundaries")
 
     def is_open(self, t: datetime) -> bool:
         local = t.astimezone(ZoneInfo(self.tz))
@@ -64,6 +68,9 @@ class SessionSchedule:
 
     def next_open_slot(self, open_time: datetime, size: timedelta) -> datetime:
         """The open time of the first bar expected after the bar opening at `open_time`."""
+        return _next_open_slot(self, open_time, size)
+
+    def _search(self, open_time: datetime, size: timedelta) -> datetime:
         t = open_time + size
         limit = open_time + MAX_CLOSED
         while not self.expects(t, size):
@@ -71,6 +78,12 @@ class SessionSchedule:
             if t > limit:
                 raise ValueError(f"{self.schedule_id}: no open slot within {MAX_CLOSED}")
         return t
+
+
+@lru_cache(maxsize=65536)
+def _next_open_slot(schedule: SessionSchedule, open_time: datetime, size: timedelta) -> datetime:
+    """Memoised: every technique asks the same question for every pair in its window."""
+    return schedule._search(open_time, size)
 
 
 XAUUSD_NY_1700 = SessionSchedule(
