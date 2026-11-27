@@ -181,6 +181,8 @@ def evaluate(intent: TradeIntent, ctx: RiskContext) -> RiskDecision:
     else:
         if not quote_fresh(quote, ctx.now, ctx.policy):
             reasons.append("QUOTE_STALE")  # too old, or from the future (clock skew)
+        if quote.bid <= 0 or quote.ask < quote.bid:
+            reasons.append("QUOTE_INVALID")  # crossed or non-positive: never price off it
         if quote.ask - quote.bid > ctx.policy.max_spread:
             reasons.append("SPREAD_TOO_WIDE")
 

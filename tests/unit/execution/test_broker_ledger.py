@@ -2,6 +2,7 @@
 
 import sqlite3
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -9,7 +10,14 @@ from pathlib import Path
 import pytest
 
 from app.core.enums import ExecutionState, Side
-from app.execution.broker import BOT_MAGIC, CloseRequest, MarginMode, OpenRequest, SendStatus
+from app.execution.broker import (
+    BOT_MAGIC,
+    CloseRequest,
+    Deal,
+    MarginMode,
+    OpenRequest,
+    SendStatus,
+)
 from app.execution.executor import DispatchBlocked, Executor
 from app.execution.fake_broker import FakeBroker, Outcome, Partial
 from app.execution.ledger import ExecutionLedger
@@ -310,6 +318,27 @@ def test_unknown_cancel_reconciles_from_pending_orders(
 
 def test_reconcile_reports_volume_weighted_price(broker: FakeBroker, ex: Executor) -> None:
     broker.script(Outcome.TIMEOUT_FILLED)
+    ex.open(_open("req-1", volume="0.02"))
+    (u,) = ex.reconcile()
+    assert u.fill_price == D("2000.20")
+
+
+class UnpricedDealBroker(FakeBroker):
+    """Reports one more deal of the request without a price, as a terminal may."""
+
+    def find_by_request(self, request_id: str) -> list[Deal]:
+        deals = super().find_by_request(request_id)
+        if not deals:
+            return deals
+        return [*deals, replace(deals[0], deal_id="deal-unpriced", price=None)]
+
+
+def test_reconcile_vwap_divides_by_the_priced_volume_only(conn: sqlite3.Connection) -> None:
+    """#121 (b): an unpriced deal must not dilute the VWAP towards zero."""
+    b = UnpricedDealBroker(balance=D("1000"), now=T0)
+    b.set_quote("XAUUSD", bid=D("2000.00"), ask=D("2000.20"))
+    ex = Executor(conn, b, clock=Clock())
+    b.script(Outcome.TIMEOUT_FILLED)
     ex.open(_open("req-1", volume="0.02"))
     (u,) = ex.reconcile()
     assert u.fill_price == D("2000.20")

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.contracts import RiskUpdated
 from app.execution.broker import AccountInfo, MarginMode
 from app.risk.drawdown import DrawdownTracker, dd_percent
 from app.risk.policy import DEFAULT_POLICY
@@ -143,3 +144,43 @@ def test_approve_recovery_is_audited(conn: sqlite3.Connection) -> None:
     t.approve_recovery(D("790"), actor="owner")
     actions = [r[0] for r in conn.execute("SELECT action FROM audit_log")]
     assert "risk.approve_recovery" in actions
+
+
+def _observe(t: DrawdownTracker, equity: str, cash_flow: str = "0") -> RiskUpdated:
+    return t.observe(D(equity), cash_flow=D(cash_flow), owner_max_dd=MAX_DD, policy=DEFAULT_POLICY)
+
+
+def test_a_large_withdrawal_at_a_small_dd_keeps_the_dd(conn: sqlite3.Connection) -> None:
+    """B2: peak 1000, equity 950 (5%), withdraw 900 -> equity 50. The additive rule
+    moved the peak to 100 (50% DD, a permanent lifetime breach); scaling keeps 5%."""
+    t = _tracker(conn)
+    _observe(t, "1000")
+    _observe(t, "950")
+    upd = _observe(t, "50", "-900")
+    nine = D("1e-9")  # the scaled peak 1000 x 50 / 950 is not exact in 28 digits
+    assert upd.epoch_dd_percent.quantize(nine) == upd.lifetime_dd_percent.quantize(nine) == 5
+    assert not upd.risk_locked
+
+
+def test_a_deposit_does_not_hide_the_dd(conn: sqlite3.Connection) -> None:
+    t = _tracker(conn)
+    _observe(t, "1000")
+    _observe(t, "900")  # 10%
+    upd = _observe(t, "1800", "900")  # doubled the account: the 10% is still there
+    assert upd.epoch_dd_percent == D("10") and upd.lifetime_dd_percent == D("10")
+
+
+def test_a_trading_loss_after_a_withdrawal_still_breaches(conn: sqlite3.Connection) -> None:
+    t = _tracker(conn)
+    _observe(t, "1000")
+    _observe(t, "500", "-500")  # peak 500, no DD
+    upd = _observe(t, "390")  # -22% from 500
+    assert upd.risk_locked and "EPOCH_DD_BREACH" in upd.reason_codes
+
+
+def test_a_full_withdrawal_still_fails_closed(conn: sqlite3.Connection) -> None:
+    """Equity <= 0 handling is [TBD] in master plan section 4.3: it stays locked."""
+    t = _tracker(conn)
+    _observe(t, "1000")
+    upd = _observe(t, "0", "-1000")
+    assert upd.risk_locked and "LIFETIME_DD_BREACH" in upd.reason_codes

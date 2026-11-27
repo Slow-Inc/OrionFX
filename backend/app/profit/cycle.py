@@ -226,7 +226,7 @@ class CycleBook:
         return s.as_event()
 
     def begin_closing(self, cycle_id: str, reason: CloseReason) -> CycleUpdated:
-        """Latch CLOSING for a non-profit reason (emergency stop, DD breach, finish)."""
+        """Latch CLOSING for a non-profit reason (emergency stop, DD breach, finish, AI exit)."""
         with transaction(self._conn):
             s = self.snapshot(cycle_id)
             if s.state is CycleState.ACTIVE:

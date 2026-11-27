@@ -135,6 +135,8 @@ class CloseReason(StrEnum):
     RISK_LIMIT = "RISK_LIMIT"
     FINISH_CYCLE = "FINISH_CYCLE"
     MANUAL_RECONCILED = "MANUAL_RECONCILED"
+    AI_EXIT = "AI_EXIT"
+    """An allowed CLOSE_ALL from M05 ended the cycle before its target (§4.2)."""
 
 
 class DataQuality(StrEnum):

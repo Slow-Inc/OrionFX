@@ -44,14 +44,20 @@ from app.core.enums import (
     Verdict,
 )
 from app.core.events import make_event
-from app.engine.engine import Engine, LeaseLost
+from app.engine.engine import FINISH_FLAG, Engine, LeaseLost
 from app.execution.broker import BOT_MAGIC
-from app.execution.fake_broker import FakeBroker, Outcome
+from app.execution.fake_broker import FakeBroker, Outcome, Partial
 from app.execution.ledger import ExecutionLedger
 from app.execution.ownership import OwnershipRegistry
 from app.profit.cycle import CycleBook
 from app.risk.drawdown import DrawdownTracker
-from app.storage.flags import REQUIRES_RECONCILE, get_bool_flag, set_bool_flag, set_flag
+from app.storage.flags import (
+    REQUIRES_RECONCILE,
+    get_bool_flag,
+    get_flag,
+    set_bool_flag,
+    set_flag,
+)
 from app.storage.journal import Journal, payload_as
 from app.storage.lease import LeaseStore
 
@@ -578,14 +584,20 @@ def test_dd_lock_during_emergency_close_still_completes_the_command(
 # --- code-review findings: exits, poison events, cash flow, finish --------------------------
 
 
-def _two_positions(conn: sqlite3.Connection, broker: FakeBroker, clock: Clock) -> Engine:
-    eng = _running(conn, broker, clock)
-    _intent(conn, clock)
+def _two_positions(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock, lot: str = "0.01"
+) -> Engine:
+    eng = _running(conn, broker, clock, initial_lot=D(lot))
+    _intent(conn, clock, lot=lot)
     eng.tick()
-    _intent(conn, clock, action=IntentAction.ADD)
+    _intent(conn, clock, action=IntentAction.ADD, lot=lot)
     eng.tick()
     assert len(_bot_positions(broker)) == 2
     return eng
+
+
+def _bot_volume(broker: FakeBroker) -> Decimal:
+    return sum((p.volume for p in broker.positions() if p.magic == BOT_MAGIC), D(0))
 
 
 def test_close_one_of_two_positions_closes_just_that_one(
@@ -606,8 +618,7 @@ def test_partial_close_over_several_refs_never_exceeds_the_approved_lot(
     refs = _bot_positions(broker)
     _intent(conn, clock, action=IntentAction.CLOSE, lot="0.01", side=None, refs=refs)
     eng.tick()
-    left = [p for p in broker.positions() if p.magic == BOT_MAGIC]
-    assert sum(p.volume for p in left) == D("0.01")
+    assert _bot_volume(broker) == D("0.01")
 
 
 def test_close_with_nothing_to_close_is_denied(
@@ -926,3 +937,76 @@ def test_with_no_cycle_open_leftovers_of_a_closed_cycle_can_still_be_closed(
     eng.tick()
     assert _decision(conn, iid).verdict is Verdict.ALLOW
     assert _bot_positions(broker) == []
+
+
+# --- #121 review findings: AI exit ends the cycle, close budget, finish under a DD lock ----------
+
+
+def test_an_ai_exit_closes_the_cycle_so_the_cooldown_and_a_new_cycle_follow(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """B1: a CLOSE_ALL from M05 that empties the basket at a loss ends the cycle. Before,
+    the empty cycle stayed ACTIVE: no CLOSED event (so M05 saw no cooldown), and the
+    next entry joined the old cycle and carried its loss."""
+    eng = _running(conn, broker, clock)
+    book = CycleBook(conn, account=broker.account())
+    first = book.open_cycle_id()
+    _intent(conn, clock)
+    eng.tick()
+    _price(broker, "1998.00")  # -$2: no target, no trailing floor
+    eng.tick()
+    _intent(conn, clock, action=IntentAction.CLOSE_ALL, lot=None, side=None)
+    eng.tick()
+    assert _bot_positions(broker) == []
+    snap = book.snapshot(first or "")
+    assert snap.state is CycleState.CLOSED and snap.close_reason is CloseReason.AI_EXIT
+    assert snap.final_net_usd == D("-2.00")
+    closed = Journal(conn).find("cycle.updated", "state", CycleState.CLOSED.value)
+    assert closed is not None and closed.envelope.cycle_id == first  # M05's cooldown source
+    assert closed.envelope.occurred_at == clock()
+    second = book.open_cycle_id()
+    assert second is not None and second != first  # RUNNING: the next cycle is a fresh one
+
+
+def test_a_rejected_close_does_not_use_up_the_close_budget(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#121 (c): the budget shrinks by what filled, not by what was asked."""
+    eng = _two_positions(conn, broker, clock, "0.01")
+    refs = _bot_positions(broker)
+    broker.script(Outcome.REJECT)
+    _intent(conn, clock, action=IntentAction.CLOSE, lot="0.01", side=None, refs=refs)
+    eng.tick()
+    assert _bot_volume(broker) == D("0.01")  # the second ref closed the approved 0.01
+
+
+def test_a_partial_close_fill_leaves_the_rest_of_the_budget(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#121 (c): a half-filled close leaves half the approved lot for the next ref."""
+    eng = _two_positions(conn, broker, clock, "0.02")
+    refs = _bot_positions(broker)
+    broker.script(Partial(D("0.5")))
+    _intent(conn, clock, action=IntentAction.CLOSE, lot="0.02", side=None, refs=refs)
+    eng.tick()
+    assert _bot_volume(broker) == D("0.02")  # 0.01 + 0.01 closed: never more than 0.02
+
+
+def test_finish_cycle_is_answered_when_a_dd_lock_ends_the_cycle(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """#121 (d) / MAJ-06.3: a DD breach during FINISHING still answers FINISH_CYCLE."""
+    eng = _running(conn, broker, clock)
+    _intent(conn, clock)
+    eng.tick()
+    cid = _command(conn, ControlCommand.FINISH_CYCLE)
+    eng.tick()
+    assert eng.control.state is ControlState.FINISHING
+    broker.add_manual_position("XAUUSD", Side.BUY, D("1.00"))
+    _price(broker, "1997.50")  # manual -$250: 25% DD > 20%
+    eng.tick()
+    assert eng.control.state is ControlState.RISK_LOCKED
+    done = _completed(conn, cid)
+    assert done.status is CommandStatus.COMPLETED
+    assert done.resulting_state is ControlState.RISK_LOCKED and done.risk_locked
+    assert get_flag(conn, FINISH_FLAG) in (None, "")

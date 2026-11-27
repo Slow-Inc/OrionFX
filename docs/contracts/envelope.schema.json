@@ -421,7 +421,8 @@
         "EMERGENCY_STOP",
         "RISK_LIMIT",
         "FINISH_CYCLE",
-        "MANUAL_RECONCILED"
+        "MANUAL_RECONCILED",
+        "AI_EXIT"
       ],
       "title": "CloseReason",
       "type": "string"

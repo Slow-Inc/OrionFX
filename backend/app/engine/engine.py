@@ -432,6 +432,7 @@ class Engine:
         if (command_id := self._pending_finish()) is not None and state in (
             _S.FINISHING,
             _S.CLOSING,
+            _S.RISK_LOCKED,  # a DD breach ended the cycle while finishing (#121)
         ):
             self._announce(cfg, command_id, CommandStatus.COMPLETED)
             self._set_pending_finish(None)
@@ -578,6 +579,10 @@ class Engine:
         )  # fmt: skip
         if decision.verdict is not Verdict.ALLOW:
             return False
+        if intent.action is IntentAction.CLOSE_ALL and cycle_id is not None:
+            # The AI exits the cycle: latch CLOSING first, so the close workflow finishes
+            # what this exit leaves and the cycle ends CLOSED (cooldown, next cycle).
+            self._book.begin_closing(cycle_id, CloseReason.AI_EXIT)
         for update in self._execute(intent, decision, cycle_id):
             self._emit("execution.updated", update, cfg, cycle_id=cycle_id)
         return True
@@ -641,7 +646,7 @@ class Engine:
                 )
             updates.append(update)
             if budget is not None:
-                budget -= volume
+                budget -= update.filled_lot or Decimal(0)  # a rejected close used none of it
             if self._ledger.has_unresolved():
                 break  # an unknown outcome blocks every further write until reconciled
         return updates
