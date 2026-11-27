@@ -1,0 +1,51 @@
+# OpenCode review: an advisory AI code review on every pull request.
+#
+# Calls the third-party reusable workflow from dceoy/opencode-action, pinned by
+# full commit SHA. It posts one COMMENT review authored by `opencode-agent[bot]`
+# and never approves, requests changes, merges or pushes. The review is advisory
+# evidence only; it does not replace the T4 gates (see CLAUDE.md -> Enforcement).
+#
+# - Trigger is `pull_request`, never `pull_request_target`, so fork PRs get no
+#   secrets and a read-only token. The called job also skips drafts, bot PRs and
+#   authors outside OWNER/MEMBER/COLLABORATOR, and a skipped job is not a review.
+# - Auth: the default OIDC exchange for an OpenCode GitHub App token
+#   (`id-token: write`). The App (github.com/apps/opencode-agent) must be
+#   installed on this repo, or publishing the review fails closed.
+# - Model: the free default `opencode/deepseek-v4.1-flash-free` (no secret).
+#   To switch to OpenCode Go, add the `OPENCODE_API_KEY` repo secret, then set
+#   `model: opencode-go/<model>` under `with:` and pass
+#   `secrets: { OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }} }`.
+# - Runtime v1, because only v1 accepts plain-text review focus; review-only mode
+#   ignores repo config, so this prompt is the only steering it gets.
+name: OpenCode review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: opencode-review-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  review:
+    # Exactly what the called job declares; it fails at startup if any is missing.
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+      actions: read
+    uses: dceoy/opencode-action/.github/workflows/opencode-review.yml@cda16d479232f0998a3046425dc43747f1c4c66e  # v1.1.0
+    with:
+      runtime: v1
+      prompt: >-
+        Review against this repo's rules: AI only proposes and risk/execution
+        stays independent of AI; never real money, real credentials or real
+        account data; no LLM sends broker orders; never touch Manual Positions;
+        no claims of guaranteed profit or exact-price Emergency SL/Stop fills.
+        Money and prices use Decimal, never float; datetimes are timezone-aware
+        UTC. Data access is point-in-time with no look-ahead. Tests must exercise
+        behaviour, not mirror the implementation.
