@@ -10,6 +10,7 @@ master plan §15.5, §16.4; UST-01, UST-08; AT-28).
 """
 
 import sqlite3
+from datetime import datetime
 
 from app.core.contracts import EligibilityRecord, StrategyManifest, SubjectKind
 from app.core.time import Clock, utc_now
@@ -124,6 +125,17 @@ class ArtifactRegistry:
                 action="registry.eligibility",
                 detail=f"{kind} {record.subject_ref} -> {record.eligibility}",
             )
+
+    def eligibility_at(self, kind: SubjectKind, ref: str, at: datetime) -> EligibilityRecord | None:
+        """The record that was current at `at` (point-in-time, for replay): the newest
+        one recorded no later than `at`. Expiry is the caller's `approves(mode, at)`."""
+        subject_id, version = split_ref(ref)
+        row = self._conn.execute(
+            "SELECT record FROM registry_eligibility WHERE kind = ? AND subject_id = ?"
+            " AND version = ? AND recorded_at <= ? ORDER BY id DESC LIMIT 1",
+            (kind, subject_id, version, at.isoformat()),
+        ).fetchone()
+        return None if row is None else EligibilityRecord.model_validate_json(row[0])
 
     def eligibility(self, kind: SubjectKind, ref: str) -> EligibilityRecord | None:
         """The current record: the newest one, unless it has expired (then None)."""

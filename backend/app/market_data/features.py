@@ -29,12 +29,17 @@ DEFAULT_TECHNIQUES: tuple[Technique, ...] = (
 )
 
 
+def _key(tf: Timeframe, technique_id: str, output: str) -> str:
+    """The snapshot key format: the contract between M02 and every consumer."""
+    return f"{tf}.{technique_id}.{output}"
+
+
 def feature_key(tf: Timeframe, catalog_id: str, output: str) -> str:
     """The snapshot key of one output of the default technique for a catalog row, so
     consumers name features by catalog id, not by technique-id spelling."""
     for t in DEFAULT_TECHNIQUES:
         if t.catalog_id == catalog_id and output in t.outputs:
-            return f"{tf}.{t.technique_id}.{output}"
+            return _key(tf, t.technique_id, output)
     raise KeyError(f"no default technique for {catalog_id} with output {output!r}")
 
 
@@ -42,7 +47,7 @@ SUMMARY_CATALOG_IDS = ("CAT-T03-04", "CAT-T03-06", "CAT-T03-07")
 """Structure, regime and multi-bar direction: the chart summary other modules may read."""
 SUMMARY_KEYS: frozenset[str] = frozenset(
     {
-        f"{tf}.{t.technique_id}.{key}"
+        _key(tf, t.technique_id, key)
         for tf in Timeframe
         for t in DEFAULT_TECHNIQUES
         if t.catalog_id in SUMMARY_CATALOG_IDS
@@ -92,7 +97,7 @@ def build_feature_snapshot(
             obs = observe(tech, bars, now) if bars else None
             got = {} if obs is None else obs.values
             for key in tech.outputs:
-                values[f"{tf}.{tech.technique_id}.{key}"] = got.get(key)
+                values[_key(tf, tech.technique_id, key)] = got.get(key)
             if tech.catalog_id == "CAT-T03-07":
                 directions.append(got.get("direction"))
             if obs is None:

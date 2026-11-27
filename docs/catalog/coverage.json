@@ -102,7 +102,7 @@
       "backend/app/decision/gate.py"
     ],
     "test_ids": [
-      "tests/unit/decision/test_strategies.py::test_hybrid_needs_two_strategies_to_agree",
+      "tests/unit/decision/test_strategies.py::test_hybrid_needs_two_allowed_strategies_to_agree",
       "tests/unit/decision/test_strategies.py::test_only_enabled_and_approved_strategies_pass"
     ],
     "note": "Rule logic tested on synthetic snapshots; thresholds PROPOSED; no performance claim (X02 walk-forward pending)."

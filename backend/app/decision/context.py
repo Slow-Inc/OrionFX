@@ -21,6 +21,8 @@ class DecisionContext:
     price: Decimal | None
     spread: Decimal | None
     initial_lot: Decimal
+    allowed: frozenset[str] = frozenset()
+    """Strategy ids that passed the gate; composites vote only with these."""
 
     def value(self, key: str) -> Decimal | None:
         return self.snapshot.values.get(key)

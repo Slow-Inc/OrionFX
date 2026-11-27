@@ -1,12 +1,17 @@
 """Which strategies may propose now (#52; DEC-03, UST-06, UST-08; AT-32).
 
-A strategy passes only if the owner enabled it, its newest registry eligibility
-record approves the current mode and has not expired at `now`, and the feature
-snapshot is usable (M02's rule). Every refusal is reported with its reason.
+A strategy passes only if:
+- the owner listed it in `strategies_enabled` (the config toggle) AND the
+  registry record is user-enabled: both consents must hold, deliberately;
+- the record current at `now` (point-in-time) approves the mode at `now`;
+- that record approves this exact code: its hash equals the strategy's hash;
+- the feature snapshot is usable (M02's rule).
+Every refusal is reported with its reason. `with_allowed` hands the decision
+loop a context that tells composite strategies which members passed.
 """
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from app.core.contracts import StrategyManifest, StrategyProposal
@@ -27,6 +32,9 @@ class GateResult:
     allowed: list[Strategy]
     refused: dict[str, str] = field(default_factory=dict)
 
+    def with_allowed(self, ctx: DecisionContext) -> DecisionContext:
+        return replace(ctx, allowed=frozenset(s.manifest.strategy_id for s in self.allowed))
+
 
 def eligible(
     strategies: Iterable[Strategy],
@@ -44,12 +52,13 @@ def eligible(
         if m.strategy_id not in on:
             refused[m.strategy_id] = "not enabled by the owner"
             continue
-        record = registry.eligibility("strategy", subject_ref(m.strategy_id, m.version))
-        expired = (
-            record is not None and record.expires_at is not None and record.expires_at <= ctx.now
-        )
-        if record is None or expired or ctx.mode not in record.approved_modes:
+        ref = subject_ref(m.strategy_id, m.version)
+        record = registry.eligibility_at("strategy", ref, ctx.now)
+        if record is None or not record.approves(ctx.mode, ctx.now):
             refused[m.strategy_id] = f"not approved for {ctx.mode}"
+            continue
+        if record.subject_hash != m.artifact_hash:
+            refused[m.strategy_id] = "approval is for different code (hash changed)"
             continue
         if problem is not None:
             refused[m.strategy_id] = problem

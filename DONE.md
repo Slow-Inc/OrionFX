@@ -6,6 +6,20 @@
 
 ---
 
+## M05 slice A — strategy port, registry gate, MVP rule strategies (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/52-m05-strategies`)
+
+**Goal:** only owner-enabled, registry-approved strategies propose, as documented deterministic rules (PRD-05 #51, slice #52; DEC-03, UST-01/06/08, AT-28, AT-32).
+
+**Shipped:** `backend/app/decision/{context,strategies,gate}.py`; `feature_key` + single `_key` format in M02 features; `EligibilityRecord.approves(mode, now)` (now shared by gate and M04 engine); `ArtifactRegistry.eligibility_at` (point-in-time); `StrategyProposal.decision_id` optional until adopted. Catalog CAT-S01-01..06 → tested (rule logic on synthetic snapshots, thresholds PROPOSED, no performance claim); CAT-S01-07 → blocked (needs trained model).
+
+**Validation:** `uv run pytest` → all pass. 18 mutation probes; 17 caught, 1 equivalent (`user_enabled` term in `approves`: the validator already forces disabled records to approve no modes).
+
+**Review fixes:** hybrid votes only with members the gate allowed (was a consent bypass); gate refuses an approval whose hash differs from the running code, and each strategy's hash covers only its own rule + thresholds (newline-normalised); eligibility judged point-in-time at `ctx.now`; range no longer buys a breakdown or sells a breakout; breakout needs only the level being tested; pullback DOWN tested; per-strategy gate test.
+
+**Skipped:** dropping the config `strategies_enabled` toggle in favour of only the record's `user_enabled` (both consents are required deliberately; documented in the gate).
+
+---
+
 ## M04 slice B — adaptive ensemble (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/47-m04-ensemble`)
 
 **Goal:** combine forecasts by evidence without double counting (PRD-04 #45, slice #47; PRE-03/04, AT-17).

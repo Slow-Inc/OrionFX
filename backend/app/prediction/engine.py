@@ -103,7 +103,7 @@ def load_model(
         built, built.card.model_copy(update={"artifact_hash": manifest.artifact_hash})
     )
     record = registry.eligibility("model", predictor.card.ref)
-    if record is None or (record.expires_at is not None and record.expires_at <= now):
+    if record is None or not record.approves(mode, now):
         raise Refused(f"{predictor.card.ref} is not approved for {mode} at {now.isoformat()}")
     return LoadedPredictor(predictor, mode, _GATE)
 

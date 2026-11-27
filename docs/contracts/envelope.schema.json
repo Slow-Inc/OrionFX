@@ -3343,8 +3343,15 @@
           "title": "Cost Estimate Usd"
         },
         "decision_id": {
-          "title": "Decision Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Decision Id"
         },
         "direction": {
           "$ref": "#/$defs/Direction"

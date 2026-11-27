@@ -85,6 +85,8 @@ def test_breakout_fires_beyond_a_level_outside_a_range() -> None:
 def test_pullback_enters_with_the_trend_after_a_counter_move() -> None:
     assert _side("pullback", _ctx(**{k(M5, "CAT-T01-04", "rsi"): D(35)})) is Direction.UP
     assert _side("pullback", _ctx()) is None  # no pullback (RSI 55)
+    down = {k(H1, "CAT-T03-07", "direction"): D(-1), k(M5, "CAT-T01-04", "rsi"): D(65)}
+    assert _side("pullback", _ctx(**down)) is Direction.DOWN
 
 
 def test_range_fades_the_edges_only_in_a_range_regime() -> None:
@@ -93,6 +95,8 @@ def test_range_fades_the_edges_only_in_a_range_regime() -> None:
     assert _side("range", _ctx(price="2009.5", **ranging)) is Direction.DOWN
     assert _side("range", _ctx(price="2000", **ranging)) is None
     assert _side("range", _ctx(price="1990.5")) is None  # trending, not a range
+    assert _side("range", _ctx(price="1975", **ranging)) is None  # breakdown, not support
+    assert _side("range", _ctx(price="2025", **ranging)) is None  # breakout, not resistance
 
 
 def test_scalping_needs_aligned_fast_timeframes_and_a_tight_spread() -> None:
@@ -102,17 +106,25 @@ def test_scalping_needs_aligned_fast_timeframes_and_a_tight_spread() -> None:
     assert _side("scalping", _ctx(**{k(M5, "CAT-T03-07", "direction"): D(-1)})) is None
 
 
-def test_hybrid_needs_two_strategies_to_agree() -> None:
-    assert _side("hybrid", _ctx()) is Direction.UP  # trend following + scalping agree
+ALL = frozenset(s for s in STRATEGIES if s != "hybrid")
+
+
+def test_hybrid_needs_two_allowed_strategies_to_agree() -> None:
+    assert _side("hybrid", replace(_ctx(), allowed=ALL)) is Direction.UP  # trend + scalping
     weak = {k(H1, "CAT-T01-07", "adx"): D(10), k(M5, "CAT-T03-07", "direction"): D(-1)}
-    assert _side("hybrid", _ctx(**weak)) is None
+    assert _side("hybrid", replace(_ctx(**weak), allowed=ALL)) is None
+
+
+def test_hybrid_ignores_members_the_gate_did_not_allow() -> None:
+    assert _side("hybrid", _ctx()) is None  # nothing allowed: no votes
+    assert _side("hybrid", replace(_ctx(), allowed=frozenset({"trend_following"}))) is None
 
 
 def test_missing_feature_means_no_proposal() -> None:
     assert _side("trend_following", _ctx(**{k(H1, "CAT-T01-07", "adx"): None})) is None
-    assert _side("breakout", _ctx(**{k(M15, "CAT-T03-03", "resistance"): None}, price="2012")) is (
-        None
-    )
+    no_resistance = {k(M15, "CAT-T03-03", "resistance"): None}
+    assert _side("breakout", _ctx(price="2012", **no_resistance)) is None  # nothing to break
+    assert _side("breakout", _ctx(price="1980", **no_resistance)) is Direction.DOWN
 
 
 def test_proposals_are_typed_sized_with_the_initial_lot_and_cite_their_features() -> None:
@@ -134,7 +146,7 @@ def test_every_mvp_rule_strategy_maps_to_its_catalog_row() -> None:
 def registry(tmp_path: Path) -> Iterator[ArtifactRegistry]:
     c = connect(tmp_path / "gate.db")
     migrate(c)
-    reg = ArtifactRegistry(c)
+    reg = ArtifactRegistry(c, clock=lambda: T0 - timedelta(hours=1))
     for s in STRATEGIES.values():
         reg.register("strategy", s.manifest, actor="m07")
     yield reg
@@ -185,3 +197,36 @@ def test_approval_for_another_mode_does_not_count(registry: ArtifactRegistry) ->
     _approve(registry, "trend_following", [Mode.SHADOW], eligibility=Eligibility.SHADOW_ONLY)
     result = eligible(STRATEGIES.values(), _ctx(), enabled=["trend_following"], registry=registry)
     assert result.refused["trend_following"] == "not approved for DEMO"
+
+
+@pytest.mark.parametrize("sid", sorted(STRATEGIES))
+def test_each_strategy_passes_the_gate_only_when_enabled_and_approved(
+    registry: ArtifactRegistry, sid: str
+) -> None:
+    assert eligible(STRATEGIES.values(), _ctx(), enabled=[sid], registry=registry).allowed == []
+    _approve(registry, sid, [Mode.DEMO])
+    result = eligible(STRATEGIES.values(), _ctx(), enabled=[sid], registry=registry)
+    assert [s.manifest.strategy_id for s in result.allowed] == [sid]
+
+
+def test_an_approval_for_other_code_is_refused(registry: ArtifactRegistry) -> None:
+    _approve(registry, "trend_following", [Mode.DEMO])
+    changed = replace(
+        STRATEGIES["trend_following"],
+        manifest=STRATEGIES["trend_following"].manifest.model_copy(
+            update={"artifact_hash": "sha256:" + "f" * 64}
+        ),
+    )
+    result = eligible([changed], _ctx(), enabled=["trend_following"], registry=registry)
+    assert "hash" in result.refused["trend_following"]
+
+
+def test_an_approval_recorded_after_now_does_not_count(tmp_path: Path) -> None:
+    c = connect(tmp_path / "late.db")
+    migrate(c)
+    reg = ArtifactRegistry(c, clock=lambda: T0 + timedelta(days=30))  # recorded in the future
+    reg.register("strategy", STRATEGIES["trend_following"].manifest, actor="m07")
+    _approve(reg, "trend_following", [Mode.DEMO])
+    result = eligible(STRATEGIES.values(), _ctx(), enabled=["trend_following"], registry=reg)
+    assert result.refused["trend_following"] == "not approved for DEMO"
+    c.close()
