@@ -32,7 +32,7 @@ from app.core.enums import Direction, ForecastLineage, Mode
 from app.core.ids import new_id
 from app.core.time import TIMEFRAME_DURATION
 from app.market_data.features import snapshot_problem
-from app.prediction.card import ModelCard, Predictor
+from app.prediction.card import ModelCard, Predictor, unique_leader
 from app.storage.artifacts import ArtifactLoader, UntrustedArtifact
 from app.storage.registry import ArtifactRegistry
 
@@ -126,11 +126,10 @@ def _leader(card: ModelCard, scores: Mapping[Direction, Decimal]) -> tuple[Direc
         isinstance(s, Decimal) and s.is_finite() and 0 <= s <= 1 for s in scores.values()
     ):
         raise Refused(f"{card.ref} returned scores that are not finite Decimals in 0..1")
-    top = max(scores.values())
-    leaders = [d for d, s in scores.items() if s == top]
-    if len(leaders) > 1:
+    leader = unique_leader(scores)
+    if leader is None:
         raise Refused(f"{card.ref} gave no signal: tied scores")
-    return leaders[0], top
+    return leader
 
 
 def predict(

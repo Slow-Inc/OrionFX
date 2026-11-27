@@ -6,6 +6,20 @@
 
 ---
 
+## M04 slice B — adaptive ensemble (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/47-m04-ensemble`)
+
+**Goal:** combine forecasts by evidence without double counting (PRD-04 #45, slice #47; PRE-03/04, AT-17).
+
+**Shipped:** `backend/app/prediction/ensemble.py` (`ensemble`, `EnsembleResult`, `WiringError`); `ModelCard.skill`, shared `unique_leader`. Catalog CAT-A01-03 → implemented (synthetic members only).
+
+**Validation:** `uv run pytest` → all pass (13 ensemble tests, written first). 15 mutation probes caught.
+
+**Review fixes:** mismatched prediction/card pairs refused; models on the same inputs are one vote (max weight, not sum); latest repeat wins regardless of order; horizon is a parameter (other horizons skipped, not fatal); semantics state the horizon; metric names owned by the card.
+
+**Skipped:** a shared `conftest.py` card factory (two small fixtures differ on purpose).
+
+---
+
 ## M04 slice A — predictor port, model cards, approval-gated loading, baseline (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/46-m04-predictor`)
 
 **Goal:** inference that runs only reviewed models on usable inputs and never mislabels a score (PRD-04 #45, slice #46; PRE-02/04, AT-16, AT-17). No training.

@@ -1791,7 +1791,15 @@
     "phase": "MVP",
     "catalog_class": "R",
     "dependency": "Chronological training and calibration; market risk only",
-    "coverage_state": "planned"
+    "coverage_state": "implemented",
+    "implementation_refs": [
+      "backend/app/prediction/ensemble.py"
+    ],
+    "test_ids": [
+      "tests/unit/prediction/test_ensemble.py::test_models_reading_the_same_inputs_are_one_vote",
+      "tests/unit/prediction/test_ensemble.py::test_members_are_weighted_by_skill_over_the_baseline"
+    ],
+    "note": "Implemented and unit-tested on synthetic members only; not 'tested' until trained models exist (#48)."
   },
   {
     "catalog_id": "CAT-A01-04",
