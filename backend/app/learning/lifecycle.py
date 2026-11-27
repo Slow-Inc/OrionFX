@@ -26,6 +26,7 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
 import bisect
 import sqlite3
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -145,11 +146,15 @@ class ModelLifecycle:
         datasets: DatasetStore,
         *,
         clock: Clock = utc_now,
+        live_verifier: Callable[[str], bool] | None = None,
     ) -> None:
+        """`live_verifier` (X02's `EvidenceStore.verify_live_qualification`) checks that a
+        Live qualification ref was really issued under the current readiness policy."""
         self._conn = conn
         self.registry = registry
         self.datasets = datasets
         self._clock = clock
+        self._live_verifier = live_verifier
 
     # --- candidates ------------------------------------------------------------------------
 
@@ -273,6 +278,10 @@ class ModelLifecycle:
                 LIVE_EVIDENCE_PREFIX
             ):
                 raise LifecycleRefused(f"live approval needs a {LIVE_EVIDENCE_PREFIX} ref")
+            if self._live_verifier is not None and not self._live_verifier(live_qualification_ref):
+                raise LifecycleRefused(
+                    f"{live_qualification_ref} was not issued by X02 under the current policy"
+                )
             evidence.append(live_qualification_ref)
         record = EligibilityRecord(
             subject_hash=manifest.artifact_hash, subject_kind="model",
