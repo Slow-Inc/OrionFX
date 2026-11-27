@@ -217,6 +217,7 @@ class Engine:
                 mode=Mode(cfg.trading.account_mode),
                 cycle_id=cycle_id,
                 causation_id=causation,
+                occurred_at=self._clock(),
             )
         )
 
@@ -472,16 +473,27 @@ class Engine:
             return bot
         return [p for p in bot if p.position_id in intent.position_refs]
 
-    def _engine_reasons(self, intent: TradeIntent) -> list[str]:
-        """Checks only the engine can make: cycle, reconcile state, exit targets."""
+    def _engine_reasons(self, intent: TradeIntent, cfg: UserConfig) -> list[str]:
+        """Checks only the engine can make: mode, cycle, basket, reconcile state, exit
+        targets. An entry (OPEN/ADD) is refused in Shadow (no broker order, master plan
+        §13), when it names no cycle or another cycle, when an OPEN would start a second
+        basket, or when an ADD is on the other side of the bot's basket."""
         if intent.action in EXITS:
             return [] if self._exit_targets(intent) else ["NOTHING_TO_CLOSE"]
         reasons = []
+        if Mode(cfg.trading.account_mode) is Mode.SHADOW:
+            reasons.append("SHADOW_NO_ORDER")
         cycle_id = self._book.open_cycle_id()
         if cycle_id is None or self._book.snapshot(cycle_id).state is not CycleState.ACTIVE:
             reasons.append("CYCLE_NOT_ACTIVE")
-        elif intent.cycle_id is not None and intent.cycle_id != cycle_id:
+        elif intent.cycle_id != cycle_id:
             reasons.append("CYCLE_MISMATCH")
+        held = self._owners.bot_positions(self._broker.account(), self._broker.positions())
+        held = [p for p in held if p.symbol == intent.symbol]
+        if intent.action is IntentAction.OPEN and held:
+            reasons.append("POSITION_OPEN")
+        if intent.action is IntentAction.ADD and any(p.side != intent.side for p in held):
+            reasons.append("SIDE_MISMATCH")
         if get_bool_flag(self._conn, REQUIRES_RECONCILE):
             reasons.append("RECONCILE_REQUIRED")
         return reasons
@@ -537,7 +549,7 @@ class Engine:
                 self._fail_intent(intent, cfg, "interrupted before dispatch; not retried")
             return False
         decision = evaluate(intent, self._context(intent, cfg))
-        if extra := self._engine_reasons(intent):
+        if extra := self._engine_reasons(intent, cfg):
             decision = decision.model_copy(
                 update={
                     "verdict": Verdict.DENY,

@@ -816,3 +816,56 @@ def test_no_positions_snapshot_from_a_disconnected_terminal(
     clock.advance(120)
     eng.tick()
     assert Journal(conn).recent(["positions.snapshot"], limit=1)[0].seq == before
+
+
+# --- #84 scrutiny: entries M06 refuses on its own, whatever M05 sends ------------------
+
+
+def test_shadow_never_sends_an_entry_to_the_broker(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _running(conn, broker, clock, account_mode="SHADOW")
+    iid = _intent(conn, clock, mode=Mode.SHADOW)
+    eng.tick()
+    assert "SHADOW_NO_ORDER" in _decision(conn, iid).reason_codes
+    assert _bot_positions(broker) == []
+
+
+def test_an_entry_naming_no_cycle_or_another_cycle_is_refused(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _running(conn, broker, clock)
+    unnamed = _intent(conn, clock, cycle_id=None)
+    other = _intent(conn, clock, cycle_id="cycle-elsewhere")
+    eng.tick()
+    for iid in (unnamed, other):
+        assert "CYCLE_MISMATCH" in _decision(conn, iid).reason_codes
+    assert _bot_positions(broker) == []
+
+
+def test_a_second_open_or_an_add_on_the_other_side_is_refused(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    eng = _running(conn, broker, clock)
+    _intent(conn, clock)  # OPEN BUY
+    eng.tick()
+    assert len(_bot_positions(broker)) == 1
+    clock.advance(1)
+    again = _intent(conn, clock)
+    hedge = _intent(conn, clock, action=IntentAction.ADD, side=Side.SELL)
+    eng.tick()
+    assert "POSITION_OPEN" in _decision(conn, again).reason_codes
+    assert "SIDE_MISMATCH" in _decision(conn, hedge).reason_codes
+    assert len(_bot_positions(broker)) == 1
+
+
+def test_m06_events_carry_the_engine_clock(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    from app.storage.journal import Journal
+
+    eng = _running(conn, broker, clock)
+    iid = _intent(conn, clock)
+    eng.tick()
+    found = Journal(conn).find("risk.decision", "intent_id", iid)
+    assert found is not None and found.envelope.occurred_at == broker.now

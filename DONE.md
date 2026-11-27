@@ -6,6 +6,43 @@
 
 ---
 
+## X01 follow-up C: runtime decision loop, plus the M06 entry guards it exposed (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/84-decision-loop`)
+
+**Goal:** one tick runs M02 → evidence → M05 → journal → M06 → M07, never calls the broker, and decides nothing it cannot trust (PRD-X01b #81, slice #84; DEC-01, LRN-02, AT-14, AT-15).
+
+**Shipped: `app.runtime.loop.DecisionLoop.tick()`**
+- **Inputs:**
+  - bars available at `now` for every configured timeframe; a missing one makes the snapshot MISSING;
+  - price and spread from a fresh live quote (an injected provider), not the bar;
+  - evidence from an injected provider.
+- **M06 state, read from the journal:**
+  - the open cycle, plus the last close, so the cooldown survives the next cycle opening;
+  - the bot's positions from a fresh `positions.snapshot` that is newer than M06's last risk decision, in the open cycle, on one side;
+  - intents M06 has not decided yet, in one bounded query (`Journal.unanswered`).
+- **The decision:** `decide`, or `manage` when the bot holds a basket. The M07 experience is recorded *before* the intent is published, then due outcomes are labelled.
+- **Fails closed:** any input not known gives no decision and health DEGRADED. A CLOSING cycle gets no decision. A fault gives DOWN with a 60 s backoff, and the fault report itself can't escape the tick.
+- **Health:** journaled when it changes, plus a heartbeat every 60 s.
+
+**M06 fixes found by scrutiny (pre-existing, made reachable by the loop):**
+- Shadow no longer sends entries to the broker (`SHADOW_NO_ORDER`), per master plan "Shadow on live market (no broker order)".
+- An entry that names no cycle or another cycle is refused (`CYCLE_MISMATCH`).
+- A second OPEN is refused (`POSITION_OPEN`), and so is an ADD on the other side of the basket (`SIDE_MISMATCH`).
+- M06 events are stamped with the engine clock, not the wall clock, so replay and cooldown are consistent.
+- One `SNAPSHOT_STALE_AFTER` rule is now shared by the API and the loop.
+
+**Validation:**
+- Backend verify green.
+- Mutation probes: all caught, after six tests were strengthened.
+
+**Not done (ledger):**
+- Running the loop in `serve` with real providers is blocked on #17, #41 and #48.
+- Exit intents ignore `cycle_id`.
+- Replay reads the latest state, not state as-of `now`.
+- `Decision` doesn't carry direction and horizon.
+- No `intent_id` index.
+
+---
+
 ## X01 follow-up B: reasoning availability, judged point-in-time (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/83-reasoning-available-at`)
 
 **Goal:** no look-ahead through LLM output (PRD-X01b #81, slice #83; AT-15).

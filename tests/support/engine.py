@@ -98,8 +98,12 @@ def _intent(
     symbol: str = "XAUUSD",
     mode: Mode = Mode.DEMO,
     refs: list[str] | None = None,
+    cycle_id: str | None = "current",
 ) -> str:
+    """A trade intent as M05 writes it; it names the open cycle unless told otherwise."""
     global _n
+    if cycle_id == "current":
+        cycle_id = _open_cycle(conn)
     _n += 1
     iid = f"intent-{_n}"
     Journal(conn).append(
@@ -114,7 +118,7 @@ def _intent(
                 symbol=symbol,
                 requested_lot=None if lot is None else D(lot),
                 strategy_id=strategy,
-                cycle_id=None,
+                cycle_id=cycle_id,
                 mode=mode,
                 expected_value_usd=None,
                 prediction_ids=[],
@@ -127,6 +131,13 @@ def _intent(
         )
     )
     return iid
+
+
+def _open_cycle(conn: sqlite3.Connection) -> str | None:
+    latest = Journal(conn).recent(["cycle.updated"], limit=1)
+    if not latest or payload_as(latest[0], CycleUpdated).state is CycleState.CLOSED:
+        return None
+    return latest[0].envelope.cycle_id
 
 
 def _completed(conn: sqlite3.Connection, command_id: str) -> ControlCompleted:
@@ -155,8 +166,10 @@ def _closed_cycle(conn: sqlite3.Connection) -> CycleUpdated:
     raise AssertionError("no CLOSED cycle.updated")
 
 
-def _running(conn: sqlite3.Connection, broker: FakeBroker, clock: Clock) -> Engine:
-    _configure(conn)
+def _running(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock, **trading: object
+) -> Engine:
+    _configure(conn, **trading)
     eng = _engine(conn, broker, clock)
     assert eng.start()
     cid = _command(conn, ControlCommand.START)

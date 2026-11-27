@@ -5,7 +5,7 @@ derives the expected set from the master plan table and compares.
 """
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -296,6 +296,11 @@ class BotPosition(ContractModel):
     commission: Money
     swap: Money
     cycle_id: str | None
+
+
+SNAPSHOT_STALE_AFTER = timedelta(seconds=60)
+"""An account or positions snapshot older than this no longer describes the account
+(M06 publishes one at least every 30 s while connected)."""
 
 
 class PositionsSnapshot(ContractModel):
