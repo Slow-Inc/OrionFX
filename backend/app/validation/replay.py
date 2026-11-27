@@ -27,7 +27,7 @@ from app.core.enums import DecisionAction, Mode, Side, Timeframe
 from app.core.time import TIMEFRAME_DURATION
 from app.decision.context import DecisionContext
 from app.decision.decide import decide
-from app.decision.fusion import Costs, CycleView, Evidence, usable_proposals
+from app.decision.fusion import Costs, CycleView, Evidence
 from app.decision.gate import Strategy, eligible
 from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot
 from app.market_data.store import CandleStore
@@ -198,10 +198,10 @@ def replay(
         if d.created.action is DecisionAction.ENTER and intent is not None:
             if intent.side is None or intent.requested_lot is None:
                 raise ValueError("an ENTER intent must carry side and lot")
-            chosen = usable_proposals(proposals, now)[0]  # the one `decide` chose
             entry = _fill(bar, intent.side, opening=True, cost=cost)
+            hold_for = TIMEFRAME_DURATION[d.horizon or bar.timeframe]  # ENTER always has one
             open_ = _Open(d.created.decision_id, intent.side, intent.requested_lot, now, entry,
-                          bar.close_time + TIMEFRAME_DURATION[chosen.horizon])  # fmt: skip
+                          bar.close_time + hold_for)  # fmt: skip
     if open_ is not None and driving:  # the window ended first: close at the last bar
         trades.append(_settle(open_, driving[-1], cost, forced=True))
     nets = [t.net_usd for t in trades]

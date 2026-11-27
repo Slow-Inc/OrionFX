@@ -211,12 +211,17 @@ def test_the_trace_captures_every_input_field() -> None:
         assert {f.name for f in fields(source)} == set(trace.model_fields), source
 
 
-def test_a_managed_decision_leans_to_the_held_side() -> None:
-    """#90: manage acts on the basket: ADD, WAIT and EXIT all lean to the held side."""
+def test_a_managed_decision_bets_on_the_held_side_and_an_exit_against_it() -> None:
+    """#90: what M07 scores. ADD/WAIT lean to the held basket; an EXIT bets against it;
+    a horizon is never borrowed from a proposal on the other side."""
     down = Direction.DOWN
     exit_ = _manage([_proposal(direction=down)],
                     Evidence(forecast=_forecast(direction=down), news=[_news(down)]))  # fmt: skip
-    waiting = _manage([])
-    for d in (exit_, waiting, _manage()):
-        assert d.direction is Direction.UP
-    assert _manage().horizon is Timeframe.H1 and waiting.horizon is None
+    hold = _manage([_proposal(direction=down)])
+    add = _manage()
+    assert exit_.created.action is DecisionAction.EXIT and exit_.direction is down
+    assert exit_.horizon is Timeframe.H1  # the DOWN proposal's horizon
+    assert hold.created.reason_codes == ["HOLD"] and hold.direction is Direction.UP
+    assert hold.horizon is None  # only a DOWN proposal: no UP horizon to borrow
+    assert add.created.action is DecisionAction.ADD and add.direction is Direction.UP
+    assert add.horizon is Timeframe.H1

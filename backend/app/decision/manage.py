@@ -68,14 +68,14 @@ def manage(
     policy_version: str,
 ) -> Decision:
     inp = gather(ctx, proposals, evidence, cycle=cycle, costs=costs, symbol=symbol,
-                 policy_version=policy_version)  # fmt: skip
+                 policy_version=policy_version, held=held.side)  # fmt: skip
     extra: list[object] = [held.side, held.positions, held.position_refs]
 
-    held_dir = direction_of(held.side)  # every managed decision leans to the basket
+    held_dir = direction_of(held.side)
 
     def waiting(reason: WaitReason, **more: object) -> Decision:
         return wait(ctx, cycle, inp, reason, symbol=symbol, policy_version=policy_version,
-                    extra_basis=extra, leaning=held_dir, **more)  # type: ignore[arg-type]  # fmt: skip
+                    extra_basis=extra, **more)  # type: ignore[arg-type]  # fmt: skip
 
     fresh = snapshot_live(ctx)
     support, against = inp.tally(held_dir, with_chart=fresh)
@@ -85,7 +85,7 @@ def manage(
         return build(ctx, cycle, inp, action=DecisionAction.EXIT,
                      reasons=["EVIDENCE_REVERSED", f"VOTES_{against}_AGAINST_{support}"],
                      symbol=symbol, policy_version=policy_version, extra_basis=extra,
-                     leaning=held_dir, order=Order(IntentAction.CLOSE_ALL, None, None,
+                     order=Order(IntentAction.CLOSE_ALL, None, None,
                                  held.position_refs))  # fmt: skip
     if not fresh:
         return waiting(WaitReason.STALE_INPUT)
@@ -117,6 +117,6 @@ def manage(
     return build(ctx, cycle, inp, action=DecisionAction.ADD,
                  reasons=[opportunity, f"VOTES_{support}_AGAINST_{against}"], symbol=symbol,
                  policy_version=policy_version, ev=ev, confidence=confidence,
-                 extra_basis=extra, leaning=held_dir,
+                 extra_basis=extra,
                  order=Order(IntentAction.ADD, held.side, ctx.initial_lot,
                              held.position_refs))  # fmt: skip

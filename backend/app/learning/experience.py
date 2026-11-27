@@ -62,7 +62,7 @@ class Experience(ContractModel):
     action: DecisionAction
     strategy_id: str | None
     direction: Direction | None
-    """The side the decision leaned to (held side for EXIT), if any."""
+    """The side the decision bet on (against the held side for an EXIT), if any."""
     cycle_id: str | None
     intent_id: str | None
     mode: Mode

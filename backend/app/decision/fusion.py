@@ -104,9 +104,10 @@ class Decision:
     mode: Mode
     cycle_id: str | None
     direction: Direction | None = None
-    """The side it leaned to: the chosen proposal's, or the held basket's when managing."""
+    """The side it bet on: the agreed chart side when entering, the held side when
+    holding or adding, against the held side for an EXIT; None when it leaned nowhere."""
     horizon: Timeframe | None = None
-    """The chosen proposal's horizon, if one was chosen."""
+    """The horizon of a usable proposal on that side, if any."""
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,9 @@ class Inputs:
     """Evidence votes, without the chart."""
     evidence_refs: list[str]
     basis: list[object]
+    leaning: Direction | None = None
+    """The side a decision leans to before its action: the held basket's when managing,
+    else the side the chart proposals agree on (None when they conflict or are absent)."""
 
     def tally(self, direction: Direction, *, with_chart: bool = True) -> tuple[int, int]:
         """(support, against) for `direction`."""
@@ -204,6 +208,7 @@ def gather(
     costs: Costs | None,
     symbol: str,
     policy_version: str,
+    held: Side | None = None,
 ) -> Inputs:
     usable = usable_proposals(proposals, ctx.now)
     directions = {p.direction for p in usable}
@@ -214,14 +219,16 @@ def gather(
     cost_basis = None if costs is None else [costs.contract_size, costs.commission_per_lot]
     basis: list[object] = [evidence_refs, cycle.cycle_id, ctx.mode, symbol, policy_version,
                            ctx.initial_lot, ctx.spread, cost_basis]  # fmt: skip
+    chart = next(iter(directions)) if len(directions) == 1 else None
     return Inputs(
         usable=usable,
         chosen=usable[0] if usable else None,
-        chart=next(iter(directions)) if len(directions) == 1 else None,
+        chart=chart,
         forecast=forecast,
         votes=votes,
         evidence_refs=evidence_refs,
         basis=basis,
+        leaning=direction_of(held) if held else chart,
     )
 
 
@@ -272,7 +279,6 @@ def build(
     confidence: Confidence | None = None,
     order: Order | None = None,
     extra_basis: list[object] | None = None,
-    leaning: Direction | None = None,
 ) -> Decision:
     decision_id = stable_id("dec", action, reasons, inp.basis, extra_basis or [])
     chosen = inp.chosen
@@ -295,8 +301,13 @@ def build(
             prediction_ids=[inp.forecast.prediction_id] if inp.forecast else [],
             position_refs=order.position_refs, valid_until=min(bounds),
         )  # fmt: skip
-    direction = leaning if leaning is not None else (chosen.direction if chosen else None)
-    horizon = chosen.horizon if chosen else None
+    # what M07 scores: an EXIT bets against the held side; the horizon is that of a
+    # proposal on the same side, if any (never an opposing proposal's)
+    direction = inp.leaning
+    if action is DecisionAction.EXIT and direction is not None:
+        direction = Direction.DOWN if direction is Direction.UP else Direction.UP
+    same_side = [p for p in inp.usable if p.direction is direction]
+    horizon = same_side[0].horizon if direction is not None and same_side else None
     return Decision(created, intent, ctx.now, ctx.mode, cycle.cycle_id, direction, horizon)
 
 
@@ -311,11 +322,10 @@ def wait(
     ev: Decimal | None = None,
     confidence: Confidence | None = None,
     extra_basis: list[object] | None = None,
-    leaning: Direction | None = None,
 ) -> Decision:
     return build(ctx, cycle, inp, action=DecisionAction.WAIT, reasons=[reason], symbol=symbol,
                  policy_version=policy_version, ev=ev, confidence=confidence,
-                 extra_basis=extra_basis, leaning=leaning)  # fmt: skip
+                 extra_basis=extra_basis)  # fmt: skip
 
 
 def to_events(d: Decision, *, account_id: str, bot_id: str) -> list[EventEnvelope]:
