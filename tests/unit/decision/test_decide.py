@@ -397,3 +397,15 @@ def test_the_proposal_whose_horizon_matches_the_forecast_is_chosen() -> None:
     d = _decide([m15, _proposal("trend_following")])
     assert d.created.action is DecisionAction.ENTER
     assert d.created.strategy_id == "trend_following"
+
+
+def test_without_a_horizon_match_the_first_proposal_is_priced() -> None:
+    m15 = _proposal("breakout").model_copy(update={"horizon": Timeframe.M15})
+    d = _decide([m15], Evidence(forecast=_forecast()))
+    assert d.created.strategy_id == "breakout"  # usable[0]; EV then needs the match
+
+
+def test_conflicting_proposals_credit_the_one_agreeing_with_the_forecast() -> None:
+    up, down = _proposal("trend_following"), _proposal("breakout", Direction.DOWN)
+    d = _decide([down, up], Evidence(forecast=_forecast()))
+    assert d.created.action is DecisionAction.WAIT and d.created.strategy_id == "trend_following"

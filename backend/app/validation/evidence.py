@@ -247,7 +247,7 @@ class EvidenceStore:
         return Readiness(Verdict.READY, [], self._issue(policy.version, run_refs, subjects))
 
     def _issue(self, policy_version: str, run_refs: list[str], subjects: list[str]) -> str:
-        qid = content_hash(policy_version, sorted(run_refs))
+        qid = content_hash(policy_version, sorted(run_refs), subjects)  # binds what it qualifies
         body = ValidationQualification(policy_version=policy_version, run_refs=sorted(run_refs),
                                        subject_refs=subjects).model_dump_json()  # fmt: skip
         with transaction(self._conn):

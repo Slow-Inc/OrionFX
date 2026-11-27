@@ -104,7 +104,7 @@ class ArtifactLoader:
         the record current at `at` and its expiry at `at` (point-in-time, for replay);
         without it, the current record."""
         ref = subject_ref(subject_id, version)
-        if at is None:
+        if at is None:  # legacy: mode only, expiry by the registry clock (no production caller)
             record = self._registry.eligibility(kind, ref)
             approved = record is not None and mode in record.approved_modes
         else:
