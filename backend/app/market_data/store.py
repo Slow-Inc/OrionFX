@@ -9,22 +9,16 @@ version is the way to correct data.
 """
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime
 
 from app.core.contracts import CandleClosed
 from app.core.enums import Timeframe
+from app.core.time import utc_iso
 from app.storage.db import transaction
 
 
 class CandleConflict(ValueError):
     pass
-
-
-def _ts(t: datetime) -> str:
-    """UTC ISO text sorts in time order; every stored and queried time is UTC."""
-    if t.tzinfo is None:
-        raise ValueError("naive datetime: pass an aware UTC time")
-    return t.astimezone(UTC).isoformat()
 
 
 class CandleStore:
@@ -34,7 +28,7 @@ class CandleStore:
 
     def key(self, bar: CandleClosed) -> tuple[str, str, str, str]:
         """A bar's identity: the store's primary key and the candle event id."""
-        return (self.dataset_version, bar.symbol, bar.timeframe.value, _ts(bar.open_time))
+        return (self.dataset_version, bar.symbol, bar.timeframe.value, utc_iso(bar.open_time))
 
     def event_id(self, bar: CandleClosed) -> str:
         return "candle:" + ":".join(self.key(bar))
@@ -46,7 +40,7 @@ class CandleStore:
             cur = self.conn.execute(
                 "INSERT INTO candles (dataset_version, symbol, timeframe, open_time,"
                 " available_at, body) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                (*key, _ts(bar.available_at), body),
+                (*key, utc_iso(bar.available_at), body),
             )
             if cur.rowcount == 1:
                 return
@@ -77,8 +71,8 @@ class CandleStore:
                 self.dataset_version,
                 symbol,
                 timeframe.value,
-                _ts(as_of),
-                "" if after is None else _ts(after),
+                utc_iso(as_of),
+                "" if after is None else utc_iso(after),
                 -1 if limit is None else limit,
             ),
         ).fetchall()
@@ -90,7 +84,7 @@ class CandleStore:
         row = self.conn.execute(
             "SELECT open_time FROM candles WHERE dataset_version = ? AND symbol = ?"
             " AND timeframe = ? AND available_at <= ? ORDER BY available_at DESC LIMIT 1",
-            (self.dataset_version, symbol, timeframe.value, _ts(as_of)),
+            (self.dataset_version, symbol, timeframe.value, utc_iso(as_of)),
         ).fetchone()
         return None if row is None else datetime.fromisoformat(row[0])
 
@@ -101,6 +95,6 @@ class CandleStore:
         row = self.conn.execute(
             "SELECT body FROM candles WHERE dataset_version = ? AND symbol = ?"
             " AND timeframe = ? AND open_time = ? AND available_at <= ?",
-            (self.dataset_version, symbol, timeframe.value, _ts(open_time), _ts(as_of)),
+            (self.dataset_version, symbol, timeframe.value, utc_iso(open_time), utc_iso(as_of)),
         ).fetchone()
         return None if row is None else CandleClosed.model_validate_json(row[0])
