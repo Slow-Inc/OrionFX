@@ -55,12 +55,13 @@ class AlwaysUp:
     """A test strategy: always proposes UP on M15. Not a real rule."""
 
     manifest: StrategyManifest = MANIFEST
+    horizon: Timeframe = M15
 
     def propose(self, ctx: DecisionContext) -> StrategyProposal | None:
         return StrategyProposal(
             proposal_id=new_id("prop"), strategy_id="always_up", strategy_version="1",
             technique_refs=[], composition_id=None, decision_id=None, direction=Direction.UP,
-            action=IntentAction.OPEN, horizon=M15, expected_value_usd=None,
+            action=IntentAction.OPEN, horizon=self.horizon, expected_value_usd=None,
             cost_estimate_usd=None, requested_lot=ctx.initial_lot,
             valid_until=ctx.snapshot.valid_until, rationale="test", constraints=[],
         )  # fmt: skip
@@ -93,11 +94,11 @@ def _store(conn: sqlite3.Connection, bars: list[CandleClosed]) -> CandleStore:
     return store
 
 
-def _calibrated(now: datetime) -> Evidence:
+def _calibrated(now: datetime, horizon: Timeframe = M15) -> Evidence:
     return Evidence(forecast=PredictionGenerated(
         prediction_id=f"pred-{now.isoformat()}", model_id="m", model_version="1",
-        lineage=ForecastLineage.CHART_ONLY, horizon=M15, horizon_bars=1, direction=Direction.UP,
-        probability=Confidence(value=D("0.8"), semantics="calibrated P(up) 1 M15 bar",
+        lineage=ForecastLineage.CHART_ONLY, horizon=horizon, horizon_bars=1, direction=Direction.UP,
+        probability=Confidence(value=D("0.8"), semantics="calibrated P(up) over 1 bar",
                                calibrated=True),
         data_quality=DataQuality.OK, input_refs=[], generated_at=now,
         valid_until=now + timedelta(minutes=15),
@@ -147,7 +148,8 @@ def test_entries_are_simulated_with_every_cost_against_the_trade(
 def test_one_position_at_a_time_then_a_cooldown(
     conn: sqlite3.Connection, registry: ArtifactRegistry
 ) -> None:
-    result = _run(conn, registry, TREND, evidence=_calibrated)
+    result = _run(conn, registry, TREND, strategies=[AlwaysUp(horizon=H1)],
+                  evidence=lambda now: _calibrated(now, H1))  # fmt: skip
     reasons = [d.reason_codes[0] for d in result.decisions if d.action is DecisionAction.WAIT]
     assert "POSITION_OPEN" in reasons and "COOLDOWN" in reasons
     for a, b in zip(result.trades, result.trades[1:], strict=False):
@@ -197,3 +199,39 @@ def test_scenarios_have_their_shape() -> None:
     assert ranges[-1] > 10 * ranges[len(ranges) // 2]
     assert all(b.spread == D("1.50") for b in generate(Scenario.WIDE_SPREAD, start=T0, bars=5))
     assert all(b.available_at > b.close_time for b in spike)  # known only after the close
+
+
+def test_a_trade_exits_at_its_horizon_bar_not_one_later(
+    conn: sqlite3.Connection, registry: ArtifactRegistry
+) -> None:
+    result = _run(conn, registry, TREND, evidence=_calibrated)
+    t = result.trades[0]
+    assert t.exit_time - t.entry_time == timedelta(minutes=15)  # the next M15 bar
+    assert not t.forced_exit
+
+
+def test_a_position_open_at_the_end_is_closed_and_counted(
+    conn: sqlite3.Connection, registry: ArtifactRegistry
+) -> None:
+    h1 = {"strategies": [AlwaysUp(horizon=H1)], "evidence": lambda now: _calibrated(now, H1)}
+    first = _run(conn, registry, TREND, **h1).trades[0]
+    # end the window two bars after that entry, long before its 1-hour horizon
+    entry_open = first.entry_time - timedelta(minutes=15, seconds=1)
+    cut = _run(conn, registry, [], end=entry_open + timedelta(minutes=30), **h1)
+    last = cut.trades[-1]
+    assert last.decision_id == first.decision_id and last.forced_exit
+    assert last.exit_time == first.entry_time + timedelta(minutes=15)  # the last bar
+    assert cut.metrics["expectancy"].n == len(cut.trades)
+
+
+def test_the_last_bar_of_the_window_is_replayed(
+    conn: sqlite3.Connection, registry: ArtifactRegistry
+) -> None:
+    result = _run(conn, registry, TREND, end=TREND[-1].open_time + timedelta(minutes=15))
+    assert result.steps == len(TREND)
+
+
+def test_negative_costs_are_refused() -> None:
+    with pytest.raises(ValueError):
+        CostModel(contract_size=D(100), commission_per_lot=D(0), slippage=D("-0.1"),
+                  default_spread=D("0.2"))  # fmt: skip

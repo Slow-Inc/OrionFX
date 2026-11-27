@@ -6,6 +6,36 @@
 
 ---
 
+## X02 slice B: point-in-time replay harness, cost model and AT-25 scenarios (2026-11-27, /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/67-x02-replay`)
+
+**Goal:** replay history exactly as the bot would have seen it, through the real M02/M05 code, with every cost stated (PRD-X02 #65, slice #67; VAL-02, VAL-03, AT-15, AT-25).
+
+**Shipped:**
+- `backend/app/validation/replay.py`: `replay`, `CostModel` (explicit, non-negative costs), `SimTrade` (with `forced_exit`), `ReplayResult`, which includes the metrics, a no-trade baseline, per-step bar availability and the list of simplifications.
+- `backend/app/validation/scenarios.py`: seeded AT-25 generators (strong trend, range, false breakout, reversal, news spike, wide spread).
+
+**Behaviour:** with no calibrated forecast, every decision is WAIT and the result equals the no-trade baseline. That is intended.
+
+**Validation:**
+- `uv run pytest`: all pass, including 11 replay/scenario tests.
+- 11 mutation probes, all caught.
+
+**Review fixes:**
+- Trades exit at their horizon bar. Before, they were held one bar too long because of the `available_at` offset.
+- A position still open when the window ends is closed at the last bar, flagged, and counted.
+- The last bar of the window is replayed.
+- Lot and horizon come from the intent and from the proposal `decide` chose.
+- Removed a fill clamp that never fired; non-negative costs give the same guarantee.
+- History is loaded once per timeframe and sliced by `available_at` with bisect.
+- The lookback is the slowest technique's own.
+- Not simulating M05 `manage` while a position is held is now stated in the simplifications.
+
+**Skipped:**
+- Reusing `FakeBroker` accounting for replay fills. Replay settles per bar rather than per deal, and the rounding difference is at most a cent per trade. This is noted as a known divergence.
+- Incremental technique computation for multi-year replays.
+
+---
+
 ## X02 slice A: validation metrics and chronological walk-forward splits (2026-11-27, /to-prd + /tdd + /simplify + /code-review + /scrutinize, security-review n-a, branch `feat/66-x02-metrics`)
 
 **Goal:** measure models and strategies honestly, with sample sizes, and split time without leakage (PRD-X02 #65, slice #66; VAL-02, VAL-04).
