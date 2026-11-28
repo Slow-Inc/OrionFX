@@ -10,8 +10,8 @@ metadata:
 The owner decided on 2026-11-28. Their words: "ถ้าฟรีและแจกแบบ public แสดงว่าสามารถนำมาใช้ได้เพราะส่วนมากก็ไม่ค่อยมี license ระบุไว้อยู่แล้ว อย่าระวังเกินไป"
 
 Free, publicly distributed historical market data may be used to train and backtest this personal bot.
-- **Dukascopy XAUUSD** is the primary corpus: spot, bid/ask and spread, deep history.
-- **HistData** is the fallback.
+- **HistData XAUUSD M1** is the bulk corpus. Its timestamps are America/New_York WITH DST (verified 2026-11-28).
+- **Dukascopy** is throttled (about 20 s per request), so use it for spread measurement and gap fill only.
 - **MT5 demo history** (#17) is the parity check before Shadow.
 - **FirstRate GC** no longer needs to be purchased.
 
