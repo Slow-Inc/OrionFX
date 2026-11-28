@@ -52,6 +52,8 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
       - run: sh .githooks/check-tree-budget
+      - name: hook tests (OpenCode merge gate, #149)
+        run: bash tests/hooks/test-orionfx-opencode-merge-gate.sh
       - name: check-gate-ledger
         if: env.DEPENDABOT_ONLY != 'true'  # env values are strings
         run: sh .githooks/check-gate-ledger

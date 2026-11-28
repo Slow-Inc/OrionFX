@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# OrionFX merge gate: the OpenCode review at the PR head SHA (issue #149).
+#
+# REPO-LOCAL, NOT VENDORED. Every t4-* file in this folder is a copy of xeno-skills;
+# this one is OrionFX's own and is edited here. Upstream design: xenodeve/xeno-skills#441.
+#
+# PreToolUse on `gh pr merge`. Active only when .claude/t4.json has
+# "requireOpenCodeReview": true. It blocks (exit 2, reason on stderr) unless:
+#   1. normal pass: a review by "opencodeBotLogin" exists whose commit_id is the PR
+#      head SHA, and every review thread opened by one of those reviews is RESOLVED
+#      (rule chosen: resolved, not "has a reply" -- reply with the reason, then resolve);
+#   2. risk paths: if a changed file (or a rename's old path) matches "riskPaths",
+#      a trusted comment also carries  <!-- t4:independent-review head=<sha> -->
+#      plus a written summary of the findings;
+#   3. fallback: with no OpenCode review at the head SHA, a trusted comment carries
+#      <!-- t4:opencode-fallback head=<sha> reason="..." -->  AND the independent-review
+#      record above is present at the same SHA.
+#   4. round cap: when it blocks and OpenCode has reviewed more than "opencodeMaxRounds"
+#      (default 5) distinct commits on the PR, the message says stop and ask the owner.
+# "Trusted" = not a bot, author_association OWNER/MEMBER/COLLABORATOR (the repo is public,
+# so anyone can comment). Any gh/API error blocks (fail closed). A non-merge command
+# exits 0 at once.
+#
+# Layout: a bash fast path, then the logic in perl (`perl -x` runs from the #!perl line
+# below). Bash + perl only, like the vendored hooks; JSON::PP is core perl.
+set -uo pipefail
+
+input="$(cat)"
+case "$input" in *merge*) ;; *) exit 0 ;; esac
+
+cfg="${CLAUDE_PROJECT_DIR:-.}/.claude/t4.json"
+[ -f "$cfg" ] || exit 0
+cfg_txt=""
+IFS= read -r -d '' cfg_txt < "$cfg" || true
+[[ "$cfg_txt" =~ \"requireOpenCodeReview\"[[:space:]]*:[[:space:]]*true ]] || exit 0
+
+if ! command -v perl >/dev/null 2>&1; then
+  echo "OpenCode merge gate: perl is not available, so the merge cannot be checked. Blocking." >&2
+  exit 2
+fi
+ORIONFX_GH="$(command -v gh 2>/dev/null || true)"
+if [ -z "$ORIONFX_GH" ]; then
+  for c in "/c/Program Files/GitHub CLI/gh" "/c/Program Files/GitHub CLI/gh.exe"; do
+    [ -x "$c" ] && { ORIONFX_GH="$c"; break; }
+  done
+fi
+export ORIONFX_GH ORIONFX_CFG="$cfg"
+printf '%s' "$input" | perl -x "$0"
+exit $?
+
+#!perl
+use strict;
+use warnings;
+use JSON::PP;
+use File::Temp qw(tempfile);
+
+my $JSON = JSON::PP->new->allow_nonref;
+
+sub block {
+    print STDERR "OpenCode merge gate (.claude/hooks/orionfx-opencode-merge-gate): $_[0]\n";
+    exit 2;
+}
+
+my $raw = do { local $/; <STDIN> };
+my $in = eval { $JSON->decode($raw) };
+block("could not parse the hook input as JSON. Blocking rather than guessing.") unless ref $in eq 'HASH';
+my $tool = $in->{tool_name} // '';
+
+my $cfg = eval {
+    open my $fh, '<', $ENV{ORIONFX_CFG} or die;
+    local $/; $JSON->decode(<$fh>);
+};
+block("could not parse $ENV{ORIONFX_CFG}.") unless ref $cfg eq 'HASH';
+
+if ($tool =~ /^mcp__github__merge_pull_request$/) {
+    block("merging through the GitHub MCP tool bypasses this gate. Use `gh pr merge <n>` instead.");
+}
+exit 0 unless $tool eq 'Bash';
+my $cmd = ref $in->{tool_input} eq 'HASH' ? ($in->{tool_input}{command} // '') : '';
+
+# --- find `gh pr merge` at a command position --------------------------------
+# The same three normalisations as the vendored t4-gate (#236, #84): drop heredoc
+# bodies, blank shell separators inside quotes, and reduce a quoted/absolute gh path
+# to its basename. So a PR body that mentions the command does not trigger, and
+# "/c/Program Files/GitHub CLI/gh" pr merge 5 does.
+# An env prefix (GH_REPO=x gh pr merge 5) is matched too, then refused below: it can
+# point the merge at a PR other than the one this hook would look up.
+my $ENVP = qr{(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)};
+my $scan = $cmd;
+$scan =~ s{<<-?'?"?([A-Za-z_][A-Za-z0-9_]*)'?"?(.*?)^\s*\1\s*$}{<<HEREDOC\nHEREDOC}gms;
+$scan =~ s{('[^']*'|"(?:\\.|[^"\\])*")}{ my $q = $1; $q =~ tr/;&|`()/      /; $q }ge;
+$scan =~ s{((?:^|[;&|`(\n])[ \t]*$ENVP*)(?:"([^"]*)"|'([^']*)'|([^\s;&|`()]+))(?=[ \t])}{
+    my $pre = $1;
+    my $p = defined $2 ? $2 : defined $3 ? $3 : $4;
+    my $b = $p; $b =~ s{.*[\\/]}{}; $b =~ s{\.exe$}{}i;
+    $b eq 'gh' ? "$pre$b" : $&;
+}ge;
+
+my $MERGE = qr{(?:^|[;&|`(\n])[ \t]*($ENVP*)gh(?:[ \t]+-{1,2}\S+)*[ \t]+pr[ \t]+merge(?=[\s;&|`)]|$)([^;&|`)\n]*)};
+my @hits;
+while ($scan =~ /$MERGE/g) { push @hits, [$1, $2] }
+exit 0 unless @hits;
+block("one `gh pr merge` per command, please; this command has " . scalar(@hits) . ".") if @hits > 1;
+my ($envp, $argstr) = @{ $hits[0] };
+block("drop the environment prefix ($envp) from `gh pr merge`, so this gate checks the same PR that gets merged.")
+    if $envp ne '';
+my @tok;
+while ($argstr =~ /\G\s*((?:'[^']*'|"(?:\\.|[^"\\])*"|[^\s'"]+)+)/gc) {
+    (my $t = $1) =~ s/'([^']*)'|"((?:\\.|[^"\\])*)"/defined $1 ? $1 : $2/ge;
+    push @tok, $t;
+}
+# Flags of `gh pr merge` that take a value: their value is never the PR selector.
+my %VALUE_FLAG = map { $_ => 1 } qw(-b --body -F --body-file -t --subject -A --author-email --match-head-commit -R --repo);
+my ($sel, $repo_flag) = ('', '');
+for (my $i = 0; $i < @tok; $i++) {
+    my $t = $tok[$i];
+    if ($t =~ /^(-R|--repo)=(.+)$/) { $repo_flag = $2; next }
+    if ($VALUE_FLAG{$t}) { $repo_flag = $tok[$i + 1] // '' if $t eq '-R' || $t eq '--repo'; $i++; next }
+    next if $t =~ /^-/;
+    $sel = $t; last;   # first positional: a number, a PR URL, or a branch name
+}
+
+# --- config -------------------------------------------------------------------
+my $bot = $cfg->{opencodeBotLogin};
+block('.claude/t4.json "opencodeBotLogin" must be a non-empty string when "requireOpenCodeReview" is true.')
+    unless defined $bot && !ref $bot && $bot =~ /\S/;
+my $risk = $cfg->{riskPaths};
+block('.claude/t4.json "riskPaths" must be a non-empty list of glob strings when "requireOpenCodeReview" is true.')
+    unless ref $risk eq 'ARRAY' && @$risk && !grep { !defined $_ || ref $_ || $_ !~ /\S/ } @$risk;
+my $max_rounds = $cfg->{opencodeMaxRounds} // 5;
+block('.claude/t4.json "opencodeMaxRounds" must be a positive integer.')
+    unless !ref $max_rounds && $max_rounds =~ /^[1-9][0-9]*$/;
+
+sub norm_login { my $l = lc(shift // ''); $l =~ s/\[bot\]$//; $l }   # REST has "[bot]", GraphQL not
+my $bot_n = norm_login($bot);
+sub by_bot { my $u = $_[0]{user} || {}; ($u->{type} // q()) eq q(Bot) && norm_login($u->{login}) eq $bot_n }   # an account, not just a name
+
+sub glob_re {
+    my $g = shift;
+    my $re = '';
+    while ($g =~ /\G(\*\*\/|\*\*|\*|\?|[^*?]+)/gc) {
+        my $p = $1;
+        $re .= $p eq '**/' ? '(?:.*/)?' : $p eq '**' ? '.*' : $p eq '*' ? '[^/]*' : $p eq '?' ? '[^/]' : quotemeta $p;
+    }
+    qr/^$re$/;
+}
+my @risk_re = map { glob_re($_) } @$risk;
+
+# --- gh ---------------------------------------------------------------------
+my $GH = $ENV{ORIONFX_GH} // '';
+block('gh (GitHub CLI) was not found, so the OpenCode review cannot be checked.') unless $GH ne '';
+my $HAS_TIMEOUT = grep { -x "$_/timeout" } split /:/, ($ENV{PATH} // '');
+
+sub gh {
+    my (@args) = @_;
+    my ($efh, $efile) = tempfile(UNLINK => 1);
+    my @run = (($HAS_TIMEOUT ? ('timeout', '60') : ()), $GH, @args);
+    my $pid = open(my $out, '-|');
+    block("could not start gh: $!") unless defined $pid;
+    if (!$pid) { open STDERR, '>&', $efh; exec { $run[0] } @run; exit 127 }
+    my $o = do { local $/; <$out> } // '';
+    close $out;
+    my $rc = $? >> 8;
+    seek $efh, 0, 0;
+    my $e = do { local $/; <$efh> } // '';
+    if ($rc != 0) {
+        $e =~ s/\s+$//;
+        my $label = join " ", map { /^query=/ ? "query=..." : $_ } @args;
+        block("`gh $label` failed (exit $rc), so the review state is unknown. Blocking (fail closed).\n$e");
+    }
+    return $o;
+}
+
+# `gh api --paginate` prints one JSON array per page, back to back.
+sub gh_list {
+    my $o = gh('api', '--paginate', @_);
+    my $p = JSON::PP->new;
+    my @all;
+    $p->incr_parse($o);
+    while (1) {
+        my $v = eval { $p->incr_parse };
+        block("could not parse the reply of `gh api $_[0]`.") if $@;
+        last unless defined $v;
+        block("unexpected reply shape from `gh api $_[0]`.") unless ref $v eq 'ARRAY';
+        push @all, @$v;
+    }
+    return \@all;
+}
+
+sub gh_json {
+    my $o = gh(@_);
+    my $v = eval { $JSON->decode($o) };
+    block("could not parse the reply of `gh @_[0..1]`.") unless defined $v;
+    return $v;
+}
+
+# --- PR, head SHA, changed files --------------------------------------------
+my @view = ('pr', 'view');
+push @view, $sel if $sel ne '';
+push @view, '--repo', $repo_flag if $repo_flag ne '';
+my $pr = gh_json(@view, '--json', 'number,headRefOid,url,changedFiles');
+my ($num, $head, $url) = @{$pr}{qw(number headRefOid url)};
+block("gh pr view returned no head SHA.") unless defined $head && $head =~ /^[0-9a-f]{40}$/i;
+my ($owner, $name) = ($url // '') =~ m{github\.com/([^/]+)/([^/]+)/pull/\d+};
+block("could not read owner/repo from the PR URL '" . ($url // '') . "'.") unless $owner;
+$head = lc $head;
+my $R = "repos/$owner/$name";
+
+my $files = gh_list("$R/pulls/$num/files?per_page=100");
+block("GitHub listed " . scalar(@$files) . " of $pr->{changedFiles} changed files, so the risk-path check would be incomplete.")
+    if defined $pr->{changedFiles} && @$files < $pr->{changedFiles};
+my @risk_hits;
+for my $f (@$files) {
+    for my $path (grep { defined } $f->{filename}, $f->{previous_filename}) {
+        if (grep { $path =~ $_ } @risk_re) { push @risk_hits, $path; last }
+    }
+}
+
+# --- OpenCode review at the head SHA ----------------------------------------
+my $reviews = gh_list("$R/pulls/$num/reviews?per_page=100");
+my %head_review = map { $_->{id} => 1 }
+    grep { by_bot($_) && lc($_->{commit_id} // '') eq $head } @$reviews;
+
+my @problems;
+if (%head_review) {
+    my $q = 'query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){'
+          . 'reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved path line '
+          . 'comments(first:1){nodes{pullRequestReview{databaseId}}}}}}}}';
+    my $g = gh_json('api', 'graphql', '-f', "owner=$owner", '-f', "name=$name", '-F', "n=$num", '-f', "query=$q");
+    my $rt = eval { $g->{data}{repository}{pullRequest}{reviewThreads} };
+    block("the GraphQL reply has no reviewThreads" . ($g->{errors} ? ": " . $JSON->encode($g->{errors}) : '.')) unless ref $rt eq 'HASH';
+    block("the PR has more than 100 review threads; this gate does not page them, so it cannot prove they are resolved.")
+        if $rt->{pageInfo}{hasNextPage};
+    my @open = grep {
+        my $first = $_->{comments}{nodes}[0];
+        !$_->{isResolved} && $first && $first->{pullRequestReview} && $head_review{ $first->{pullRequestReview}{databaseId} // '' };
+    } @{ $rt->{nodes} || [] };
+    if (@open) {
+        my @where = map { ($_->{path} // '?') . ':' . ($_->{line} // '?') } @open;
+        push @problems, scalar(@open) . " OpenCode review thread(s) at $head are not resolved: @where. "
+            . "Fix each valid finding, or reply with why not; then resolve the thread "
+            . "(`gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:\"<id>\"}){thread{isResolved}}}'`).";
+    }
+}
+
+# --- trusted marker comments --------------------------------------------------
+my ($ind_ok, $fb_ok) = (0, 0);
+if (@risk_hits || !%head_review) {
+    my $comments = gh_list("repos/$owner/$name/issues/$num/comments?per_page=100");
+    for my $c (@$comments) {
+        my $login = $c->{user}{login} // '';
+        next if ($c->{user}{type} // '') eq 'Bot' || $login =~ /\[bot\]$/i;
+        next unless ($c->{author_association} // '') =~ /^(OWNER|MEMBER|COLLABORATOR)$/;
+        my $body = $c->{body} // '';
+        if ($body =~ /<!--\s*t4:independent-review\s+head=([0-9a-fA-F]{40})\s*-->/ && lc $1 eq $head) {
+            (my $rest = $body) =~ s/<!--.*?-->//gs;
+            $ind_ok = 1 if $rest =~ /\S/;
+        }
+        $fb_ok = 1 if $body =~ /<!--\s*t4:opencode-fallback\s+head=([0-9a-fA-F]{40})\s+reason="[^"]*\S[^"]*"\s*-->/ && lc $1 eq $head;
+    }
+}
+
+my $IND = "<!-- t4:independent-review head=$head -->";
+my $FB  = "<!-- t4:opencode-fallback head=$head reason=\"...\" -->";
+if (!%head_review) {
+    if (!($fb_ok && $ind_ok)) {
+        push @problems, "no review by $bot at the head SHA $head. Either:\n"
+            . "  (a) wait for the OpenCode `review` check on this head (gh pr checks $num --watch), then handle its findings; or\n"
+            . "  (b) if OpenCode is down (model 429, App token failure, timeout, check missing/failed for an infra reason), "
+            . "run the fallback self-review with subagents (code-review, scrutinize, simplify, + security-review when relevant), then post BOTH as PR comments from your own account:\n"
+            . "      $FB   (state the cause)" . ($fb_ok ? "  [present]" : "  [missing]") . "\n"
+            . "      $IND   followed by the findings and how each was handled" . ($ind_ok ? "  [present]" : "  [missing]");
+    }
+}
+if (@risk_hits && !$ind_ok && %head_review) {
+    push @problems, "this PR touches risk paths (" . join(', ', @risk_hits[0 .. ($#risk_hits < 4 ? $#risk_hits : 4)])
+        . (@risk_hits > 5 ? ', ...' : '') . "), so it also needs one independent subagent review. "
+        . "Run it, then post a PR comment: $IND followed by the findings and how each was handled.";
+}
+
+exit 0 unless @problems;
+
+# Round cap: one OpenCode round per distinct reviewed commit. Past the cap, the
+# review -> fix loop is not converging; a human decides, not another push.
+my %rounds = map { lc($_->{commit_id} // '') => 1 } grep { by_bot($_) } @$reviews;
+my $n_rounds = scalar keys %rounds;
+unshift @problems, "STOP AND ASK THE OWNER. OpenCode has reviewed $n_rounds commits on this PR, above the cap of "
+    . "$max_rounds (.claude/t4.json \"opencodeMaxRounds\"), and the gate still fails. Do not push another round: "
+    . "report the open findings below to the owner and wait for a decision."
+    if $n_rounds > $max_rounds;
+block("PR #$num cannot merge yet:\n- " . join("\n- ", @problems));

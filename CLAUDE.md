@@ -23,6 +23,17 @@ Companion ecosystems (recorded 2026-11-27):
 - **9arm** — present (`debug-mantra`, `scrutinize`, `post-mortem`); `qwen-agent` not installed.
 - **matt pocock** — installed; `setup-matt-pocock-skills` ran 2026-11-27 (see "Agent skills" below).
 
+### Review gates — OpenCode (owner decision 2026-11-28, #149)
+
+This subsection overrides the "before merge → `code-review` + `scrutinize`" trigger above, and any wording elsewhere that calls the OpenCode review advisory only. Full procedure, markers and the loop: `docs/agents/workflow.md` → "Review gates — OpenCode merge gate".
+
+- **Every PR is reviewed by OpenCode** (the `review` check, bot `opencode-agent[bot]`). That review satisfies the before-merge `code-review` + `scrutinize` trigger. The agent does **not** spawn subagents to review its own work, except in the two cases below.
+- **Risk paths also need one independent subagent review.** These are the `riskPaths` globs in `.claude/t4.json`: money/risk modules, secrets/config/auth, `.github/workflows/`, `.github/actions/`, `.claude/`, `.githooks/`. Record it with a PR comment that carries `<!-- t4:independent-review head=<sha> -->`.
+- **Fallback if OpenCode is down** (model 429, App token failure, timeout, check missing or failed for an infra reason): self-review with subagents as before (`code-review`, `scrutinize`, `simplify`, plus `security-review` when relevant). Record it explicitly with `<!-- t4:opencode-fallback head=<sha> reason="..." -->` and the independent-review record. Never fall back silently.
+- **Review → fix loop.** Push, OpenCode reviews the new head, fix each finding or reply with the reason, resolve the thread, push again. Merge only when the latest review at the current head has no unresolved thread. After `opencodeMaxRounds` reviews (default 5), **stop and ask the owner** instead of pushing again.
+- **Still the agent's own work:** TDD, `verify`, and the in-session `simplify` / `security-review` triggers.
+- **`T4-Gates` trailer:** `code-review=ran` (and `scrutinize=ran`) means OpenCode reviewed the work, or the fallback subagent review ran. The trailer is written before OpenCode has run, so `not-run` is the honest value then. The merge gate enforces the review, not the trailer.
+
 ## Session-start read protocol
 
 1. `karpathy-guidelines` — load once.
@@ -71,6 +82,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 - `.claude/hooks/` holds only the 16 files the wired hooks reach (dependency closure checked 2026-11-27); the unwired `clink`/canary/debt/receipt scripts and the unread `using-t4.snapshot.md` were left out. The scripts are vendored from `xeno-skills` — fix bugs upstream, not here.
 - **Known upstream defects (vendored, not patched here):** `.githooks/check-gate-ledger` reads the **oldest** `T4-Gates:` trailer on the branch (`git log … | tail -n 1`), so put the trailer on the first commit correctly; `t4-gate`'s `mcp__github__merge_pull_request` path skips the `requireGreenCI` check (no GitHub MCP server is configured here, so the path is unreachable today); `gh pr merge --squash <n>` (flag before the number) is not parsed as PR `<n>` — write `gh pr merge <n> --squash`.
 - **Secret scanning / push protection: unavailable** (GitHub 422 on this private free-plan repo). Nothing server-side stops a committed secret — keep secrets in `.env` (gitignored) and run `/security-review` on every boundary change. Dependabot alerts + security-fix PRs are on.
+- **OpenCode merge gate (#149; repo-local, not vendored):** `.claude/hooks/orionfx-opencode-merge-gate`, a second `PreToolUse` hook beside `t4-gate`. It is a 17th file in `.claude/hooks/` and is edited here, not upstream. When `.claude/t4.json` has `"requireOpenCodeReview": true`, it blocks `gh pr merge` (exit 2) unless the OpenCode review at the head SHA exists and all its threads are resolved, the risk-path record is present when needed, or the explicit fallback is recorded. It fails closed on any `gh` error, and blocks merges through `mcp__github__merge_pull_request`. Committed as `false` until PR #144 (the OpenCode workflow) is on `main`. Tests: `bash tests/hooks/test-orionfx-opencode-merge-gate.sh`, also run by the CI `guards` job. Binds Claude only; a web merge is not blocked.
 
 ## Training-loop research autonomy (owner grant, 2026-11-28)
 
