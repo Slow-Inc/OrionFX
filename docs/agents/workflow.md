@@ -57,13 +57,14 @@ Outside these cases, the agent does not spawn subagents to review its own work. 
 gh pr merge <number|PR URL> --squash --match-head-commit <head sha>
 ```
 
-Run it as its own plain command. The gate refuses, fail-closed, any other text that looks like a merge outside a heredoc body. That text is `pr merge`, `/pulls/<n>/merge`, `mergePullRequest` or `enablePullRequestAutoMerge`, and the refusal covers:
+Run it as its own plain command. The gate refuses, fail-closed, any other text that looks like a merge. That text is `pr merge`, `/pulls/<n>/merge`, `mergePullRequest` or `enablePullRequestAutoMerge`. The gate counts these keywords three ways: in the raw text, in a copy with quotes and escapes stripped, and in the lexed words. So `gh pr 'merge'`, `m''erge`, `me\rge` and a mid-word line continuation all count. The refusal covers:
 - wrappers and prefixes: `bash -c`, `eval`, `xargs`, `{ …; }`, `if …; then`, `time`, `env`, `command`, `VAR=x`;
-- other routes: aliases, `gh -R x pr merge`, `gh api … merge`, two merges in one command.
+- other routes: aliases, `gh -R x pr merge`, `gh api … merge`, two merges in one command;
+- anything but a plain word after `gh [-R <repo>] pr`, such as `gh pr $'…'`, `gh pr -R x merge` or `gh pr $SUB`.
 
-It also refuses a missing or branch selector, a missing or stale `--match-head-commit`, and `--auto`.
+It also refuses a missing or branch selector, a missing or stale `--match-head-commit`, and `--auto` in any spelling (`--auto`, `--auto=…`).
 
-`--match-head-commit` makes GitHub refuse the merge if someone pushed after the check. Text that only *mentions* a merge, such as a PR body or a commit message, belongs in a file (`--body-file`, `-F`) or a heredoc.
+`--match-head-commit` makes GitHub refuse the merge if someone pushed after the check. Text that only *mentions* a merge, such as a PR body or a commit message, belongs in a file (`--body-file`, `-F`) or a heredoc. A heredoc or here-string body is data only while no interpreter reads it. If the command also names one (`bash`, `sh`, `source`, `xargs`, `iex`, `Invoke-Expression`, `pwsh`, `powershell`, `python`, …), the bodies are scanned as code. The detection is quote- and comment-aware: `<<EOF` inside quotes or a comment is not a heredoc, and the rest of a `<<EOF` line is still code.
 
 ### The review → fix loop
 
@@ -102,7 +103,7 @@ Independent review (subagent: code-review + scrutinize) of <sha>:
 
 - **OpenCode infra failures finish green.** When OpenCode fails for an infrastructure reason, its job is meant to finish green with an "unavailable" notice, so the vendored `t4-gate` (`requireGreenCI`) does not block the fallback. That change belongs to PR #144. Until it lands, a red `review` check still trips `requireGreenCI`; re-run the check or ask the owner.
 - **The `review` check is not a required check, and will not become one.** That would make the fallback unreachable. The hook is the gate.
-- **The ruleset on `main` will require a PR plus the `t4-verify` checks, and will block direct pushes.** So `git push … :main` is covered by the ruleset, not by this hook.
+- **The ruleset is live (checked 2026-11-28).** The repo is public. Ruleset `main-protection` (id 28272751) is active on the default branch with no bypass actors. It requires a PR and the `t4-verify` checks `guards`, `lint`, `typecheck`, `test` and `frontend`, and it blocks deletion and force-push. So `git push … :main` is refused server-side, not by this hook. Secret scanning and push protection are on.
 - **Dependabot PRs get no OpenCode review**, because the review job skips bot authors. To merge one, run the fallback self-review and post both markers. No Dependabot exemption exists in the hook yet: Dependabot can change `.github/workflows/`, a risk path. An exemption that mirrors the `guards` one is an owner decision.
 
 ### `T4-Gates` trailer
@@ -111,10 +112,17 @@ Independent review (subagent: code-review + scrutinize) of <sha>:
 
 ### Limits
 
-- The hook binds Claude only. A human merging on the web is not blocked.
-- Fail-closed paths:
-  - a `gh` or API error, GraphQL `errors`, or a runtime error (any exit other than 0 or 2 becomes 2);
+- The hook binds Claude only. A human merging on the web is held only by the ruleset's required checks, not by the review gate.
+- **How it blocks.** The hook prints a PreToolUse `deny` JSON on stdout and exits 0, the same way `t4-gate` does. It never blocks by exit code. On Windows, the vendored `run-hook.cmd` runs `exit /b %ERRORLEVEL%` inside a `( … )` block, which expands at parse time to 0, so an exit-2 block would be lost. Allow means exit 0 with empty stdout.
+- Fail-closed paths, all with the deny JSON:
+  - a `gh` or API error, GraphQL `errors`, or a runtime error in the checker;
+  - any unexpected exit or signal in the wrapper (a trap);
+  - checker output that is not exactly one deny object;
+  - perl missing;
   - the 100-second budget for `gh` calls running out;
-  - the hook timing out (`onFailure: "block"`, timeout 150 s).
+  - the hook timing out (`onFailure: "block"`, timeout 150 s). `onFailure` needs Claude Code ≥ 2.1.295.
+- **"Trusted" is identity-based.** A trusted thread reply or marker comes from an `OWNER`, `MEMBER` or `COLLABORATOR` account. The agent posts as the OWNER account too, so a trusted reply does not prove that a human wrote it.
+- **What a text hook cannot close.** It cannot see indirect forms: `$(…)`, a variable holding the command, encoded commands (`pwsh -EncodedCommand`, `base64 -d | sh`), or a script written in one tool call and run in another. The ruleset on `main` is the server-side backstop.
+- **`run-hook.cmd` fails open when bash is missing.** It exits 0 silently (an upstream defect in the vendored file). This is one more reason the gate relies on the deny JSON plus the ruleset, not on the exit code.
 - A PR with more than 100 review threads is blocked, because the gate does not page them.
 - If `.claude/t4.json` or its `requireOpenCodeReview` key is missing, the gate is off. It prints a notice on every merge-looking command, so it never turns off silently.

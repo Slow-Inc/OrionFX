@@ -86,18 +86,41 @@ Subagent review: 2 findings, both fixed in abc123."
 FB="<!-- t4:opencode-fallback head=$HEAD reason=\"model 429 FreeUsageLimitError\" -->"
 
 pass=0; fail=0
-# run <expect allow|block> <name> <command> [stderr-regex] [tool_name]
+# decide <exit code> <stdout file>: how Claude Code reads the hook's answer.
+#   allow = exit 0 and empty stdout; block = exit 0 and stdout is exactly ONE JSON object
+#   that is a PreToolUse deny (its reason is written to $TMP/reason). Anything else --
+#   exit 2, a non-zero exit, junk or two objects on stdout -- is reported as itself, so
+#   a test expecting allow or block fails. Exit 2 is NOT a block here: on Windows
+#   run-hook.cmd turns it into 0 (#150 review).
+decide() {
+  perl -MJSON::PP -e '
+    my ($rc, $f, $rf) = @ARGV;
+    open my $fh, "<", $f or die; my $o = do { local $/; <$fh> };
+    if ($rc != 0) { print "exit-$rc"; exit }
+    if ($o eq "") { print "allow"; exit }
+    my $v = eval { JSON::PP->new->decode($o) };
+    my $h = ref $v eq "HASH" ? $v->{hookSpecificOutput} : undef;
+    if (ref $h eq "HASH" && keys %$v == 1 && ($h->{hookEventName} // "") eq "PreToolUse"
+        && ($h->{permissionDecision} // "") eq "deny" && ($h->{permissionDecisionReason} // "") =~ /\S/) {
+      open my $r, ">", $rf or die; print $r $h->{permissionDecisionReason}; print "block"; exit;
+    }
+    print "bad-stdout";
+  ' "$1" "$2" "$TMP/reason"
+}
+# run <expect allow|block> <name> <command> [message-regex] [tool_name]
 run() {
   local expect="$1" name="$2" cmd="$3" pat="${4:-}" tool="${5:-Bash}" input rc got
-  err=""  # global: no_escalation reads the last message
+  err=""  # global: no_escalation reads the last message (deny reason + stderr)
   input="$(perl -MJSON::PP -e 'print encode_json({tool_name=>$ARGV[0],tool_input=>{command=>$ARGV[1]}})' "$tool" "$cmd")"
-  err="$(printf '%s' "$input" | bash "$HOOK" 2>&1 >/dev/null)"; rc=$?
-  case "$rc" in 0) got=allow ;; 2) got=block ;; *) got="exit-$rc" ;; esac
+  : > "$TMP/reason"
+  printf '%s' "$input" | bash "$HOOK" >"$TMP/out" 2>"$TMP/err"; rc=$?
+  got="$(decide "$rc" "$TMP/out")"
+  err="$(cat "$TMP/reason" "$TMP/err")"
   if [ "$got" = "$expect" ] && { [ -z "$pat" ] || printf '%s' "$err" | grep -Eq -- "$pat"; }; then
     pass=$((pass + 1)); echo "ok   - $name"
   else
     fail=$((fail + 1)); echo "FAIL - $name (expected $expect${pat:+ matching /$pat/}, got $got)"
-    printf '%s\n' "$err" | sed 's/^/       /'
+    { printf '%s\n' "$err"; [ "$got" = bad-stdout ] && cat "$TMP/out"; } | sed 's/^/       /'
   fi
 }
 called() {  # $1 = name, $2 = regex the calls log must match ("" = gh must not be called)
@@ -273,6 +296,89 @@ reset; printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo"
 run block "probe: graphql partial data + errors" "$M" "errors"
 # Out of scope by design: a direct push to main is blocked by the GitHub ruleset, not by this hook.
 reset; reviews '[]'; run allow "probe: git push to main is the ruleset's job (documented)" "git push origin HEAD:main"
+
+# --- security re-review of PR #150 ---------------------------------------------------
+# 1. The decision is the deny JSON on stdout, not the exit code. On Windows,
+#    run-hook.cmd's `exit /b %ERRORLEVEL%` sits in a `( ... )` block, expands at parse
+#    time and returns 0 -- so an exit-2-only hook blocks nothing there.
+stdin_for() { perl -MJSON::PP -e 'print encode_json({tool_name=>"Bash",tool_input=>{command=>$ARGV[0]}})' "$1"; }
+# shim <name> <expect> <runner...>: run the hook through <runner>, stdin = a gated merge.
+shim() {
+  local name="$1" expect="$2" rc got; shift 2
+  : > "$TMP/reason"
+  stdin_for "$M" | "$@" >"$TMP/out" 2>"$TMP/err"; rc=$?
+  got="$(decide "$rc" "$TMP/out")"
+  if [ "$got" = "$expect" ]; then pass=$((pass + 1)); echo "ok   - $name"
+  else fail=$((fail + 1)); echo "FAIL - $name (expected $expect, got $got)"; sed 's/^/       /' "$TMP/err" "$TMP/out"; fi
+}
+reset; reviews '[]'; shim "exit code lost (bash hook; exit 0): still denied" block bash -c 'bash "$1"; exit 0' _ "$HOOK"
+reset; shim "exit code lost, passing merge: still allowed" allow bash -c 'bash "$1"; exit 0' _ "$HOOK"
+if command -v cmd.exe >/dev/null 2>&1; then  # Windows only: the real wrapper
+  reset; reviews '[]'
+  shim "Windows: through run-hook.cmd, a failing merge is denied" block \
+    env MSYS_NO_PATHCONV=1 cmd.exe /d /c "$(cygpath -w "$ROOT/.claude/hooks/run-hook.cmd")" orionfx-opencode-merge-gate
+else
+  pass=$((pass + 1)); echo "ok   - Windows: run-hook.cmd check skipped (no cmd.exe)"
+fi
+# Fail closed when the checker itself breaks: every path prints the deny JSON.
+mkdir -p "$TMP/badperl" "$TMP/noperl"
+printf '#!/usr/bin/env bash\nexit 3\n' > "$TMP/badperl/perl"; chmod +x "$TMP/badperl/perl"
+reset; shim "perl crashes: deny JSON, not a silent exit" block env PATH="$TMP/badperl:$PATH" bash "$HOOK"
+grep -q "internal error" "$TMP/reason" && { pass=$((pass + 1)); echo "ok   - perl crash: reason says internal error"; } \
+  || { fail=$((fail + 1)); echo "FAIL - perl crash: reason says internal error"; }
+reset; shim "perl missing: deny JSON" block env PATH="$TMP/noperl" "$BASH" "$HOOK"
+# The gate must stay silent (exit 0, empty stdout) where it has no opinion.
+reset; run allow "silent on a plain command" "ls -la"
+reset; run allow "silent on gh pr view" "gh pr view 7 --json headRefOid"
+reset; run allow "silent on gh pr checks" "gh pr checks 7 --watch"
+
+# 2. Quoting and escaping inside the keyword. Each one is a real merge to the shell.
+P "single-quoted merge"        "gh pr 'merge' 7"
+P "double-quoted merge"        'gh pr "merge" 7'
+P "empty quotes inside merge"  "gh pr m''erge 7"
+P "backslash inside merge"     'gh pr me\rge 7'
+P "ANSI-C quoted merge"        "gh pr \$'merge' 7"
+P "hex-escaped merge"          "gh pr \$'\\x6derge' 7"
+P "mid-word line continuation" $'gh pr mer\\\nge 7'
+P "flag between pr and merge"  "gh pr -R Slow-Inc/OrionFX merge 7"
+P "--repo= between pr and merge" "gh pr --repo=Slow-Inc/OrionFX merge 7"
+P "quoted gh"                  "'gh' pr merge 7"
+P "PowerShell backtick in merge" 'gh pr me`rge 7' PowerShell
+P "variable subcommand"        'gh pr $SUB 7'
+reset; reviews '[]'; run block "quoted merge with a head SHA is gated, not skipped" "gh pr 'merge' 7 $MHC" "no review by"
+reset; run allow "quoted merge that passes the gate" "gh pr \"merge\" 7 --squash $MHC"
+
+# 3. Heredoc / here-string bodies fed to an interpreter are code, not data.
+P "heredoc into bash"          $'bash <<X\ngh pr merge 7\nX'
+P "quoted heredoc into sh"     $'sh <<\'EOF\'\ngh pr merge 7\nEOF'
+P "heredoc into bash -s"       $'bash -s <<EOF\ngh pr merge 7\nEOF'
+P "heredoc piped to bash"      $'cat <<EOF | bash\ngh pr merge 7\nEOF'
+P "heredoc piped to sh"        $'cat <<EOF | sh\ngh pr merge 7\nEOF'
+P "heredoc written then run"   $'cat > m.sh <<EOF\ngh pr merge 7\nEOF\nbash m.sh'
+P "here-string into bash"      "bash <<< 'gh pr merge 7'"
+P "xargs fed by a heredoc"     $'xargs gh pr <<EOF\nmerge 7\nEOF'
+P "here-string piped to iex"   $'@\'\ngh pr merge 7\n\'@ | iex' PowerShell
+P "here-string to Invoke-Expression" $'@"\ngh pr merge 7\n"@ | Invoke-Expression' PowerShell
+P "here-string var to Invoke-Expression" $'$s = @\'\ngh pr merge 7\n\'@\nInvoke-Expression $s' PowerShell
+P "here-string piped to pwsh"  $'@\'\ngh pr merge 7\n\'@ | pwsh -Command -' PowerShell
+P "here-string piped to powershell" $'@\'\ngh pr merge 7\n\'@ | powershell -' PowerShell
+P "here-string piped to bash"  $'@\'\ngh pr merge 7\n\'@ | bash' PowerShell
+reset; run allow "heredoc body to a non-interpreter stays data" $'gh pr comment 7 --body-file - <<EOF\nthen gh pr merge 7\nEOF'
+reset; run allow "quoted heredoc delimiter with a space stays data" $'gh pr comment 7 --body-file - << \'EOF\'\nthen gh pr merge 7\nEOF'
+# Text that only looks like a heredoc / here-string opener is not one: the lines after it run.
+P "code after <<EOF on the same line" $'cat <<EOF; gh pr merge 7\nx\nEOF'
+P "<<EOF inside double quotes" $'echo "<<EOF"\ngh pr merge 7\nEOF'
+P "<<EOF inside single quotes" $'echo \'<<EOF\'\ngh pr merge 7\nEOF'
+P "<<EOF inside a comment"     $'echo hi # <<EOF\ngh pr merge 7\nEOF'
+P "<< as an arithmetic shift"  $'echo $((1<<x))\ngh pr merge 7\nx'
+P "@' inside a PowerShell string" $'echo "@\'"\ngh pr merge 7\n\'@"' PowerShell
+P "heredoc with no end line"   $'cat <<EOF\ngh pr merge 7'
+
+# 4. --auto in any spelling queues a merge after the gate has run.
+# The baseline review passes, so only the --auto rule can block these.
+reset; run block "--auto=true is refused" "gh pr merge 7 --auto=true --squash $MHC" "--auto. queues a merge"
+reset; run block "--auto=1 is refused" "gh pr merge 7 --auto=1 --squash $MHC" "--auto. queues a merge"
+reset; run block "--auto=false is refused too" "gh pr merge 7 --auto=false --squash $MHC" "--auto. queues a merge"
 
 echo
 echo "$pass passed, $fail failed"

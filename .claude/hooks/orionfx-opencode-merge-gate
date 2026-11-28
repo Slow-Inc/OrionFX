@@ -7,12 +7,27 @@
 # PreToolUse on Bash, PowerShell and Monitor commands, and on GitHub MCP merge tools.
 # Active only when .claude/t4.json has "requireOpenCodeReview": true.
 #
+# HOW IT BLOCKS: a PreToolUse "deny" JSON object on stdout, exit 0 -- like t4-gate, and
+# NEVER by exit code. On Windows run-hook.cmd (vendored) runs `exit /b %ERRORLEVEL%`
+# inside a cmd `( ... )` block, which expands at parse time to 0, so an exit-2 block
+# would be lost there. Every error path, and any unexpected exit or signal (trap),
+# also prints the deny JSON. Allow = exit 0 with empty stdout.
+#
 # THE ONLY MERGE IT LETS THROUGH is one plain command segment of the form
 #     gh pr merge <number|PR URL> [flags] --match-head-commit <head sha>
 # Any other text that looks like a merge -- `pr merge`, `/pulls/<n>/merge`,
-# `mergePullRequest`, `enablePullRequestAutoMerge` outside a heredoc body -- is
-# refused (fail closed): `bash -c`, `eval`, `xargs`, aliases, `gh api ... merge`,
-# `{ ...; }`, `time`/`env`/`command` prefixes, `gh -R x pr merge`. `--auto` is refused.
+# `mergePullRequest`, `enablePullRequestAutoMerge` -- is refused (fail closed):
+# `bash -c`, `eval`, `xargs`, aliases, `gh api ... merge`, `{ ...; }`, `time`/`env`/
+# `command` prefixes, `gh -R x pr merge`. The keywords are counted in the raw text, in
+# a copy with quotes and escapes stripped, and in the lexed words, so `gh pr 'merge'`,
+# `m''erge` and `me\rge` count. The word after `gh [-R x] pr` must be a plain
+# subcommand (`gh pr $'merge'`, `gh pr -R x merge` are refused). Heredoc and
+# here-string bodies are data, unless the command also names an interpreter (bash, sh,
+# iex, Invoke-Expression, pwsh, ...): then the bodies are scanned too.
+# `--auto` / `--auto=<anything>` is refused.
+# NOT CLOSABLE BY A TEXT HOOK: indirect forms such as `$(...)`, variables holding the
+# command, encoded commands, scripts written in one tool call and run in another. The
+# GitHub ruleset on main is the server-side backstop.
 # A merge that passes the parse is then refused unless:
 #   1. normal pass: the latest review by "opencodeBotLogin" at the head SHA ends with
 #      `Verdict: 0 blocker, 0 major`, and EVERY thread the bot opened on the PR (any
@@ -27,32 +42,43 @@
 #   4. round cap: when it blocks and OpenCode has reviewed more than "opencodeMaxRounds"
 #      (default 5) distinct commits, the message says stop and ask the owner.
 # "Trusted" = not a bot, author_association OWNER/MEMBER/COLLABORATOR (the repo is public).
-# Fail closed: any gh/API error, GraphQL `errors`, a runtime error (any exit other than
-# 0/2 becomes 2) or an exhausted time budget blocks. Not covered: `git push` to main,
-# which the GitHub ruleset on main blocks; a human merging on the web.
+# Fail closed: any gh/API error, GraphQL `errors`, a runtime error, an unexpected exit
+# or an exhausted time budget denies. Not covered: `git push` to main, which the GitHub
+# ruleset on main blocks; a human merging on the web.
 #
-# Layout: a bash fast path, then the logic in perl (`perl -x` runs from the #!perl line
-# below). Bash + perl only, like the vendored hooks; JSON::PP is core perl.
+# Layout: a bash wrapper (config switch, deny output, trap), then the logic in perl
+# (`perl -x` runs from the #!perl line below). Bash + perl only, like the vendored
+# hooks; JSON::PP is core perl. When the gate is on, perl reads every gated command:
+# a text fast path here would be a second lexer to get wrong.
 set -uo pipefail
 
-input="$(cat)"
-shopt -s nocasematch
-[[ "$input" == *merge* ]] || exit 0
-shopt -u nocasematch
+DECIDED=0
+deny() {  # static reasons only; perl builds the JSON for anything dynamic
+  DECIDED=1
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"OpenCode merge gate (.claude/hooks/orionfx-opencode-merge-gate): %s"}}\n' "$1"
+  exit 0
+}
+on_exit() {
+  local rc=$?
+  [ "$DECIDED" = 1 ] || [ "$rc" = 0 ] || deny "internal error (the hook exited unexpectedly). Blocking (fail closed)."
+}
+trap on_exit EXIT
+trap 'deny "interrupted by a signal. Blocking (fail closed)."' HUP INT TERM
+
+input=""
+IFS= read -r -d '' input || true
 
 cfg="${CLAUDE_PROJECT_DIR:-.}/.claude/t4.json"
 cfg_txt=""
 [ -f "$cfg" ] && { IFS= read -r -d '' cfg_txt < "$cfg" || true; }
 if [[ ! "$cfg_txt" =~ \"requireOpenCodeReview\"[[:space:]]*:[[:space:]]*(true|false) ]]; then
-  echo "OpenCode merge gate: no \"requireOpenCodeReview\" in $cfg, so the gate is DISABLED for this command." >&2
+  shopt -s nocasematch
+  [[ "$input" == *merge* ]] && echo "OpenCode merge gate: no \"requireOpenCodeReview\" in $cfg, so the gate is DISABLED for this command." >&2
   exit 0
 fi
 [ "${BASH_REMATCH[1]}" = true ] || exit 0
 
-if ! command -v perl >/dev/null 2>&1; then
-  echo "OpenCode merge gate: perl is not available, so the merge cannot be checked. Blocking." >&2
-  exit 2
-fi
+command -v perl >/dev/null 2>&1 || deny "perl is not available, so the command cannot be checked. Blocking (fail closed)."
 ORIONFX_GH="$(command -v gh 2>/dev/null || true)"
 if [ -z "$ORIONFX_GH" ]; then
   for c in "/c/Program Files/GitHub CLI/gh" "/c/Program Files/GitHub CLI/gh.exe"; do
@@ -60,11 +86,16 @@ if [ -z "$ORIONFX_GH" ]; then
   done
 fi
 export ORIONFX_GH ORIONFX_CFG="$cfg"
-printf '%s' "$input" | perl -x "$0"
+out="$(printf '%s' "$input" | perl -x "$0")"
 rc=$?
-case "$rc" in 0|2) exit "$rc" ;; esac
-echo "OpenCode merge gate: internal error (exit $rc). Blocking (fail closed)." >&2
-exit 2
+[ "$rc" = 0 ] || deny "internal error (the checker exited with $rc). Blocking (fail closed)."
+# Re-emit only what perl's block() prints: empty (allow) or one deny object.
+case "$out" in
+  "") exit 0 ;;
+  '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"'*'"}}')
+    DECIDED=1; printf '%s\n' "$out"; exit 0 ;;
+esac
+deny "the checker printed something other than a decision. Blocking (fail closed)."
 
 #!perl
 use strict;
@@ -76,9 +107,12 @@ my $JSON = JSON::PP->new->allow_nonref;
 my $T0 = time;
 my $BUDGET = 100;   # seconds for all gh calls; the hook's settings.json timeout is 150
 
+# One deny object on stdout, exit 0 (see the header: the exit code can be lost).
 sub block {
-    print STDERR "OpenCode merge gate (.claude/hooks/orionfx-opencode-merge-gate): $_[0]\n";
-    exit 2;
+    print JSON::PP->new->ascii->canonical->encode({ hookSpecificOutput => {
+        hookEventName => 'PreToolUse', permissionDecision => 'deny',
+        permissionDecisionReason => "OpenCode merge gate (.claude/hooks/orionfx-opencode-merge-gate): $_[0]" } });
+    exit 0;
 }
 sub H { ref $_[0] eq 'HASH' ? $_[0] : {} }
 sub A { ref $_[0] eq 'ARRAY' ? $_[0] : [] }
@@ -100,19 +134,6 @@ my $ps = $tool eq 'PowerShell';
 exit 0 unless $ps || $tool eq 'Bash' || $tool eq 'Monitor';
 my $cmd = H($in->{tool_input})->{command} // '';
 $cmd = '' if ref $cmd;
-
-# --- normalise: heredoc / here-string bodies are data; line continuations join ----
-my $text = $cmd;
-if ($ps) {
-    $text =~ s{\@(['"])\r?\n.*?\r?\n\1\@}{''}gs;
-    $text =~ s{`\r?\n}{ }g;
-} else {
-    $text =~ s{<<-?'?"?([A-Za-z_][A-Za-z0-9_]*)'?"?(.*?)^\s*\1\s*$}{<<HEREDOC\nHEREDOC}gms;
-    $text =~ s{\\\r?\n}{ }g;
-}
-my $KW = qr{\bpr(?:\s|\\.)+merge\b|/pulls/[^/\s'"]+/merge\b|mergePullRequest|enablePullRequestAutoMerge}i;
-my $n_kw = () = $text =~ /$KW/g;
-exit 0 unless $n_kw;
 
 # --- split into command segments of words (a small shell lexer) -------------------
 sub segments {
@@ -151,13 +172,110 @@ sub segments {
     $ends->();
     return @segs;
 }
-sub is_gh { (my $b = shift // '') =~ s{.*[\\/]}{}; $b =~ s{\.exe$}{}i; lc $b eq 'gh' }
-my @merges = grep { @$_ >= 3 && is_gh($_->[0]) && $_->[1] eq 'pr' && $_->[2] eq 'merge' } segments($text);
+sub base { (my $b = shift // '') =~ s{.*[\\/]}{}; $b =~ s{\.exe$}{}i; lc $b }
+sub is_gh { base(shift) eq 'gh' }
 my $FORM = "gh pr merge <number|PR URL> --squash --match-head-commit <head sha>";
-block("this command mentions a merge ($n_kw place(s)) in a form the gate cannot check. Run the merge as its own "
-    . "plain command: `$FORM` (no wrapper, prefix, alias, `gh api` or second merge). If the command only MENTIONS a "
-    . "merge in text, move that text into a file (--body-file / -F) or a heredoc.")
-    unless @merges == 1 && $n_kw == 1;
+my $UNCHECKABLE = "in a form the gate cannot check. Run the merge as its own plain command: `$FORM` (no wrapper, "
+    . "prefix, alias, quoting, `gh api` or second merge). If the command only MENTIONS a merge in text, move that "
+    . "text into a file (--body-file / -F) or a heredoc that no interpreter reads.";
+
+# --- normalise ---------------------------------------------------------------------
+# $text: heredoc / here-string bodies replaced (they are data), line continuations
+# joined. $code: the same with the bodies kept, for when an interpreter reads them.
+# A continuation is joined both with nothing (bash drops `\<newline>`, even mid-word)
+# and with a space; every variant is scanned.
+sub join_lines { my ($s, $with) = @_; $ps ? $s =~ s{`\r?\n}{$with}gr : $s =~ s{\\\r?\n}{$with}gr }
+# Quote- and comment-aware: `<<EOF` / `@'` inside quotes or a comment is not a body,
+# and the rest of the `<<EOF` line is still code (`cat <<EOF; gh pr merge 7`). Where
+# `<<` may be a shift (`((`, `$[`, `let`), no body is removed. Unsure = keep the text.
+sub strip_bodies {
+    my $s = shift;
+    return $s if !$ps && $s =~ /\(\(|\$\[|\blet\b/;
+    my $esc = $ps ? '`' : '\\';
+    my ($out, $i, $n, $q, @pending) = ('', 0, length $s, '');
+    while ($i < $n) {
+        my $c = substr($s, $i, 1);
+        if ($q ne '') {                                   # inside '...', "..." or $'...'
+            if ($q ne "'" && $c eq $esc && $i + 1 < $n) { $out .= substr($s, $i, 2); $i += 2; next }
+            $q = '' if $c eq ($q eq 'a' ? "'" : $q);
+            $out .= $c; $i++; next;
+        }
+        if ($c eq $esc && $i + 1 < $n) { $out .= substr($s, $i, 2); $i += 2; next }
+        if ($ps && $c eq '@' && substr($s, $i + 1) =~ /^(['"])[ \t]*\r?\n/) {   # PowerShell here-string
+            my $qc = $1;
+            if (substr($s, $i) =~ /^\@\Q$qc\E[ \t]*\r?\n.*?\r?\n\Q$qc\E\@/s) { $out .= "''"; $i += length $&; next }
+        }
+        if ($c eq "'" || $c eq '"') {
+            $q = ($c eq "'" && !$ps && $i > 0 && substr($s, $i - 1, 1) eq '$') ? 'a' : $c;
+            $out .= $c; $i++; next;
+        }
+        if ($c eq '#' && ($i == 0 || substr($s, $i - 1, 1) =~ /[\s;&|()]/)) {   # comment to end of line
+            my $j = index($s, "\n", $i); $j = $n if $j < 0;
+            $out .= substr($s, $i, $j - $i); $i = $j; next;
+        }
+        if (!$ps && substr($s, $i) =~ /^<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([^\s;&|<>()'"]+))/) {
+            push @pending, $2 // $3 // $4;
+            $out .= '<<HEREDOC'; $i += length $&; next;
+        }
+        if (!$ps && $c eq '<') { while ($i < $n && substr($s, $i, 1) eq '<') { $out .= '<'; $i++ } next }
+        if ($c eq "\n" && @pending) {                     # bodies start on the next line
+            $out .= "\n"; $i++;
+            while (@pending) {
+                my $d = shift @pending;
+                my $rest = substr($s, $i);
+                last unless $rest =~ /^.*?^[ \t]*\Q$d\E[ \t]*\r?$(?:\n|\z)/ms;   # no end: keep it as code
+                $out .= "HEREDOC\n"; $i += length $&;
+            }
+            @pending = ();
+            next;
+        }
+        $out .= $c; $i++;
+    }
+    return $out;
+}
+my $text = join_lines(strip_bodies($cmd), ' ');
+my @segs = segments($text);
+my @data_variants = ($text, join_lines(strip_bodies($cmd), ''));
+
+# Is any word an interpreter (or a command that runs one)? Then heredoc and
+# here-string bodies are code: `bash <<X`, `cat <<X | sh`, `@'...'@ | iex`.
+my $INTERP = qr/^(?:bash|sh|zsh|dash|ksh|mksh|fish|busybox|source|exec|eval|env|xargs|nohup|sudo|wsl|cmd|
+    pwsh|powershell|iex|invoke-expression|invoke-command|icm|start-process|saps|start|
+    python[0-9.]*|py|perl|node|ruby|php|osascript)$/xi;
+my $interp = grep { my $s = $_; ($s->[0] // '') eq '.' || grep { base($_) =~ $INTERP } @$s } @segs;
+my @variants = $interp ? (@data_variants, join_lines($cmd, ' '), join_lines($cmd, '')) : @data_variants;
+
+# Count the merge keywords in each variant raw, with quotes / escapes stripped
+# (`m''erge`, `me\rge`, `$'merge'`), and as lexed words; the largest count wins.
+my $KW = qr{\bpr(?:\s|\\.)+merge\b|/pulls/[^/\s'"]+/merge\b|mergePullRequest|enablePullRequestAutoMerge}i;
+sub kw_count { my $n = () = $_[0] =~ /$KW/g; $n }
+my $n_kw = 0;
+for my $v (@variants) {
+    my $stripped = $v =~ s/\$(?=['"])//gr =~ s/['"\\`]//gr;
+    my $lexed = join "\n", map { join ' ', @$_ } segments($v);
+    for my $c (kw_count($v), kw_count($stripped), kw_count($lexed)) { $n_kw = $c if $c > $n_kw }
+}
+
+# The word after `gh [-R <repo>|--repo[=<repo>]] pr` must be a plain subcommand, or the
+# keyword scan cannot see what it is: `gh pr $'\x6derge'`, `gh pr -R x merge`, `gh pr $SUB`.
+for my $v (@variants) {
+    for my $s (segments($v)) {
+        my @w = @$s;
+        for my $i (grep { is_gh($w[$_]) } 0 .. $#w) {
+            my $j = $i + 1;
+            while ($j < @w && $w[$j] =~ /^-/) { $j += ($w[$j] eq '-R' || $w[$j] eq '--repo') ? 2 : 1 }
+            next unless ($w[$j] // '') eq 'pr';
+            my $sub = $w[$j + 1] // '';
+            block("`gh pr` is followed by `$sub`, not a plain subcommand, so the gate cannot tell whether it merges. "
+                . "Write the subcommand first, as a plain word (`gh pr <subcommand> ...`).")
+                unless $sub =~ /^[a-z][a-z-]*$/ || $sub eq '--help' || $sub eq '-h';
+        }
+    }
+}
+exit 0 unless $n_kw;
+
+my @merges = grep { @$_ >= 3 && is_gh($_->[0]) && $_->[1] eq 'pr' && $_->[2] eq 'merge' } @segs;
+block("this command mentions a merge ($n_kw place(s)) $UNCHECKABLE") unless @merges == 1 && $n_kw == 1;
 
 # --- merge arguments ----------------------------------------------------------------
 my %VALUE_FLAG = map { $_ => 1 } qw(-b --body -F --body-file -t --subject -A --author-email --match-head-commit -R --repo);
@@ -166,7 +284,8 @@ my @pos;
 my ($repo_flag, $mhc) = ('', '');
 for (my $i = 0; $i < @tok; $i++) {
     my $t = $tok[$i];
-    block("`--auto` queues a merge for later, after this gate has run. Merge when the review passes instead.") if $t eq '--auto';
+    block("`--auto` queues a merge for later, after this gate has run. Merge when the review passes instead.")
+        if $t =~ /^--auto(?:=|$)/;
     if ($t =~ /^\d*[<>]+&?\d*$/) { $i++; next }      # redirection with a separate target
     next if $t =~ /^\d*[<>]/;                          # redirection with an attached target
     my ($name, $val);
