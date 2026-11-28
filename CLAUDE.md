@@ -87,7 +87,7 @@ The owner has authorised the agent to **research independently inside the M04 tr
 
 The freedom stops at these limits, which are not optional. The mechanism in full is `docs/agents/training-loop.md`.
 - **Protocol first.** Exploration runs on development data: the walk-forward folds and the debug window. A result becomes a claim only under a pre-registered, hashed protocol version (PRD #120 slice 5). Never tune on the final holdout or the unread slice. An opened holdout becomes development data, so the next claim needs fresh forward data. Report best-of-N with N, and keep every run as evidence, including failures.
-- **The goalposts are certified, never moved.** On 2026-11-28 the owner delegated certification of the M04 targets and protocol to the agent ("ไม่ต้องถามผม ให้ทำการพิจารณาอย่างเข้มข้นแล้วเริ่ม loop training ได้เลย"). The agent certifies targets, gates, the holdout window and the budget for **Shadow/Demo qualification**, under these rules:
+- **The goalposts are certified, never moved.** On 2026-11-28 the owner delegated certification of the M04 targets and protocol to the agent, telling it not to ask, but to deliberate rigorously and start the training loop. The owner's exact words are quoted in `docs/research/2026-11-28-m04-protocol-v1.md`. The agent certifies targets, gates, the holdout window and the budget for **Shadow/Demo qualification**, under these rules:
   - every certified value rests on research **plus an advisor review**;
   - every certified value carries the line "certified by agent under owner delegation, 2026-11-28" and a rationale;
   - **a target is never lowered after its results are seen**;

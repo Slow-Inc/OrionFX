@@ -46,7 +46,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Item | Definition | Status |
 |---|---|---|
 | Triple-barrier label | `m07.labels.tb.v2`: **one exhaustive label per row**, UP, DOWN or FLAT.<br>- The barriers are symmetric at ±d, where d = `TARGET_ATR`·ATR_M15, on the bid path (the trade path for a last-trade source such as GC).<br>- **No costs inside the label.** EV = size·(d·(p_side − p_opp) − (spread + 2·slip)) − commission.<br>- A bar that touches both barriers is ambiguous and excluded, and its rate is reported per era.<br>tb.v1 was rejected: it gave one label per side, with the spread inside the trigger, so it was side-dependent and spread-dependent. Full definition: protocol v1 §2 (`docs/research/2026-11-28-m04-protocol-v1.md`). | [planned #129] |
-| Stationary transforms | One M04 transform path with its own schema version. Training and the predictor adapter call the same code. Examples: `(close−sma)/atr`, Bollinger position, `macd/atr`, log returns, `spread/atr`, `sin`/`cos` of the UTC hour. `tick_volume` is excluded or normalised per source. | [planned #129] |
+| Stationary transforms | One M04 transform path with its own schema version. Training and the predictor adapter call the same code. Examples: `(close−sma)/atr`, Bollinger position, `macd/atr`, log returns, `sin`/`cos` of the UTC hour. Spread and volume features are excluded for the GC corpus, and are otherwise excluded or self-normalised per source (protocol v1 §4). | [planned #129] |
 | Offline/online parity | Live model evaluation uses the same label version and transforms as training. The raw `move` stays as raw data. | [planned #129] |
 
 ## 4. Training
@@ -102,7 +102,7 @@ Rules, adopted from mip-research (PRD #120):
 9. **Say who verified.** Every report states what was verified and by whom.
 10. **Stop rule.** If the budget runs out before the targets are met, stop and report. Never lower the targets.
 
-**Certification (owner delegation, 2026-11-28).** The owner delegated certification of the M04 targets and protocol to the agent ("ไม่ต้องถามผม ให้ทำการพิจารณาอย่างเข้มข้นแล้วเริ่ม loop training ได้เลย"). The delegation has these rules:
+**Certification (owner delegation, 2026-11-28).** The owner delegated certification of the M04 targets and protocol to the agent: do not ask, deliberate rigorously, and start the training loop. The exact quote is in protocol v1. The delegation has these rules:
 - every certified value rests on research plus an advisor review;
 - every certified value carries the line "certified by agent under owner delegation, 2026-11-28" and a rationale;
 - a target is never lowered after its results are seen;
@@ -147,7 +147,7 @@ Source: `docs/research/2026-11-28-m04-quant-upgrade-proposals.md`.
 | 0 | **EV and the label price the same event.** EV assumes a symmetric ±`TARGET_ATR`·ATR_M15 bet (`fusion.expected_value`). Triple-barrier barriers, the treatment of FLAT, the horizon and any meta-label P(win) must match it, or EV must change with them. | #129 | [planned] |
 | 1 | **Session and liquidity features** from the gold bars: distance to the previous session's high and low, the London/NY volatility ratio, spread anomalies. | #129 | [planned] |
 | 2 | **Uniqueness weights and time decay.** Pre-register whether claim metrics are weighted. Time decay is a hyperparameter inside the budget. | #130 | [planned] |
-| 3 | **Horizon M15–H1 as configs.** Watch label overlap. | #130/#132 | [planned] |
+| 3 | **Horizon.** Protocol v1 pins B0 at H1. A move inside M15–H1 cannot lower the FLAT share or cost/d at k = 1 (protocol v1 §6). Horizon arms that change `TARGET_ATR` or go beyond H1 are out of v1 scope, and belong to a v2. | #130/#132 | [planned] |
 | 4 | **Volatility-model WAIT gate.** Block-only, following the `NEWS_VETO` pattern. New evidence contract. Baseline is persistence plus the M02 regime rule. | #139 | [planned] |
 | 5 | **Meta-labeling arm.** Predictor-port contract change. Needs an evaluation path for strategy eligibility over history (the same seam as #127). The dataset pins the strategy rule hash. | #140 | [planned] |
 | 6 | **Cross-market data-only symbols** (XAGUSD and a USD proxy). Schema bump, never tradable, one session schedule per symbol. Admitted only with a live source. Measure the skew between the training feed and the serving feed. | #141 | [planned] |
