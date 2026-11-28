@@ -414,6 +414,43 @@
       "title": "CandleClosedEvent",
       "type": "object"
     },
+    "ClassProbabilities": {
+      "additionalProperties": false,
+      "description": "Calibrated probabilities of the triple-barrier label's three outcomes (#129):\nthe upper barrier first (UP), the lower first (DOWN), neither (FLAT). The label is\nthe same for both sides, so one triple prices a long (p_side = up) and a short\n(p_side = down). They sum to 1. `label_version` names the label they were calibrated\non.",
+      "properties": {
+        "down": {
+          "ge": 0,
+          "le": 1,
+          "title": "Down",
+          "type": "string"
+        },
+        "flat": {
+          "ge": 0,
+          "le": 1,
+          "title": "Flat",
+          "type": "string"
+        },
+        "label_version": {
+          "minLength": 1,
+          "title": "Label Version",
+          "type": "string"
+        },
+        "up": {
+          "ge": 0,
+          "le": 1,
+          "title": "Up",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_version",
+        "up",
+        "down",
+        "flat"
+      ],
+      "title": "ClassProbabilities",
+      "type": "object"
+    },
     "CloseReason": {
       "enum": [
         "TARGET_TRIGGERED",
@@ -2784,6 +2821,17 @@
     "PredictionGenerated": {
       "additionalProperties": false,
       "properties": {
+        "class_probabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClassProbabilities"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "data_quality": {
           "$ref": "#/$defs/DataQuality"
         },

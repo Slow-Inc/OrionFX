@@ -33,7 +33,7 @@ from app.core.contracts import StrategyManifest, StrategyProposal, sha256_ref
 from app.core.enums import Direction, IntentAction, Mode, Timeframe
 from app.core.ids import new_id
 from app.decision.context import DecisionContext
-from app.market_data.features import feature_key
+from app.market_data.features import ATR_M15, feature_key
 from app.prediction.card import unique_leader
 
 D = Decimal
@@ -51,7 +51,6 @@ STRUCT_M15 = feature_key(M15, "CAT-T03-04", "structure")
 ADX_H1 = feature_key(H1, "CAT-T01-07", "adx")
 RANGE_M15 = feature_key(M15, "CAT-T03-06", "range")
 RSI_M5 = feature_key(M5, "CAT-T01-04", "rsi")
-ATR_M15 = feature_key(M15, "CAT-T01-06", "atr")
 SUPPORT_M15 = feature_key(M15, "CAT-T03-03", "support")
 RESIST_M15 = feature_key(M15, "CAT-T03-03", "resistance")
 

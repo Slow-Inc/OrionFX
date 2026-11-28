@@ -23,6 +23,7 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from app.core.config import ProtectedPolicy
 from app.core.contracts import (
     SNAPSHOT_STALE_AFTER,
     BotPosition,
@@ -244,7 +245,7 @@ class DecisionLoop:
         cycle = CycleView(cycle_id, len(positions), closed_at, self._pending(now))
         net = None if upd is None or cycle_id is None else upd.cycle_net_estimated_usd
         held = _held(positions, net) if positions else None
-        pv = self._policy.policy_version
+        pv = ProtectedPolicy().policy_version  # M05's rules; M06 verdicts carry the risk policy
         if held is None:
             d = decide(ctx, proposals, evidence, cycle=cycle, costs=self._costs,
                        symbol=self._symbol, policy_version=pv)  # fmt: skip

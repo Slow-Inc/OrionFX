@@ -276,15 +276,18 @@ class BarLog:
         start: datetime,
         end: datetime,
         model_version: str | None = None,
+        dataset_version: str | None = None,
     ) -> list[RecordedPrediction]:
-        """Recorded predictions of `model_id` (one version if given) with
-        `start <= as_of < end`, oldest first."""
+        """Recorded predictions of `model_id` (one model and one candle dataset version
+        if given) with `start <= as_of < end`, oldest first."""
         rows = self._conn.execute(
             "SELECT as_of, provenance, body FROM learning_predictions WHERE symbol = ?"
-            " AND model_id = ? AND (? IS NULL OR model_version = ?) AND as_of >= ?"
+            " AND model_id = ? AND (? IS NULL OR model_version = ?)"
+            " AND (? IS NULL OR dataset_version = ?) AND as_of >= ?"
             " AND as_of < ? ORDER BY as_of, model_version, dataset_version",
-            (symbol, model_id, model_version, model_version, utc_iso(start), utc_iso(end)),
-        ).fetchall()
+            (symbol, model_id, model_version, model_version, dataset_version, dataset_version,
+             utc_iso(start), utc_iso(end)),
+        ).fetchall()  # fmt: skip
         return [_recorded(a, pv, b) for a, pv, b in rows]
 
     def prediction_outcomes(
