@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from app.core.contracts import CandleClosed
 from app.core.enums import Timeframe
-from app.learning.cost_log import era_costs
+from app.learning.cost_log import era_costs, spread_profile
 from app.market_data.port import M1Bar
 
 D = Decimal
@@ -53,3 +53,15 @@ def test_minutes_before_any_atr_have_a_spread_but_no_ratio() -> None:
     t = datetime(2008, 1, 2, tzinfo=UTC)
     (row,) = era_costs([_m1(t, "0.5")], [], sealed_from=datetime(2025, 5, 28, tzinfo=UTC))
     assert row.median_spread == D("0.5") and row.median_spread_over_atr is None
+
+
+def test_the_spread_profile_is_a_median_per_month_and_utc_hour_before_the_seal() -> None:
+    """The combined-source rule: Dukascopy's measured spread priced per (year, month, hour)
+    for spread-less HistData bars. A cost input only."""
+    t = datetime(2023, 3, 6, 14, tzinfo=UTC)
+    m = timedelta(minutes=1)
+    rows = [_m1(t, "0.3"), _m1(t + m, "0.5"), _m1(t + 2 * m, "0.4"),
+            _m1(t + timedelta(hours=1), "0.9"), _m1(t, None),
+            _m1(datetime(2024, 1, 2, tzinfo=UTC), "7")]  # sealed  # fmt: skip
+    profile = spread_profile(rows, sealed_from=datetime(2023, 11, 28, tzinfo=UTC))
+    assert profile == {(2023, 3, 14): D("0.4"), (2023, 3, 15): D("0.9")}

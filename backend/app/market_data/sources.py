@@ -65,12 +65,14 @@ SOURCE_SCHEDULES: Mapping[str, SessionSchedule] = {
     "mt5": XAUUSD_NY_1700,  # [PROPOSED] confirm against the broker's symbol spec (#17)
     "firstrate-gc": CME_GLOBEX_GC,  # [PROPOSED] CME Globex hours; no holiday calendar
     "dukascopy-xauusd": XAUUSD_NY_1700,  # [PROPOSED] broker-style; checked by audit on import
+    "histdata-xauusd": XAUUSD_NY_1700,  # [PROPOSED] broker-style after EST(+5h) to UTC
 }
 """XAUUSD session schedule per data source."""
 
 NO_TRADE_FILL: Mapping[str, timedelta] = {
     "firstrate-gc": timedelta(minutes=15),  # [PROPOSED] check the run lengths on import
     "dukascopy-xauusd": timedelta(minutes=15),  # [PROPOSED] a minute with no tick
+    "histdata-xauusd": timedelta(minutes=15),  # [PROPOSED] a minute with no tick
 }
 """The longest run of open-session minutes with no bar that a source's import fills as
 "no trade": a flat bar at the previous close, volume 0. Only a source that omits no-trade
@@ -84,12 +86,13 @@ UNREAD_SLICE = (datetime(2023, 11, 28, tzinfo=UTC), HOLDOUT[0])
 """Protocol v1 unread slice, [start, end): the 6 months before the holdout (#132)."""
 SEALED_FROM: Mapping[str, datetime] = {
     "dukascopy-xauusd": UNREAD_SLICE[0],
+    "histdata-xauusd": UNREAD_SLICE[0],
     "firstrate-gc": UNREAD_SLICE[0],
 }
 """Per real-market data source: nothing at or after this instant may be recorded, exported
 or read by a statistic until a recorded protocol step opens the holdout. The generic
 `dukascopy` CSV key is not sealed (synthetic tests use it), so real data goes through
-`dukascopy-xauusd` (and a HistData fallback needs its own sealed key)."""
+`dukascopy-xauusd` or `histdata-xauusd`."""
 
 
 class HoldoutToken(Protocol):

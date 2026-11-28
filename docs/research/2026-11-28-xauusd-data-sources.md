@@ -10,8 +10,8 @@ Nothing was bought, no account was created, no terms were accepted, and no data 
 
 The owner: "ถ้าฟรีและแจกแบบ public แสดงว่าสามารถนำมาใช้ได้... อย่าระวังเกินไป" (if it is free and publicly distributed, it may be used; do not be over-cautious).
 
-- **Primary corpus: Dukascopy XAUUSD** (spot, M1 bid and ask candles from the public datafeed; `app/market_data/dukascopy.py`, data source `dukascopy-xauusd`). No purchase is needed.
-- **Fallback: HistData** (spot bid M1). The permission draft stays optional.
+- **Update, same day (owner decision 2026-11-28; downloads authorised by the owner: "อนุญาตให้ download ทุกอย่างที่จำเป็นในการ train"):** Dukascopy throttles hard (15–27 s per request and 503s under mild parallelism on Colab, so more than 50 h for the full range). **HistData is the bulk M1 corpus** (spot bid M1 from 2009; `app/market_data/histdata.py`, data source `histdata-xauusd`, EST without DST converted to UTC, no spread). **Dukascopy stays the measured-spread source** for the recent era (`dukascopy-xauusd`). The combined-source rule (`cost_log.spread_profile`): Dukascopy's median spread per (year, month, UTC hour) is a cost input only for HistData bars, never a feature. The HistData permission draft is no longer needed.
+- First pick that morning: Dukascopy XAUUSD as the primary corpus (spot, M1 bid and ask candles from the public datafeed; `app/market_data/dukascopy.py`). No purchase is needed.
 - FirstRate GC is no longer needed; its importer stays as a reference source. The ledger's purchase row is withdrawn.
 - The terms reading below and in `2026-11-28-dukascopy-terms.md` is kept as history: it records what the terms say, and the owner decided with it in view.
 
