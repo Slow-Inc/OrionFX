@@ -14,7 +14,7 @@ from app.core.enums import DataQuality, Timeframe
 from app.market_data.candles import CandleEngine
 from app.market_data.features import build_feature_snapshot
 from app.market_data.port import RawTick
-from app.market_data.session import XAUUSD_NY_1700, SessionSchedule, audit
+from app.market_data.session import CME_GLOBEX_GC, XAUUSD_NY_1700, SessionSchedule, audit
 from app.market_data.techniques.indicators import make_library, observe
 
 D = Decimal
@@ -186,3 +186,18 @@ def test_audit_finds_bars_in_closed_time_and_real_gaps() -> None:
                          close_time=t + H1, open=c, high=c, low=c, close=c, volume=None,
                          available_at=t + H1)  # fmt: skip
     assert not audit(S, [*bars, stray]).fits
+
+
+def test_the_cme_globex_gold_schedule_closes_17_to_18_new_york_time_across_dst() -> None:
+    """CME Globex GC: Sunday-Friday 18:00-17:00 ET with a 60-minute break from 17:00 ET
+    (FirstRate's FAQ: "6pm US Eastern on the previous calendar day to 5pm")."""
+    g = CME_GLOBEX_GC
+    assert g.schedule_id == "cme-globex-gc-et" and g.tz == "America/New_York"
+    assert g.is_open(WED_JAN.replace(hour=21, minute=59))  # 16:59 EST
+    assert not g.is_open(WED_JAN.replace(hour=22))  # 17:00 EST
+    assert g.is_open(WED_JAN.replace(hour=23))  # 18:00 EST
+    assert not g.is_open(WED_JUL.replace(hour=21, minute=30))  # 17:30 EDT
+    assert g.is_open(WED_JUL.replace(hour=22))  # 18:00 EDT
+    assert not g.is_open(datetime(2026, 1, 9, 22, tzinfo=UTC))  # Friday 17:00 EST
+    assert not g.is_open(datetime(2026, 1, 11, 22, 55, tzinfo=UTC))  # Sunday 17:55 EST
+    assert g.is_open(datetime(2026, 1, 11, 23, tzinfo=UTC))  # Sunday 18:00 EST

@@ -3,7 +3,9 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
 
 - `DatasetManifest`: an immutable, hashed data window. Its splits are exactly train,
   then validation, then an optional holdout, in time order, non-overlapping and
-  inside the window, so training cannot see later data.
+  inside the window, so training cannot see later data. A walk-forward dataset (#128)
+  instead has the splits development and holdout, and a fold plan inside development
+  whose every fold trains, then embargoes, then tests.
 - `ModelLifecycle` on the M08 registry:
   - `propose_candidate` takes a `ModelCard` (the one source of hash, modes and
     validation metrics), needs at least one known dataset, registers the card's
@@ -30,7 +32,7 @@ import sqlite3
 from collections import Counter
 from collections.abc import Callable, Collection, Hashable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Self
 
@@ -61,6 +63,7 @@ OWNER_ACTOR = "owner"
 SPLIT_ORDER = ("train", "validation", "holdout")
 RATE_Q = D("0.000001")
 """The precision a manifest records label rates at."""
+FOLD_SPLITS = ("development", "holdout")
 
 
 class LifecycleRefused(ValueError):
@@ -89,6 +92,15 @@ class LabelEraStats(ContractModel):
     """FLAT over every class label (RATE_Q precision)."""
 
 
+class FoldWindow(ContractModel):
+    """One walk-forward fold (X02 `walk_forward`): train, then an embargo, then test."""
+
+    train_start: UtcDatetime
+    train_end: UtcDatetime
+    test_start: UtcDatetime
+    test_end: UtcDatetime
+
+
 class DatasetManifest(ContractModel):
     dataset_id: str
     version: str
@@ -100,11 +112,21 @@ class DatasetManifest(ContractModel):
     label_stats: list[LabelEraStats] = Field(default_factory=list)
     """The barrier labels' dual-touch rate and FLAT share per era (#129); empty for a
     manifest saved before them."""
+    folds: list[FoldWindow] = Field(default_factory=list)
+    """A walk-forward fold plan (#128). With folds, the splits are `development` (which
+    holds every fold) and the sealed `holdout`."""
+    embargo: timedelta = timedelta(0)
+    data_sources: dict[str, str] = Field(default_factory=dict)
+    """Candle dataset version -> its data source, for every version in the dataset."""
 
     @model_validator(mode="after")
     def _isolated(self) -> Self:
         names = tuple(s.name for s in self.splits)
-        if names not in (SPLIT_ORDER[:2], SPLIT_ORDER):
+        if self.folds:
+            if names != FOLD_SPLITS:
+                raise ValueError("a fold plan needs splits development, holdout in that order")
+            self._folds_isolated()
+        elif names not in (SPLIT_ORDER[:2], SPLIT_ORDER):
             raise ValueError("splits must be train, validation[, holdout] in that order")
         previous_end = self.window_start
         for s in self.splits:
@@ -114,6 +136,23 @@ class DatasetManifest(ContractModel):
                 raise ValueError(f"split {s.name} overlaps the one before it")
             previous_end = s.end
         return self
+
+    def _folds_isolated(self) -> None:
+        """No fold trains on or after its test, an embargo separates them, test windows
+        run in time order, and the embargo also separates the last test from the holdout
+        (#128 review constraints (c) and (d))."""
+        if self.embargo < timedelta(0):
+            raise ValueError("embargo must not be negative")
+        development = self.splits[0]
+        previous_test_end = development.start
+        for f in self.folds:
+            if not (development.start <= f.train_start < f.train_end
+                    and f.train_end + self.embargo <= f.test_start < f.test_end
+                    and f.test_end + self.embargo <= development.end):  # fmt: skip
+                raise ValueError("a fold must train, then embargo, then test, inside development")
+            if f.test_start < previous_test_end:
+                raise ValueError("fold test windows must run in time order")
+            previous_test_end = f.test_end
 
     @property
     def ref(self) -> str:

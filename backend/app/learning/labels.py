@@ -55,6 +55,7 @@ from app.learning.bars import BarLog, Horizon, RecordedPrediction
 from app.learning.moves import FINEST_FIRST
 from app.market_data.features import ATR_M15, FEATURE_SCHEMA
 from app.market_data.session import SessionSchedule, next_slot
+from app.market_data.sources import SourceRegistry
 from app.market_data.store import CandleStore
 
 __all__ = [
@@ -238,8 +239,10 @@ def prediction_labels(
     label the training export carries (LABEL_VERSION, the model's own horizon, the ATR
     of the bar's recorded M02 snapshot on `timeframe`), from bars known at `now`. Only
     predictions recorded on `candles`' dataset version are scored.
-    `session` has no default: it must be the schedule the export and recorder used."""
+    `session` has no default; a version bound to a data source is read on its source's
+    schedule, as the export and recorder read it (a different one given is refused)."""
     log = BarLog(conn)
+    session = SourceRegistry(conn).resolve_schedule(candles.dataset_version, session)
     atr = {r.snapshot.as_of: r.snapshot.values.get(ATR_M15)
            for r in log.snapshots(symbol, timeframe, start=start, end=end)
            if r.dataset_version == candles.dataset_version

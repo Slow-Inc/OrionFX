@@ -15,6 +15,10 @@ provenance: a BACKFILL prediction may be in-sample for a model trained on those 
 (cards have no training cutoff yet to refuse such bars). These are learning rows: never
 journaled as `prediction.generated`, never trading evidence.
 
+Features are built on the market's session schedule. For a candle dataset version bound
+to a data source (#128), that is the source's schedule, so an imported history and the
+live feed are each read on their own schedule.
+
 A bar is tagged LIVE only when it is recorded within `LIVE_WITHIN` of becoming
 available (the bot saw it as it happened); bars caught up after downtime, and every bar
 of a back-fill, are BACKFILL and carry no account mode. Each pass reads only bars that
@@ -42,6 +46,7 @@ from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.learning.bars import BarLog, Horizon, Provenance
 from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, build_feature_snapshot
 from app.market_data.session import SessionSchedule
+from app.market_data.sources import SourceRegistry
 from app.market_data.store import CandleStore
 from app.prediction.engine import LoadedPredictor, Refused, predict
 from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
@@ -80,9 +85,10 @@ class MarketRecorder:
         session: SessionSchedule | None,
     ) -> None:
         self._conn, self._candles, self._symbol = conn, candles, symbol
-        # The market's trading schedule; None means 24/7. No default: the export and
-        # label scoring must use the same one (train/serve parity, #129).
-        self._session = session
+        # The market's trading schedule; None means 24/7. No default (#129): a version
+        # bound to a data source uses that source's schedule, the one the export reads
+        # it on, and a different one given is refused (#128).
+        self._session = SourceRegistry(conn).resolve_schedule(candles.dataset_version, session)
         self._timeframes = [timeframe, *context_timeframes]
         self._horizons = list(horizons)
         step = TIMEFRAME_DURATION[timeframe]
