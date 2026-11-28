@@ -18,6 +18,8 @@
     "**/.env*",
     ".github/workflows/**",
     ".github/actions/**",
+    ".github/opencode/**",
+    ".opencode/**",
     ".claude/**",
     ".githooks/**"
   ],

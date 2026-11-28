@@ -172,6 +172,18 @@ my $cmd = H($in->{tool_input})->{command} // '';
 $cmd = '' if ref $cmd;
 
 # --- split into command segments of words (a small shell lexer) -------------------
+# bash ANSI-C quoting: the text of a $'...' span, with its escapes decoded the way bash
+# does (`gh $'\x70r' merge` is `gh pr merge`).
+sub ansi_c {
+    my $s = shift;
+    my %named = (n => "\n", t => "\t", r => "\r", a => "\a", b => "\b", e => "\e", E => "\e", f => "\f", v => "\x0b");
+    $s =~ s{\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|([0-7]{1,3})|c(.)|(.))}{
+        defined $1 ? chr hex $1 : defined $2 ? chr hex $2 : defined $3 ? chr hex $3
+      : defined $4 ? chr oct $4 : defined $5 ? chr(ord(uc $5) ^ 64) : ($named{$6} // $6) }gse;
+    return $s;
+}
+# The same, applied to every $'...' span of a text (bash only).
+sub decode_ansi_c { my $s = shift; $ps ? $s : $s =~ s{\$'((?:\\.|[^'\\])*)'}{ansi_c($1)}gser }
 sub segments {
     my ($s) = @_;
     my (@segs, @words);
@@ -180,6 +192,13 @@ sub segments {
     my $ends = sub { $endw->(); push @segs, [@words] if @words; @words = () };
     while ($i < $n) {
         my $c = substr($s, $i, 1);
+        if (!$ps && $c eq '$' && substr($s, $i + 1) =~ /^'((?:\\.|[^'\\])*)'?/s) {   # $'...'
+            $w .= ansi_c($1); $inw = 1; $i += 1 + length $&; next;
+        }
+        if (!$ps && $c eq '$' && substr($s, $i + 1, 1) eq '"') { $i++; next }      # $"..." = "..."
+        if ($c eq '#' && !$inw) {                                                   # comment to end of line
+            my $j = index($s, "\n", $i); $i = $j < 0 ? $n : $j; next;
+        }
         if ($c eq "'") {
             my $j = index($s, "'", $i + 1); $j = $n if $j < 0;
             $w .= substr($s, $i + 1, $j - $i - 1); $inw = 1; $i = $j + 1; next;
@@ -288,8 +307,9 @@ sub kw_count { my $n = () = $_[0] =~ /$KW/g; $n }
 my $n_kw = 0;
 for my $v (@variants) {
     my $stripped = $v =~ s/\$(?=['"])//gr =~ s/['"\\`]//gr;
+    my $decoded = decode_ansi_c($v) =~ s/['"\\`]//gr;   # `gh $'\x70r' merge`
     my $lexed = join "\n", map { join ' ', @$_ } segments($v);
-    for my $c (kw_count($v), kw_count($stripped), kw_count($lexed)) { $n_kw = $c if $c > $n_kw }
+    for my $c (kw_count($v), kw_count($stripped), kw_count($decoded), kw_count($lexed)) { $n_kw = $c if $c > $n_kw }
 }
 
 # The word after `gh [-R <repo>|--repo[=<repo>]] pr` must be a plain subcommand, or the

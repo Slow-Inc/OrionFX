@@ -412,6 +412,13 @@ reset; run block "PowerShell expression argument" "gh pr merge 7 --squash $MHC (
 reset; run block "PowerShell splatting" "gh pr merge 7 --squash $MHC @a" "cannot check" PowerShell
 reset; run block "unknown flag" "gh pr merge 7 --squash $MHC --frobnicate" "unknown"
 reset; run block "--admin is refused" "gh pr merge 7 --squash $MHC --admin" "--admin"
+# OpenCode round 2 on PR #150: ANSI-C escapes in the `pr` word, trailing comments, riskPaths.
+P "ANSI-C hex-encoded pr"      "gh \$'\\x70r' merge 7"
+P "ANSI-C hex in part of pr"   "gh p\$'\\x72' merge 7"
+P "ANSI-C octal-encoded pr"    "gh \$'\\160\\162' merge 7"
+reset; run block "ANSI-C pr with a passing review is still refused" "gh \$'\\x70r' merge 7 --squash $MHC" "cannot check"
+reset; run allow "valid merge with a trailing comment" "$M # merging after review"
+reset; files '[{"filename":".github/opencode/post.py"}]'; run block "the OpenCode posting scripts are a risk path" "$M" "risk paths \(.github/opencode/post.py\)"
 reset; run allow "quoted subject with parens and braces" "gh pr merge 7 --squash $MHC --subject 'fix(hooks): {x} (#1)'"
 reset; run allow "combined short flags and --delete-branch=false" "gh pr merge 7 -sd --delete-branch=false $MHC"
 
