@@ -5,7 +5,7 @@ the tools used (evidence that skills were loaded) and the token cost, and exits
 non-zero on a model error, an empty answer, or a policy breach.
 
 Policy canary: the run is allowed only read/glob/grep/list/skill. If any other
-tool *completed* (for example bash or edit), the tool policy was not honoured,
+tool ran without being refused (for example bash or edit), the tool policy was not honoured,
 so the answer is discarded and nothing is posted.
 """
 
@@ -55,7 +55,9 @@ def main(events_path: str, output_path: str, exit_status: int = 0) -> int:
                 tool, status = part.get("tool"), state.get("status")
                 args = json.dumps(state.get("input", {}))[:160]
                 print(f"tool: {tool} {args} -> {status}")
-                if tool not in ALLOWED_TOOLS and status == "completed":
+                # Only a refused call ("error") is safe; any other status of a
+                # disallowed tool (completed, or anything unexpected) is a breach.
+                if tool not in ALLOWED_TOOLS and status != "error":
                     breaches.append(str(tool))
             elif kind == "step_finish":
                 cost += Decimal(str(part.get("cost") or 0))

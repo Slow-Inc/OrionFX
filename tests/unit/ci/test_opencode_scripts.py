@@ -599,3 +599,108 @@ def test_post_owns_the_first_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_header_lookalikes_inside_a_hunk_are_content() -> None:
     diff = "--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+++ new comment\n keep\n"
     assert post.commentable_lines(diff) == {"q.sql": {1, 2}}
+
+
+def test_hunk_counts_default_to_one_and_no_newline_marker_is_skipped() -> None:
+    diff = (
+        "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file\n"
+        "--- a/b.txt\n+++ b/b.txt\n@@ -3 +3,2 @@\n keep\n+added\n"
+    )
+    assert post.commentable_lines(diff) == {"a.txt": {1}, "b.txt": {3, 4}}
+
+
+# --- more triage and language cases --------------------------------------------------------
+
+
+def test_thai_body_with_english_terms_is_not_an_english_section() -> None:
+    assert post.has_english("ระบบ M06 risk veto order ไม่ทำงานเมื่อ quote ผิด") is False
+
+
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        ("M02-market-data", ["needs-info"]),
+        ("ready-for-human", ["M06-risk-execution"]),
+    ],
+    ids=["component-present", "role-present"],
+)
+def test_triage_fills_only_the_missing_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: str, expected: list[str]
+) -> None:
+    answer = '{"component": "M06-risk-execution", "role": "needs-info"}'
+    rec = _triage(tmp_path, monkeypatch, answer, f"{EN}\n{TH}", existing)
+    assert rec.calls == [{"labels": expected}]
+
+
+def test_unknown_status_of_a_disallowed_tool_is_a_breach(tmp_path: Path) -> None:
+    events = [_tool("bash", status="running"), _text("m", "answer")]
+    assert extract.main(_events(tmp_path, events), str(tmp_path / "out.md")) == 1
+
+
+# --- skills JSON and posting causes --------------------------------------------------------
+
+
+def test_skills_prints_one_json_object(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    files = tmp_path / "files.txt"
+    files.write_text("frontend/src/app.tsx\n\n", encoding="utf-8")
+    assert post.skills(str(files)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "ui-audit" in out["run"] and out["skipped"] == [
+        "security-review — no security paths touched"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rc", "category"),
+    [(3, "security"), (2, "config"), (4, "unavailable"), (1, "unavailable"), (7, "unavailable")],
+)
+def test_posting_exit_status_maps_to_a_cause(rc: int, category: str) -> None:
+    assert post.classify(post.cause_for_post(rc))[0] == category
+
+
+def test_successful_post_records_no_cause() -> None:
+    assert post.cause_for_post(0) == ""
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("jq") is None, reason="needs POSIX bash and jq"
+)
+@pytest.mark.parametrize(
+    ("repos", "command", "rc", "revoked"),
+    [
+        ("o/r", "true", 0, True),
+        ("o/r", "exit 2", 2, True),
+        ("o/r,o/other", "true", 3, True),
+        ("FAIL", "true", 4, True),
+    ],
+    ids=["ok-then-revoke", "command-status-passes-through", "wrong-scope", "mint-failed"],
+)
+def test_with_app_token_wraps_mint_run_revoke(
+    tmp_path: Path, repos: str, command: str, rc: int, revoked: bool
+) -> None:
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    for name, text in (("curl", STUB_CURL), ("gh", STUB_GH)):
+        (stubs / name).write_text(text, encoding="utf-8")
+        (stubs / name).chmod(0o755)
+    log = tmp_path / "log"
+    env = {
+        **os.environ,
+        "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        "ACTIONS_ID_TOKEN_REQUEST_URL": "https://example.invalid/token?x=1",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "req",
+        "GITHUB_REPOSITORY": "o/r",
+        "STUB_EXCHANGE_BODY": '{"token": "ghs_x"}',
+        "STUB_EXCHANGE_STATUS": "200",
+        "STUB_REPOS": repos,
+        "STUB_LOG": str(log),
+    }
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/opencode/with-app-token.sh"), "bash", "-c", command],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == rc, result.stderr
+    assert log.exists() is revoked
+    assert "ghs_x" not in result.stdout.replace("::add-mask::ghs_x", "")

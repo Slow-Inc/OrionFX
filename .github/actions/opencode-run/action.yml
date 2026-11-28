@@ -27,8 +27,13 @@ inputs:
     description: The one place the OpenCode Go model is set for every workflow.
     default: opencode-go/deepseek-v4.1-flash
   timeout-minutes:
-    description: Hard cap on the OpenCode process.
+    description: Hard cap on each OpenCode attempt.
     default: '10'
+  retries:
+    description: >-
+      Extra attempts when the model ends cleanly with no answer text (0 or 1).
+      The caller's job timeout must cover (retries + 1) x timeout-minutes.
+    default: '0'
 runs:
   using: composite
   steps:
@@ -57,6 +62,7 @@ runs:
         PROMPT_FILE: ${{ inputs.prompt-file }}
         OUTPUT_FILE: ${{ inputs.output-file }}
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        RETRIES: ${{ inputs.retries }}
         OPENCODE_CONFIG_CONTENT: >-
           {"permission": {"*": "deny", "read": "allow", "glob": "allow",
           "grep": "allow", "list": "allow", "skill": "allow",
@@ -89,9 +95,10 @@ runs:
         export OPENCODE_API_KEY="$token"
         unset token
         events="$RUNNER_TEMP/opencode-events.jsonl"
-        # One retry, only when the model ended without any answer text (seen on
-        # e5d1606: skills loaded, then an empty final step). Never on a breach.
-        for attempt in 1 2; do
+        # Up to RETRIES extra attempts, only when the model ended cleanly without
+        # any answer text (seen on e5d1606). Never after a breach or a timeout.
+        [[ "$RETRIES" =~ ^[01]$ ]] || cause "config: retries must be 0 or 1"
+        for attempt in $(seq 0 "$RETRIES"); do
           status=0
           timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
             opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
@@ -102,7 +109,7 @@ runs:
           extract=0
           env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" \
             "$events" "$OUTPUT_FILE" "$status" || extract=$?
-          if [ "$extract" -eq 75 ] && [ "$attempt" -eq 1 ]; then
+          if [ "$extract" -eq 75 ] && [ "$attempt" -lt "$RETRIES" ]; then
             echo "::warning::OpenCode gave no final answer; retrying once."
             continue
           fi

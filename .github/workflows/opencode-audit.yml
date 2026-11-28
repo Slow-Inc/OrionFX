@@ -79,11 +79,10 @@ jobs:
             echo "No findings; nothing posted."
             exit 0
           fi
-          GH_TOKEN=$(bash .github/opencode/app-token.sh)
-          echo "::add-mask::$GH_TOKEN"
-          export GH_TOKEN
-          trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
           printf '\n\n_Weekly OpenCode audit of %s (advisory, read-only). / ตรวจรายสัปดาห์โดย OpenCode (เป็นคำแนะนำ อ่านอย่างเดียว)_\n' "$GITHUB_SHA" >> "$answer"
+          cat > "$RUNNER_TEMP/file-audit.sh" <<'EOF'
+          set -euo pipefail
+          answer=$1
           title="OpenCode weekly audit findings"
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label repo-ops \
             --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
@@ -93,3 +92,5 @@ jobs:
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
               --label needs-triage --label repo-ops --body-file "$answer"
           fi
+          EOF
+          bash .github/opencode/with-app-token.sh bash "$RUNNER_TEMP/file-audit.sh" "$answer"

@@ -7,7 +7,8 @@ on a new issue. They validate everything the model chose before writing.
   post.py review ANSWER DIFF REPO PR HEAD_SHA
   post.py triage ANSWER REPO ISSUE BODY_FILE EXISTING_LABELS
   post.py notice CAUSE_FILE REPO PR HEAD_SHA
-  post.py skills FILES_TXT   (prints the skills to run, then the skipped ones)
+  post.py skills FILES_TXT   (prints {"run": [...], "skipped": [...]})
+  post.py cause-for-post RC  (prints the cause line for a posting exit status)
 """
 
 import json
@@ -172,8 +173,11 @@ def has_thai(text: str) -> bool:
 
 def has_english(text: str) -> bool:
     # Words outside code spans; identifiers alone do not make an English body.
-    prose = re.sub(r"`[^`]*`|```.*?```", " ", text, flags=re.S)
-    return len(re.findall(r"\b[A-Za-z]{2,}\b", prose)) >= 3
+    # Only lines with no Thai count, so a Thai body that uses English technical terms
+    # is not mistaken for an English section.
+    prose = re.sub(r"```.*?```|`[^`]*`", " ", text, flags=re.S)
+    latin_lines = (line for line in prose.splitlines() if not has_thai(line))
+    return any(len(re.findall(r"\b[A-Za-z]{2,}\b", line)) >= 3 for line in latin_lines)
 
 
 def first_json_object(text: str) -> dict:
@@ -252,9 +256,21 @@ def select_skills(files: list[str]) -> tuple[list[str], list[str]]:
 def skills(files_path: str) -> int:
     files = [f.strip() for f in Path(files_path).read_text(encoding="utf-8").splitlines()]
     run, skipped = select_skills([f for f in files if f])
-    print(", ".join(run))
-    print("; ".join(skipped) or "none")
+    print(json.dumps({"run": run, "skipped": skipped}, ensure_ascii=False))
     return 0
+
+
+def cause_for_post(rc: int) -> str:
+    """Map the posting step's exit status (with-app-token.sh + review) to a cause line."""
+    if rc == 0:
+        return ""
+    if rc == 3:
+        return "security: the OpenCode App token was not scoped to exactly this repository"
+    if rc == AUTH_FAILURE:
+        return "config: GitHub refused the review (401/403); check the OpenCode App's permissions"
+    if rc == 4:
+        return "unavailable: the OpenCode App token exchange failed"
+    return "unavailable: posting the review to GitHub failed"
 
 
 # Causes that mean a broken setup or a broken boundary: fail the check red. Everything
@@ -315,4 +331,7 @@ if __name__ == "__main__":
         sys.exit(notice(*args))
     if command == "skills":
         sys.exit(skills(*args))
+    if command == "cause-for-post":
+        print(cause_for_post(int(args[0])))
+        sys.exit(0)
     sys.exit(f"unknown command {command}")

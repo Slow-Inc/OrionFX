@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           base=_trusted-base/.github
-          if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ]; then
+          if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ] && [ -f "$base/opencode/with-app-token.sh" ]; then
             cp -r "$base" _trusted
           else
             echo "::warning::The base revision has no OpenCode tooling yet (bootstrap); using the PR head copy."
@@ -110,13 +110,11 @@ jobs:
           COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -euo pipefail
-          GH_TOKEN=$(bash _trusted/opencode/app-token.sh)
-          echo "::add-mask::$GH_TOKEN"
-          export GH_TOKEN
-          trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
           printf '\n\n_OpenCode, read-only and advisory. / OpenCode อ่านอย่างเดียว เป็นคำแนะนำเท่านั้น_\n' >> "$RUNNER_TEMP/answer.md"
           if [ "$EVENT" = "pull_request_review_comment" ]; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/comments/$COMMENT_ID/replies" -F body=@"$RUNNER_TEMP/answer.md" > /dev/null
+            endpoint="repos/$GITHUB_REPOSITORY/pulls/$NUMBER/comments/$COMMENT_ID/replies"
           else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" -F body=@"$RUNNER_TEMP/answer.md" > /dev/null
+            endpoint="repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments"
           fi
+          bash _trusted/opencode/with-app-token.sh \
+            gh api --silent --method POST "$endpoint" -F body=@"$RUNNER_TEMP/answer.md"

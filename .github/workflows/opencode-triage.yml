@@ -68,8 +68,4 @@ jobs:
           LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
         run: |
           set -euo pipefail
-          GH_TOKEN=$(bash .github/opencode/app-token.sh)
-          echo "::add-mask::$GH_TOKEN"
-          export GH_TOKEN
-          trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
-          python3 -I .github/opencode/post.py triage "$RUNNER_TEMP/answer.md" "$GITHUB_REPOSITORY" "$ISSUE" .git/opencode-ctx/body.md "$LABELS"
+          bash .github/opencode/with-app-token.sh python3 -I .github/opencode/post.py triage "$RUNNER_TEMP/answer.md" "$GITHUB_REPOSITORY" "$ISSUE" .git/opencode-ctx/body.md "$LABELS"

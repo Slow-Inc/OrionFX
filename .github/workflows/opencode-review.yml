@@ -64,19 +64,26 @@ jobs:
         run: |
           set -euo pipefail
           base=_trusted-base/.github
-          if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ]; then
+          if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ] && [ -f "$base/opencode/with-app-token.sh" ]; then
             cp -r "$base" _trusted
           else
             echo "::warning::The base revision has no OpenCode tooling yet (bootstrap); using the PR head copy."
             cp -r .github _trusted
           fi
+      # Infrastructure failures (GitHub API, model 429, sign-in, App token, timeout)
+      # must not turn the check red: the merge-gate hook is the real gate, and its
+      # fallback needs green CI. The last step classifies the recorded cause and
+      # fails red only on config or security errors.
       - name: Gather context
+        id: gather
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          trap 'echo "unavailable: gathering the PR context from GitHub failed" > "$RUNNER_TEMP/opencode-cause"' ERR
           ctx=.git/opencode-ctx
           mkdir -p "$ctx"
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" > "$ctx/pr.diff"
@@ -93,9 +100,9 @@ jobs:
           # Conditional skills: triggers are computed (and tested) in post.py
           # `select_skills`, not left to the model.
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only > "$ctx/files.txt"
-          python3 -I _trusted/opencode/post.py skills "$ctx/files.txt" > "$ctx/skills.txt"
-          run_skills=$(sed -n 1p "$ctx/skills.txt")
-          skipped=$(sed -n 2p "$ctx/skills.txt")
+          python3 -I _trusted/opencode/post.py skills "$ctx/files.txt" > "$ctx/skills.json"
+          run_skills=$(jq -r '.run | join(", ")' "$ctx/skills.json")
+          skipped=$(jq -r '.skipped | join("; ")' "$ctx/skills.json")
           echo "Skills to run: $run_skills"
           echo "Skipped: $skipped"
           cat > "$ctx/prompt.md" <<EOF
@@ -109,12 +116,9 @@ jobs:
           1. The review summary in Markdown: first line "OpenCode review of $HEAD_SHA (advisory)"; then one section per skill that ran, in the order above, in the exact format its SKILL.md defines, with severity tags [blocker], [major], [minor] or [nit] at the start of each finding bullet; then a "Skipped:" list with one "- <skill> — <reason>" line per skipped skill. Do not write a Verdict line; the poster computes it.
           2. At the very end, one fenced code block whose info string is exactly "json opencode-inline", holding a JSON array with one entry per finding that points at a line added or kept in the diff: {"path": "<file path as in the diff>", "line": <line number in the new version of the file>, "body": "[severity] finding. Why. Suggested fix."}. At most 15 entries. Findings that cannot be tied to a diff line stay only in the summary. Use [] if there are none.
           EOF
-      # Infrastructure failures (model 429, sign-in, App token, timeout) must not turn
-      # the check red: the merge-gate hook is the real gate, and its fallback needs
-      # green CI. The last step classifies the cause and fails red only on config or
-      # security errors.
       - name: Run OpenCode
         id: run
+        if: steps.gather.outcome == 'success'
         continue-on-error: true
         uses: ./_trusted/actions/opencode-run
         with:
@@ -122,6 +126,7 @@ jobs:
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           timeout-minutes: '10'
+          retries: '1'
       - name: Submit COMMENT review as the OpenCode app
         id: post
         if: steps.run.outcome == 'success'
@@ -130,31 +135,14 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          set -euo pipefail
-          cause_file="$RUNNER_TEMP/opencode-cause"
+          set -uo pipefail
           rc=0
-          GH_TOKEN=$(bash _trusted/opencode/app-token.sh) || rc=$?
-          if [ "$rc" -eq 3 ]; then
-            echo "security: the OpenCode App token was not scoped to exactly this repository" > "$cause_file"
-            exit 1
-          elif [ "$rc" -ne 0 ]; then
-            echo "unavailable: the OpenCode App token exchange failed" > "$cause_file"
-            exit 1
-          fi
-          echo "::add-mask::$GH_TOKEN"
-          export GH_TOKEN
-          trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
-          rc=0
-          python3 -I _trusted/opencode/post.py review "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA" || rc=$?
-          if [ "$rc" -eq 2 ]; then
-            echo "config: GitHub refused the review (401/403); check the OpenCode App's permissions" > "$cause_file"
-            exit 1
-          elif [ "$rc" -ne 0 ]; then
-            echo "unavailable: posting the review to GitHub failed" > "$cause_file"
-            exit 1
-          fi
+          bash _trusted/opencode/with-app-token.sh python3 -I _trusted/opencode/post.py review \
+            "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA" || rc=$?
+          python3 -I _trusted/opencode/post.py cause-for-post "$rc" > "$RUNNER_TEMP/opencode-cause"
+          exit "$rc"
       - name: OpenCode unavailable notice
-        if: ${{ !cancelled() && (steps.run.outcome == 'failure' || steps.post.outcome == 'failure') }}
+        if: ${{ !cancelled() && (steps.gather.outcome == 'failure' || steps.run.outcome == 'failure' || steps.post.outcome == 'failure') }}
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
