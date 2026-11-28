@@ -24,7 +24,9 @@
 # subcommand (`gh pr $'merge'`, `gh pr -R x merge` are refused). Heredoc and
 # here-string bodies are data, unless the command also names an interpreter (bash, sh,
 # iex, Invoke-Expression, pwsh, ...): then the bodies are scanned too.
-# `--auto` / `--auto=<anything>` is refused.
+# `--auto` / `--auto=<anything>` and `--admin` are refused; only known `gh pr merge`
+# flags pass, and outside quotes the merge command may not use shell expansion
+# ($ ` { } * ? [ ] ( ), PowerShell @splat) or a word-changing line continuation.
 # NOT CLOSABLE BY A TEXT HOOK: indirect forms such as `$(...)`, variables holding the
 # command, encoded commands, scripts written in one tool call and run in another. The
 # GitHub ruleset on main is the server-side backstop.
@@ -277,8 +279,24 @@ exit 0 unless $n_kw;
 my @merges = grep { @$_ >= 3 && is_gh($_->[0]) && $_->[1] eq 'pr' && $_->[2] eq 'merge' } @segs;
 block("this command mentions a merge ($n_kw place(s)) $UNCHECKABLE") unless @merges == 1 && $n_kw == 1;
 
-# --- merge arguments ----------------------------------------------------------------
+# The shell must not be able to build arguments the lexer did not see: outside quotes,
+# no expansion or expression characters ($ ` { } * ? [ ] ( ), PowerShell @splat), and
+# no line continuation that changes the words (`-\<newline>-auto`).
+sub unquoted {
+    my $s = shift;
+    my $e = quotemeta($ps ? '`' : '\\');
+    $s =~ s{$e.|'[^']*'|"(?:$e.|[^"])*"}{ substr($&, 0, 1) =~ /['"]/ ? "''" : $& }gse;
+    return $s;
+}
+my @merges0 = grep { @$_ >= 3 && is_gh($_->[0]) && $_->[1] eq 'pr' && $_->[2] eq 'merge' } segments($data_variants[1]);
+block("the merge command uses shell expansion, an expression or a line continuation, so the arguments `gh` receives "
+    . "are not the ones checked. $UNCHECKABLE")
+    if unquoted($text) =~ /[\$`{}*?\[\]()]|(?:^|\s)\@/
+    || "@{ $merges0[0] // [] }" ne "@{ $merges[0] }";
+
+# --- merge arguments: known `gh pr merge` flags only --------------------------------
 my %VALUE_FLAG = map { $_ => 1 } qw(-b --body -F --body-file -t --subject -A --author-email --match-head-commit -R --repo);
+my %BOOL_FLAG  = map { $_ => 1 } qw(-d --delete-branch --disable-auto -m --merge -r --rebase -s --squash);
 my @tok = @{ $merges[0] }[3 .. $#{ $merges[0] }];
 my @pos;
 my ($repo_flag, $mhc) = ('', '');
@@ -286,13 +304,20 @@ for (my $i = 0; $i < @tok; $i++) {
     my $t = $tok[$i];
     block("`--auto` queues a merge for later, after this gate has run. Merge when the review passes instead.")
         if $t =~ /^--auto(?:=|$)/;
+    block("`--admin` merges past the branch requirements. The owner runs it by hand if it is ever needed.")
+        if $t =~ /^--admin(?:=|$)/;
     if ($t =~ /^\d*[<>]+&?\d*$/) { $i++; next }      # redirection with a separate target
     next if $t =~ /^\d*[<>]/;                          # redirection with an attached target
     my ($name, $val);
-    if    ($t =~ /^(--[A-Za-z-]+)=(.*)$/s) { ($name, $val) = ($1, $2) }
+    if ($t =~ /^(--[A-Za-z-]+)=(.*)$/s) {
+        ($name, $val) = ($1, $2);
+        next if $BOOL_FLAG{$name} && $val =~ /^(?:true|false)$/;
+        block("unknown `gh pr merge` flag `$t`. $UNCHECKABLE") unless $VALUE_FLAG{$name};
+    }
     elsif ($t =~ /^-R(.+)$/s)              { ($name, $val) = ('-R', $1) }
     elsif ($VALUE_FLAG{$t})                { ($name, $val) = ($t, $tok[++$i] // '') }
-    elsif ($t =~ /^-/)                     { next }
+    elsif ($BOOL_FLAG{$t} || $t =~ /^-[dmrs]+$/) { next }
+    elsif ($t =~ /^-/)                     { block("unknown `gh pr merge` flag `$t`. $UNCHECKABLE") }
     else                                   { push @pos, $t; next }
     $repo_flag = $val if $name eq '-R' || $name eq '--repo';
     $mhc = $val if $name eq '--match-head-commit';

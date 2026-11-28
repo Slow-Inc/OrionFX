@@ -379,6 +379,20 @@ P "heredoc with no end line"   $'cat <<EOF\ngh pr merge 7'
 reset; run block "--auto=true is refused" "gh pr merge 7 --auto=true --squash $MHC" "--auto. queues a merge"
 reset; run block "--auto=1 is refused" "gh pr merge 7 --auto=1 --squash $MHC" "--auto. queues a merge"
 reset; run block "--auto=false is refused too" "gh pr merge 7 --auto=false --squash $MHC" "--auto. queues a merge"
+# The shell can BUILD --auto from text the lexer sees differently; only known flags
+# with plain spelling pass. Again on the passing baseline.
+reset; run block "--auto built by ANSI-C quoting" "gh pr merge 7 --squash $MHC --aut\$'o'" "cannot check|unknown"
+reset; run block "--auto built by brace expansion" "gh pr merge 7 --squash $MHC --{auto,squash}" "cannot check|unknown"
+reset; run block "--auto split by a line continuation" $'gh pr merge 7 --squash '"$MHC"$' -\\\n-auto' "cannot check|unknown"
+reset; run block "--auto hidden in a flag value's brace expansion" "gh pr merge 7 --squash $MHC --subject {x,--auto}" "cannot check"
+reset; run block "glob in the merge arguments" "gh pr merge 7 --squash $MHC --subject *" "cannot check"
+reset; run block "command substitution in the merge arguments" "gh pr merge 7 --squash $MHC \$(echo --auto)" "cannot check"
+reset; run block "PowerShell expression argument" "gh pr merge 7 --squash $MHC ('--au'+'to')" "cannot check" PowerShell
+reset; run block "PowerShell splatting" "gh pr merge 7 --squash $MHC @a" "cannot check" PowerShell
+reset; run block "unknown flag" "gh pr merge 7 --squash $MHC --frobnicate" "unknown"
+reset; run block "--admin is refused" "gh pr merge 7 --squash $MHC --admin" "--admin"
+reset; run allow "quoted subject with parens and braces" "gh pr merge 7 --squash $MHC --subject 'fix(hooks): {x} (#1)'"
+reset; run allow "combined short flags and --delete-branch=false" "gh pr merge 7 -sd --delete-branch=false $MHC"
 
 echo
 echo "$pass passed, $fail failed"

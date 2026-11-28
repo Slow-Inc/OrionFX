@@ -62,7 +62,7 @@ Run it as its own plain command. The gate refuses, fail-closed, any other text t
 - other routes: aliases, `gh -R x pr merge`, `gh api … merge`, two merges in one command;
 - anything but a plain word after `gh [-R <repo>] pr`, such as `gh pr $'…'`, `gh pr -R x merge` or `gh pr $SUB`.
 
-It also refuses a missing or branch selector, a missing or stale `--match-head-commit`, and `--auto` in any spelling (`--auto`, `--auto=…`).
+It also refuses a missing or branch selector, a missing or stale `--match-head-commit`, `--auto` in any spelling (`--auto`, `--auto=…`), and `--admin`. Only known `gh pr merge` flags pass: `--squash`/`--merge`/`--rebase`, `--delete-branch`, `--disable-auto`, `--subject`, `--body`, `--body-file`, `--author-email`, `--repo` and their short forms. The shell must not be able to build arguments the gate did not see. So, outside quotes, the merge command may not contain `$`, a backtick, `{ }`, `* ? [ ]`, `( )` or a PowerShell `@splat`. A line continuation that changes the words is refused too. Put a subject with parentheses in quotes.
 
 `--match-head-commit` makes GitHub refuse the merge if someone pushed after the check. Text that only *mentions* a merge, such as a PR body or a commit message, belongs in a file (`--body-file`, `-F`) or a heredoc. A heredoc or here-string body is data only while no interpreter reads it. If the command also names one (`bash`, `sh`, `source`, `xargs`, `iex`, `Invoke-Expression`, `pwsh`, `powershell`, `python`, …), the bodies are scanned as code. The detection is quote- and comment-aware: `<<EOF` inside quotes or a comment is not a heredoc, and the rest of a `<<EOF` line is still code.
 
