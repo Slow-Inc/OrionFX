@@ -147,7 +147,7 @@ def test_a_managed_decision_replays_too() -> None:
 
 
 def test_add_rules_mirror_entry_rules() -> None:
-    break_even = _manage(evidence=Evidence(forecast=_forecast(p="0.50875")))
+    break_even = _manage(evidence=Evidence(forecast=_forecast(p="0.54625")))
     assert "EV_NOT_POSITIVE" in _reasons(break_even)
     # chart agrees with the position but a forecast opposes it: 1 vs 1 -> no exit, no add
     split = _manage(evidence=Evidence(forecast=_forecast(direction=Direction.DOWN)))

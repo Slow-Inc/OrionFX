@@ -10,13 +10,24 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from tests.integration.test_market_recorder import H4, LAG, M15, T0, Clock, _bar_close, _bars
+from tests.integration.test_market_recorder import (
+    H4,
+    LAG,
+    M15,
+    STEP,
+    T0,
+    Clock,
+    _bar_close,
+    _bars,
+)
 
+from app.core.contracts import CandleClosed
 from app.core.enums import Direction, ForecastLineage, Mode
 from app.learning.bars import BarLog, Provenance
 from app.learning.export import export_dataset, horizon_key
-from app.learning.labels import LABEL_VERSION, prediction_labels
+from app.learning.labels import LABEL_VERSION, LabelStats, Outcome, label_at, prediction_labels
 from app.learning.lifecycle import Split
+from app.market_data.features import ATR_M15
 from app.market_data.store import CandleStore
 from app.prediction.card import ModelCard
 from app.prediction.engine import load_baseline
@@ -107,7 +118,30 @@ def test_predictions_are_scored_on_the_exported_label_version(
             continue  # purged from the export: its window crosses the split end
         barrier = row["barrier_labels"][horizon_key(H4)]
         assert barrier["label_version"] == lab.label_version == LABEL_VERSION
-        assert (barrier["long"], barrier["short"]) == (lab.long.outcome, lab.short.outcome)
+        assert (barrier["outcome"], barrier["timeframe"]) == (lab.outcome, "M15")
         assert row["labels"][horizon_key(H4)]["move"] == "4"  # the raw move is unchanged
-    # closes rise 1 a bar against an ATR of 4: the long reaches TP on the 4th bar
-    assert {lab.long.outcome for _, lab in labelled} == {"UP"}
+    # closes rise 1 a bar against an ATR of 4: the upper barrier is reached on the 4th bar
+    assert {lab.outcome for _, lab in labelled} == {Outcome.UP}
+
+
+def test_a_dual_touch_row_is_left_out_of_the_export_and_counted(
+    conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    store = CandleStore(conn, dataset_version="v1")
+    spike = N - 30
+    _bars(store, [str(2000 + i) for i in range(N)], skip={spike})
+    t, p = T0 + spike * STEP, Decimal(2000 + spike)
+    store.save(CandleClosed(symbol="XAUUSD", timeframe=M15, open_time=t, close_time=t + STEP,
+                            open=p - 3, high=p + 10, low=p - 10, close=p, volume=Decimal(100),
+                            spread=None, available_at=t + STEP + LAG))  # fmt: skip
+    MarketRecorder(conn, candles=store, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
+                   horizons=[H4], provenance=Provenance.BACKFILL,
+                   clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
+    rows = {r["as_of"] for r in _export(conn, tmp_path / "d.jsonl")}
+    ambiguous = _bar_close(spike - 1)  # its first barrier bar is the spike
+    assert ambiguous.isoformat() not in rows and _bar_close(spike - 5).isoformat() in rows
+    snaps = BarLog(conn).snapshots("XAUUSD", M15, start=T0, end=_bar_close(N - 5))
+    stats = LabelStats.of([label_at(store, "XAUUSD", s.snapshot.as_of,
+                                    s.snapshot.values.get(ATR_M15), H4, now=END)
+                           for s in snaps])  # fmt: skip
+    assert stats.ambiguous >= 1 and stats.dual_touch_rate is not None

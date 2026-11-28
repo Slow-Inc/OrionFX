@@ -1,10 +1,14 @@
 """The bet M05's expected value prices and the M07 triple-barrier label measures (#129).
 
 One place for what both sides must agree on, so they cannot drift:
-- TARGET_ATR: the barrier distance in ATR_M15, the same for TP and SL;
-- SLIPPAGE: what every fill is worse by;
+- TARGET_ATR: the barrier distance in ATR_M15, the same up and down;
+- SLIPPAGE: what every fill is worse by (a cost of the trade, never inside the label);
 - LABEL_VERSION: the label a forecast's class probabilities must be calibrated on;
 - the round-trip `UnitCost` and the hurdle `cost_over_atr`.
+
+The label is a cost-free bid-path event (UP, DOWN or FLAT); EV charges every cost once,
+on every outcome: EV = size x d x (p_side - p_opposite - cost_over_atr) with d =
+TARGET_ATR x ATR_M15, a FLAT's drift taken as 0.
 
 A PROXY, not the real trade: the system has no per-position SL/TP (RSK-05). Real exits
 are the Emergency SL, the USD cycle Profit Target and basket trailing. Only the system
@@ -25,7 +29,7 @@ __all__ = [
 
 D = Decimal
 TARGET_ATR = D(1)
-LABEL_VERSION = "m07.labels.tb.v1"
+LABEL_VERSION = "m07.labels.tb.v2"
 SLIPPAGE = D("0.05")
 """Price units every fill is worse by [PROPOSED]."""
 
@@ -43,7 +47,7 @@ class UnitCost:
 
     @property
     def fills(self) -> Decimal:
-        """What the fills cost: inside the label's TP and SL payoffs, paid by a FLAT."""
+        """What the two fills cost: one spread and two slippages."""
         return self.spread + 2 * self.slippage
 
 
@@ -53,14 +57,7 @@ STRESSED_COST = UnitCost(spread=D("0.80"), slippage=D("0.10"), commission=D("0.0
 [PROPOSED]."""
 
 
-ALL_FLAT = D(1)
-
-
-def cost_over_atr(cost: UnitCost, atr: Decimal, *, flat: Decimal = ALL_FLAT) -> Decimal:
-    """The edge `p_side - p_opposite` must beat for a positive EV, in barrier units.
-
-    The label's TP and SL fills already pay `cost.fills`, so only a FLAT (probability
-    `flat`) pays them on top of its drift, which EV takes as 0; the commission is always
-    paid. The default `flat=1` charges every cost on every outcome: the conservative
-    break-even a protocol can use per era without the FLAT probability."""
-    return (flat * cost.fills + cost.commission) / (TARGET_ATR * atr)
+def cost_over_atr(cost: UnitCost, atr: Decimal) -> Decimal:
+    """The edge `p_side - p_opposite` must beat for a positive EV, in barrier units:
+    the break-even a protocol computes per era (with `STRESSED_COST` to stress it)."""
+    return (cost.fills + cost.commission) / (TARGET_ATR * atr)

@@ -1,6 +1,6 @@
 """A forecast carries the calibrated triple-barrier class probabilities (#129): P(UP),
-P(DOWN), P(FLAT) of the label of the bet in the forecast's direction, under the label
-version the model was calibrated on. M05 prices EV from them, so they are emitted only
+P(DOWN), P(FLAT) of the one label both sides share, under the label version the model
+was calibrated on. M05 prices EV from them, so they are emitted only
 from a calibrated card that names its label version, and a model whose three scores do
 not sum to 1 is refused, never repaired."""
 
@@ -28,7 +28,7 @@ def _card(**over: object) -> ModelCard:
         "model_id": "tb", "model_version": "1.0.0", "artifact_hash": None,
         "lineage": ForecastLineage.CHART_ONLY, "feature_schema": "m02.features.v2",
         "required_features": [KEY], "feature_ranges": {}, "horizon": Timeframe.H1,
-        "horizon_bars": 1, "semantics": "calibrated P(outcome) of m07.labels.tb.v1",
+        "horizon_bars": 1, "semantics": "calibrated P(outcome) of m07.labels.tb.v2",
         "calibrated": True, "validation": {}, "evidence_refs": ["calibration-report"],
         "label_version": LABEL_VERSION,
     }  # fmt: skip
@@ -84,10 +84,11 @@ def test_a_model_calibrated_on_another_label_is_refused_at_load() -> None:
         load_baseline(ThreeClass(SCORES, label_version="m07.labels.tb.v0"), mode=Mode.DEMO)
 
 
-def test_a_flat_leader_gives_none() -> None:
+def test_a_flat_leader_still_carries_the_triple() -> None:
     flat = {Direction.UP: "0.2", Direction.DOWN: "0.1", Direction.NEUTRAL: "0.7"}
     p = _predict(ThreeClass(flat))
-    assert p.direction is Direction.NEUTRAL and p.class_probabilities is None  # no side
+    assert p.direction is Direction.NEUTRAL  # the label is the same for both sides
+    assert p.class_probabilities is not None and p.class_probabilities.flat == D("0.7")
 
 
 def test_three_scores_that_do_not_sum_to_one_are_refused() -> None:

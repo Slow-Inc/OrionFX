@@ -178,10 +178,11 @@ _CLASS_SUM_TOLERANCE = Decimal("1e-9")
 
 
 class ClassProbabilities(ContractModel):
-    """Calibrated probabilities of the triple-barrier label's three outcomes (#129) for
-    the bet in the forecast's `direction`: that side's label, whose TP outcome is the
-    direction itself (a long's TP is UP, a short's TP is DOWN) and whose time barrier is
-    FLAT. They sum to 1. `label_version` names the label they were calibrated on."""
+    """Calibrated probabilities of the triple-barrier label's three outcomes (#129):
+    the upper barrier first (UP), the lower first (DOWN), neither (FLAT). The label is
+    the same for both sides, so one triple prices a long (p_side = up) and a short
+    (p_side = down). They sum to 1. `label_version` names the label they were calibrated
+    on."""
 
     label_version: str = Field(min_length=1)
     up: Probability

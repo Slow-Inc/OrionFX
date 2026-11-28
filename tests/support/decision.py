@@ -65,8 +65,8 @@ def _forecast(
     flat: str = "0",
     classes: bool = True,
 ) -> PredictionGenerated:
-    """A calibrated forecast carries class probabilities (as `predict` emits them): P(side)
-    = p, P(FLAT) = `flat`, the rest on the opposite side."""
+    """A calibrated forecast carries class probabilities (as `predict` emits them): the
+    forecast direction's barrier p, FLAT `flat`, the rest on the other barrier."""
     side, opposite = D(p), 1 - D(p) - D(flat)
     up, down = (side, opposite) if direction is Direction.UP else (opposite, side)
     cp = (ClassProbabilities(label_version=LABEL_VERSION, up=up, down=down, flat=D(flat))

@@ -14,8 +14,9 @@ splits, SHA-256 of the exact bytes). Each row is point in time:
 - `labelled`: true only if every horizon has a label (a trainer must not read a missing
   label as zero).
 - `barrier_labels`: the bar's triple-barrier label per horizon (#129; `label_version`,
-  the outcome per side and its realised P&L), measured from bars known by `window_end`,
-  else null. The raw `move` labels are unchanged beside them.
+  UP/DOWN/FLAT, its bid move and the timeframe it was read on), measured from bars known
+  by `window_end`, else null. A row with an AMBIGUOUS (dual-touch) label is left out;
+  `LabelStats` reports how many. The raw `move` labels are unchanged beside them.
 Only one candle dataset version and one feature schema are exported. With `transforms`,
 `features` are the M04 transforms of the recorded snapshot (`transform_from_store`, the
 function the live recorder feeds a transform model with), under TRANSFORM_SCHEMA.
@@ -91,11 +92,10 @@ def _barrier(lab: TripleBarrierLabel | None) -> dict[str, object] | None:
         return None
     return {
         "label_version": lab.label_version,
+        "outcome": lab.outcome.value,
         "distance": _num(lab.distance),
-        "long": lab.long.outcome.value,
-        "long_pnl": _num(lab.long.pnl),
-        "short": lab.short.outcome.value,
-        "short_pnl": _num(lab.short.pnl),
+        "move": _num(lab.move),
+        "timeframe": lab.timeframe.value,
         "available_at": lab.available_at.isoformat(),
     }
 
@@ -187,11 +187,13 @@ def export_dataset(
         if split is None or as_of + longest > split.end:
             continue  # outside every split, or its label would reach into the next one
         atr = snap.snapshot.values.get(ATR_M15)
-        barriers = {horizon_key(h): label_at(candles, symbol, timeframe, as_of, atr, h,
-                                             now=window_end, session=session)
+        barriers = {horizon_key(h): label_at(candles, symbol, as_of, atr, h, now=window_end,
+                                             session=session)
                     for h in hs}  # fmt: skip
         if any(b is not None and b.ends_at > split.end for b in barriers.values()):
             continue  # a barrier window that a closure stretched into the next split
+        if any(b is not None and not b.labelled for b in barriers.values()):
+            continue  # a dual touch: no class label
         labels = {}
         for key, by_bar in outcomes.items():
             o = by_bar.get((as_of, dataset_version))
