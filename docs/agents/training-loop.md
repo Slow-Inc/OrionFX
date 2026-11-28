@@ -107,16 +107,22 @@ Rules, adopted from mip-research (PRD #120):
 | Rule | Mechanism | Status |
 |---|---|---|
 | Protocol record | `protocol.Protocol`, `protocol_hash`, `load_protocol(text, expected_hash)` refuses a document whose content does not hash to the expected value. | [built #132] |
-| 1, 10 | `runlog.RunLog` (migration `0015_claim_protocol`). A run counts only under a registered protocol hash. N is the number of distinct config hashes with an `ok` or `failed` run. A new counted config past the budget is refused. `aa` and `bugfix-rerun` (with a bug note and fix SHA) are logged but never counted, and only for a config already counted. `open_holdout` records the single opening, for a counted config whose current result (its latest `ok` or `bugfix-rerun` run) carries no erratum; after it, no new config counts. | [built #132] |
+| 1, 10 | `runlog.RunLog` (migration `0016_claim_protocol`). A run counts only under a registered protocol hash. N is the number of distinct config hashes with an `ok` or `failed` run. A new counted config past the budget is refused. `aa` and `bugfix-rerun` (with a bug note and fix SHA) are logged but never counted, and only for a config already counted. `open_holdout` records the single opening, for a counted config whose current result (its latest `ok` or `bugfix-rerun` run) carries no erratum; after it, no new config counts. | [built #132] |
 | 2 | `claimstats.mean_ci`, `brier_skill_ci`: stationary or circular block bootstrap over days, one- or two-sided. | [built #132] |
-| 3 | `claimstats.simulated_power`, `mean_lb_power`, `min_track_record_length`; `ece_noise_floor`, `expected_binned_ece` for the ECE gate. | [built #132] |
+| 3 | `claimstats.simulated_power`, `mean_lb_power`, `min_track_record_length`; `ece_sweep` with `ece_noise_floor_consistency` for the ECE gate (`ece_noise_floor`, `expected_binned_ece` for the binned estimator). | [built #132] |
 | 4 | `claimstats.best_of_n` (N from the run log), `deflated_sharpe`, `pbo_cscv`, `sign_test`, `holm`. | [built #132] |
 | 5 | `claimstats.aa_noise_floor`, `compare_to_floor`. | [built #132] |
 | 6 | `recompute.recheck`: a second implementation recomputes Brier, accuracy, log loss and Brier skill from per-prediction outputs and flags each mismatch. The train/serve skew check is not built. | recompute [built #132]; skew [planned] |
 | 7 | The retention benchmark against the previous version is not built. Runs are never deleted (database triggers). | [planned] |
 | 8 | `RunLog.add_erratum`: INVALID, WITHDRAWN, CORRECTED, UNCONFIRMED or SUPERSEDED, with a reason and a time. The run stays, and its budget is never refunded. | [built #132] |
 
-The ECE estimators are stated in `claimstats`: `ece_binned` is the plug-in L1 on equal-mass bins, and `ece_debiased` is Kumar, Liang & Ma 2019, the debiased **L2** calibration error. Which one a gate uses is a protocol value.
+The ECE estimators are stated in `claimstats`:
+- `ece_sweep` is class-wise ECE_sweep (Roelofs et al. 2022), **L1**: one-vs-rest per class on equal-mass bins, using the largest bin count that keeps the observed frequency monotone, averaged over the classes.
+- `ece_noise_floor_consistency` gives its noise floor by consistency resampling: labels are redrawn from the model's own probabilities, and the result is a set of quantiles (for example q50).
+- `ece_binned` is the plug-in L1 at a fixed bin count.
+- `ece_debiased` is Kumar, Liang & Ma 2019, the debiased **L2** calibration error. It is a secondary diagnostic only, because L2 is not on the L1 scale.
+
+Which estimator a gate uses, and on which sample, is a protocol value.
 
 **Readiness** is judged per subject: `EvidenceStore` qualifies only subjects common to every run [built #126]. `DEFAULT_POLICY` is uncertified, so the verdict is NOT_READY until the owner certifies thresholds.
 

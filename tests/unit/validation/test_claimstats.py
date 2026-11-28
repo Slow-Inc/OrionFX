@@ -18,6 +18,9 @@ from app.validation.claimstats import (
     ece_binned,
     ece_debiased,
     ece_noise_floor,
+    ece_noise_floor_consistency,
+    ece_sweep,
+    ece_sweep_binary,
     expected_binned_ece,
     expected_max_sharpe,
     holm,
@@ -226,6 +229,81 @@ def test_tied_forecasts_are_not_binned_by_outcome() -> None:
 def test_ece_refuses_too_few_samples_per_bin() -> None:
     with pytest.raises(ValueError):
         ece_debiased([0.5] * 10, [True] * 10, bins=10)
+
+
+# --- ECE_sweep (protocol G2) -----------------------------------------------------------
+
+HAND_P = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+HAND_Y = [False, False, True, False, True, True, True, True]
+
+
+def test_the_sweep_stops_at_the_first_non_monotone_bin_count() -> None:
+    # Equal-mass bins over 8 sorted rows; observed frequency per bin:
+    #   b=2: 0.25, 1.0   b=3: 1/3, 1/2, 1   b=4: 0, 0.5, 1, 1   (all non-decreasing)
+    #   b=5: 0, 1, 0.5, ...  -> falls, so the sweep keeps b=4.
+    result = ece_sweep_binary(HAND_P, HAND_Y)
+    assert result.bins == 4
+    # b=4: |0.15-0| + |0.35-0.5| + |0.55-1| + |0.75-1|, each bin a quarter of the rows.
+    assert result.ece == pytest.approx((0.15 + 0.15 + 0.45 + 0.25) / 4)
+
+
+def test_outcomes_already_in_order_keep_one_row_per_bin() -> None:
+    result = ece_sweep_binary([0.2, 0.4, 0.6, 0.8], [False, False, True, True])
+    assert result.bins == 4
+    assert result.ece == pytest.approx((0.2 + 0.4 + 0.4 + 0.2) / 4)
+
+
+def test_ece_sweep_is_the_class_wise_mean_of_one_vs_rest() -> None:
+    rng = random.Random(21)
+    probs = [_simplex(rng) for _ in range(300)]
+    labels = [rng.randrange(3) for _ in range(300)]
+    per_class = [
+        ece_sweep_binary([p[c] for p in probs], [y == c for y in labels]).ece for c in range(3)
+    ]
+    assert ece_sweep(probs, labels) == pytest.approx(statistics.fmean(per_class))
+
+
+def _simplex(rng: random.Random) -> list[float]:
+    raw = [rng.gammavariate(2.0, 1.0) for _ in range(3)]
+    return [x / sum(raw) for x in raw]
+
+
+def _draw(probs: list[list[float]], rng: random.Random) -> list[int]:
+    return [rng.choices(range(3), weights=p)[0] for p in probs]
+
+
+def test_a_calibrated_model_sits_inside_its_consistency_floor() -> None:
+    rng = random.Random(22)
+    probs = [_simplex(rng) for _ in range(2000)]
+    labels = _draw(probs, rng)  # outcomes drawn from the forecasts: perfectly calibrated
+    floor = ece_noise_floor_consistency(probs, n_resamples=60, seed=23)
+    assert floor.quantile(0.05) <= ece_sweep(probs, labels) <= floor.quantile(0.99)
+    assert floor.q50 < 0.03
+
+
+def test_injected_miscalibration_clears_the_floor_plus_the_margin() -> None:
+    rng = random.Random(24)
+    truth = [_simplex(rng) for _ in range(2000)]
+    labels = _draw(truth, rng)
+    flat = [[0.5 * p + 0.5 / 3 for p in row] for row in truth]  # underconfident forecasts
+    floor = ece_noise_floor_consistency(flat, n_resamples=60, seed=25)
+    assert ece_sweep(flat, labels) > floor.q50 + 0.02
+
+
+def test_the_consistency_floor_is_seeded_and_sorted() -> None:
+    probs = [_simplex(random.Random(s)) for s in range(200)]
+    a = ece_noise_floor_consistency(probs, n_resamples=20, seed=5)
+    assert a == ece_noise_floor_consistency(probs, n_resamples=20, seed=5)
+    assert a.draws == sorted(a.draws) and len(a.draws) == 20
+
+
+def test_ece_sweep_refuses_bad_inputs() -> None:
+    with pytest.raises(ValueError):
+        ece_sweep([[0.5, 0.6, 0.1]] * 4, [0] * 4)  # does not sum to 1
+    with pytest.raises(ValueError):
+        ece_sweep([[0.5, 0.5]] * 4, [2] * 4)  # label outside the classes
+    with pytest.raises(ValueError):
+        ece_sweep_binary([0.5], [True])  # one row
 
 
 # --- power -----------------------------------------------------------------------------

@@ -17,27 +17,32 @@ Phi and its inverse. Every random function takes an explicit seed.
   time periods (e.g. days), columns are configs. The score is the Sharpe ratio. A split
   whose in-sample winner ranks at or below the out-of-sample median (logit <= 0) counts
   as overfit, which is the conservative side of the boundary.
-- **ECE** of a binary event (P(event) vs whether it happened; for top-label ECE pass
-  the top probability and whether the top class was right), on equal-mass bins:
-  - `ece_binned`: the plug-in L1 ECE, biased upward (Roelofs et al. 2022);
+- **ECE**, always on equal-mass bins. L1 estimators average |gap|; the L2 one is the root
+  of a mean squared gap, so the two scales are not interchangeable.
+  - `ece_sweep` (the protocol's G2 estimator): class-wise ECE_sweep, **L1** (Roelofs,
+    Cain, Shlens & Mozer 2022). Per class, one-vs-rest, with the largest bin count that
+    keeps the observed frequency per bin monotone; averaged over the classes.
+    `ece_noise_floor_consistency` gives its noise floor by consistency resampling.
+  - `ece_binned`: the plug-in L1 ECE of one binary event at a fixed bin count, biased
+    upward (Roelofs et al. 2022). `expected_binned_ece` (closed form) and
+    `ece_noise_floor` (simulation) give its floor at `n_eff`.
   - `ece_debiased`: Kumar, Liang & Ma 2019 ("Verified Uncertainty Calibration"), the
-    debiased L2 calibration error: each bin's squared gap minus its sampling variance
-    ybar(1-ybar)/(n_b-1), clipped at 0 before the square root. Its scale is L2, not L1.
-  - the noise floor: the ECE a perfectly calibrated model shows at `n_eff`, in closed form
-    for the binned L1 estimator and by simulation for any estimator.
+    debiased **L2** calibration error: each bin's squared gap minus its sampling variance
+    ybar(1-ybar)/(n_b-1), clipped at 0 before the square root. A secondary diagnostic.
 - **Power** by simulation: the share of simulated worlds, under an assumed true effect,
   in which a pass rule passes (rule 3).
 - **A/A noise floor** from seed-only reruns, and **best-of-N** against a fresh baseline
   (rules 4-5).
 """
 
+import bisect
 import math
 import random
 import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from itertools import combinations, pairwise
+from itertools import accumulate, combinations, pairwise
 from typing import Literal
 
 _PHI = statistics.NormalDist()
@@ -320,7 +325,9 @@ def ece_binned(
 def ece_debiased(
     probabilities: Sequence[float], outcomes: Sequence[bool], *, bins: int = 15
 ) -> float:
-    """Kumar et al. 2019 debiased L2 calibration error on equal-mass bins."""
+    """Kumar et al. 2019 debiased **L2** calibration error on equal-mass bins: a secondary
+    diagnostic. It is the root of a mean *squared* gap, so it is not on the L1 scale of
+    `ece_sweep` / `ece_binned` and is never compared with an L1 threshold."""
     n = len(probabilities)
     total = 0.0
     for b in _bins(probabilities, outcomes, bins):
@@ -328,6 +335,106 @@ def ece_debiased(
         y_bar = statistics.fmean(float(y) for _, y in b)
         total += len(b) / n * ((y_bar - p_bar) ** 2 - y_bar * (1 - y_bar) / (len(b) - 1))
     return math.sqrt(max(0.0, total))
+
+
+@dataclass(frozen=True)
+class SweepECE:
+    ece: float
+    bins: int
+
+
+def ece_sweep_binary(probabilities: Sequence[float], outcomes: Sequence[bool]) -> SweepECE:
+    """ECE_sweep (Roelofs, Cain, Shlens & Mozer 2022), **L1**, of one binary event.
+
+    Rows are sorted by probability into equal-mass bins. The bin count rises from 1 while
+    the observed frequency per bin stays non-decreasing; the sweep stops at the first
+    count that breaks monotonicity and keeps the one before it. The result is the
+    mass-weighted mean |mean p - observed frequency| over those bins. When the sorted
+    outcomes are themselves non-decreasing every count is monotone, so one row per bin
+    is used without sweeping."""
+    if len(probabilities) != len(outcomes):
+        raise ValueError("probabilities and outcomes differ in length")
+    if len(probabilities) < 2 or any(not 0 <= p <= 1 for p in probabilities):
+        raise ValueError("need at least two probabilities, each in [0, 1]")
+    pairs = sorted(zip(probabilities, outcomes, strict=True), key=lambda pair: pair[0])
+    n = len(pairs)
+    cum_p, cum_y = [0.0], [0.0]
+    for p, y in pairs:
+        cum_p.append(cum_p[-1] + p)
+        cum_y.append(cum_y[-1] + y)
+
+    def bounds(b: int) -> list[tuple[int, int]]:
+        return list(pairwise(round(i * n / b) for i in range(b + 1)))
+
+    def monotone(b: int) -> bool:
+        freqs = [(cum_y[hi] - cum_y[lo]) / (hi - lo) for lo, hi in bounds(b)]
+        return all(a <= c for a, c in pairwise(freqs))
+
+    if all(not a or c for (_, a), (_, c) in pairwise(pairs)):  # outcomes already in order
+        chosen = n
+    else:
+        chosen = 1
+        while chosen < n and monotone(chosen + 1):
+            chosen += 1
+    gap = sum(abs((cum_p[hi] - cum_p[lo]) - (cum_y[hi] - cum_y[lo])) for lo, hi in bounds(chosen))
+    return SweepECE(gap / n, chosen)
+
+
+def _class_rows(probabilities: Sequence[Sequence[float]], labels: Sequence[int]) -> int:
+    """Validate class-probability rows and labels; return the number of classes."""
+    if not probabilities or len(probabilities) != len(labels):
+        raise ValueError("need one label per row of class probabilities")
+    k = len(probabilities[0])
+    for row in probabilities:
+        if len(row) != k or k < 2 or any(not 0 <= p <= 1 for p in row):
+            raise ValueError("every row needs the same classes, each probability in [0, 1]")
+        if abs(sum(row) - 1) > 1e-6:
+            raise ValueError("class probabilities must sum to 1")
+    if any(not 0 <= y < k for y in labels):
+        raise ValueError("a label lies outside the classes")
+    return k
+
+
+def ece_sweep(probabilities: Sequence[Sequence[float]], labels: Sequence[int]) -> float:
+    """Class-wise ECE_sweep (L1): the mean over classes of the one-vs-rest
+    `ece_sweep_binary`, e.g. over UP, DOWN and FLAT (protocol G2)."""
+    k = _class_rows(probabilities, labels)
+    return statistics.fmean(
+        ece_sweep_binary([row[c] for row in probabilities], [y == c for y in labels]).ece
+        for c in range(k)
+    )
+
+
+@dataclass(frozen=True)
+class ConsistencyFloor:
+    draws: list[float]
+    """`ece_sweep` under consistency resampling, sorted ascending."""
+
+    def quantile(self, q: float) -> float:
+        return _quantile(self.draws, q)
+
+    @property
+    def q50(self) -> float:
+        return self.quantile(0.5)
+
+
+def ece_noise_floor_consistency(
+    probabilities: Sequence[Sequence[float]], *, n_resamples: int = 1000, seed: int
+) -> ConsistencyFloor:
+    """The distribution of class-wise `ece_sweep` when the model is calibrated by
+    construction: at the same rows, each label is redrawn from that row's own
+    probabilities (consistency resampling; Bröcker & Smith 2007). Cost grows as
+    n_resamples x rows."""
+    if n_resamples < 1:
+        raise ValueError("n_resamples must be positive")
+    k = _class_rows(probabilities, [0] * len(probabilities))
+    rng = random.Random(seed)
+    cumulative = [list(accumulate(row)) for row in probabilities]
+    draws = []
+    for _ in range(n_resamples):
+        labels = [min(bisect.bisect_right(c, rng.random()), k - 1) for c in cumulative]
+        draws.append(ece_sweep(probabilities, labels))
+    return ConsistencyFloor(sorted(draws))
 
 
 def expected_binned_ece(n_eff: int, *, bins: int, p: float) -> float:

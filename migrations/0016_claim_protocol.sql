@@ -1,5 +1,5 @@
 -- X02 claim protocol machinery (#132, PRD #120 slice 5; training-loop.md §6).
--- (0015, not 0014: 0014_candle_sources.sql is taken on the #128 branch.)
+-- (0016: 0014_candle_sources.sql and 0015_candle_rolls.sql are taken on the #128 branch.)
 -- Protocols are frozen by content hash. Every run is kept, including failures, A/A and
 -- bug-fix reruns; errata mark a run without removing it. The holdout opens once per
 -- protocol (the primary key). Nothing here is ever updated or deleted.
