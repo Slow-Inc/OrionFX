@@ -29,7 +29,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 |---|---|---|
 | Live bars | `CandleEngine` builds M5/M15/H1 from bid ticks and flags real gaps. With a `SessionSchedule`, scheduled breaks and weekends are not gaps. | [built] #29, #124 |
 | Session schedule | `SessionSchedule` uses the New York zone and is DST-aware. `XAUUSD_NY_1700` is [PROPOSED]. `audit(schedule, bars)` checks it against the data. Each data source has its own schedule. | [built] #124. Per-source wiring: [planned #128] |
-| Historical bars | Import M1 bars (Dukascopy first) and resample to M5/M15/H1, with spread and a **data-source** tag separate from LIVE/BACKFILL. Validation matches live bars, and chunks are resumable. | [planned #128] |
+| Historical bars | Import M1 bars and resample them to M5/M15/H1, with spread (where the source has it) and a **data-source** tag separate from LIVE/BACKFILL. The planned source is GC futures 1-minute bars from FirstRate Data, pending the owner's purchase. Dukascopy was rejected on its terms (protocol v1 §1a). Validation matches live bars, and chunks are resumable. | [planned #128] |
 | Features | `build_feature_snapshot`, schema `m02.features.v2`, point-in-time, session-aware. | [built] #31, #124 |
 | Per-bar dataset | `MarketRecorder` records one snapshot per closed bar (LIVE or BACKFILL) into `learning_snapshots`, in one transaction per pass. | [built] #108 |
 | Outcomes | `BarLog.label_due` measures the move on the finest timeframe with bars closing at both ends. A row that cannot be labelled is marked once, point-in-time (`learning_unlabellable`). | [built] #108, #125 |
@@ -45,7 +45,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 
 | Item | Definition | Status |
 |---|---|---|
-| Triple-barrier label | TP at +k1·ATR and SL at −k2·ATR, measured on recording-timeframe bars. Time barrier of N bars. Bid prices, with the spread paid on long exits and short entries. A slippage buffer applies. A bar that touches both barriers counts as SL first. A missing spread uses a locked buffer. The output is UP, DOWN or FLAT, versioned by `label_version`. k1, k2, N and the buffer are [PROPOSED]. | [planned #129] |
+| Triple-barrier label | `m07.labels.tb.v2`: **one exhaustive label per row**, UP, DOWN or FLAT.<br>- The barriers are symmetric at ±d, where d = `TARGET_ATR`·ATR_M15, on the bid path (the trade path for a last-trade source such as GC).<br>- **No costs inside the label.** EV = size·(d·(p_side − p_opp) − (spread + 2·slip)) − commission.<br>- A bar that touches both barriers is ambiguous and excluded, and its rate is reported per era.<br>tb.v1 was rejected: it gave one label per side, with the spread inside the trigger, so it was side-dependent and spread-dependent. Full definition: protocol v1 §2 (`docs/research/2026-11-28-m04-protocol-v1.md`). | [planned #129] |
 | Stationary transforms | One M04 transform path with its own schema version. Training and the predictor adapter call the same code. Examples: `(close−sma)/atr`, Bollinger position, `macd/atr`, log returns, `spread/atr`, `sin`/`cos` of the UTC hour. `tick_volume` is excluded or normalised per source. | [planned #129] |
 | Offline/online parity | Live model evaluation uses the same label version and transforms as training. The raw `move` stays as raw data. | [planned #129] |
 
@@ -54,7 +54,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Item | Mechanism | Status |
 |---|---|---|
 | Trainer | LightGBM per fold (XGBoost as an alternative) with fixed seeds. It is an offline module; the runtime predictor stays Decimal at its boundary. | [planned #130] |
-| Calibration | Isotonic or Platt, on a slice separated in time from the fold's training data. | [planned #130] |
+| Calibration | Temperature scaling, one temperature per fold. It is fitted on a 3-month slice that sits after training and immediately before the test, purged on both sides. Isotonic is not used in protocol v1, because the slice is too small. A BCTS arm is one config. See protocol v1 §4. | [planned #130] |
 | Metric baseline | Multiclass Brier against class priors from **that training fold only**. | [planned #130] |
 | Artifact | Native model file (never pickle). The manifest records the commit SHA, dataset version, label and transform versions, seeds and library versions. | [planned #130] |
 | Card | `ModelCard` gains a training cutoff, dataset ref, label version and transform version. `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. | [planned #130] |
@@ -81,8 +81,8 @@ The synthetic scenarios (`validation/scenarios.py`) are behaviour tests. They ne
 
 ## 6. The claim protocol (anti-overfitting)
 
-A **protocol version** is a hashed record saved before the first run of a claim [planned #132]. It holds:
-- the targets [PROPOSED; certified by the owner];
+A **protocol version** is a hashed record saved before the first run of a claim [planned #132]. Protocol v1 is drafted in `docs/research/2026-11-28-m04-protocol-v1.md` (DRAFT; hashed once the data source and range are fixed). It holds:
+- the targets. They are certified by the agent under the owner's delegation of 2026-11-28 (see "Certification" below);
 - the configuration space and the iteration budget (20);
 - the regime rule;
 - the fold plan;
@@ -102,7 +102,16 @@ Rules, adopted from mip-research (PRD #120):
 9. **Say who verified.** Every report states what was verified and by whom.
 10. **Stop rule.** If the budget runs out before the targets are met, stop and report. Never lower the targets.
 
-**Readiness** is judged per subject: `EvidenceStore` qualifies only subjects common to every run [built #126]. `DEFAULT_POLICY` is uncertified, so the verdict is NOT_READY until the owner certifies thresholds.
+**Certification (owner delegation, 2026-11-28).** The owner delegated certification of the M04 targets and protocol to the agent ("ไม่ต้องถามผม ให้ทำการพิจารณาอย่างเข้มข้นแล้วเริ่ม loop training ได้เลย"). The delegation has these rules:
+- every certified value rests on research plus an advisor review;
+- every certified value carries the line "certified by agent under owner delegation, 2026-11-28" and a rationale;
+- a target is never lowered after its results are seen;
+- any change after the hash is a new protocol version with a stated reason;
+- the delegation covers **Shadow/Demo qualification only**. Real money and Live stay owner-only.
+
+**Readiness** is judged per subject: `EvidenceStore` qualifies only subjects common to every run [built #126].
+- `DEFAULT_POLICY` stays uncertified, so the verdict is NOT_READY.
+- The protocol is deliberately **not** saved as a certified `ReadinessPolicy`, because a READY verdict mints an `x02:live-qualification:` ref, and Live is outside the delegation. Readiness thresholds for Live stay with the owner.
 
 ## 7. Deployment and the closed loop (ADR 0001)
 
@@ -121,7 +130,7 @@ Rules, adopted from mip-research (PRD #120):
 2. **Write a short hypothesis** in `docs/research/` before running anything.
 3. **Explore on development data only**, inside the declared budget.
 4. **If it helps, ship it as a normal unit of work:** issue → TDD → T4 gates → PR. Generated code is untrusted until reviewed. It runs with no credentials.
-5. **Turn a result into a claim** only through a new protocol version. The owner certifies any change to targets or thresholds; the agent may propose them, with evidence.
+5. **Turn a result into a claim** only through a new protocol version. Under the 2026-11-28 delegation (§6), the agent certifies Shadow/Demo targets and thresholds, with research plus an advisor review. It never lowers a target after seeing results, and states the reason for every new version. Live thresholds stay with the owner.
 6. **Record the outcome either way.** Failures are evidence too, and wrong numbers go to errata.
 
 ## 8a. Research backlog (ordered; each item is an arm, never a shortcut)
@@ -151,7 +160,8 @@ Source: `docs/research/2026-11-28-m04-quant-upgrade-proposals.md`.
 
 | Decision | Owner | Agent |
 |---|---|---|
-| Targets, readiness thresholds, holdout window, policy certification | ✅ | proposes |
+| Protocol targets, gates, holdout window and budget, for Shadow/Demo qualification | delegated to the agent (2026-11-28); may revoke | ✅ certifies, under the §6 delegation rules |
+| Readiness thresholds that qualify Live, and a certified `ReadinessPolicy` | ✅ | proposes |
 | Features, labels, model family, hyperparameters, pipeline code | reviews by PR | ✅ within the protocol |
 | Promotion and rollback in Shadow/Demo | certifies the policy once | ✅ automatic (ADR 0001) |
 | Real-money Live | ✅ only | never |

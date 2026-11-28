@@ -87,7 +87,14 @@ The owner has authorised the agent to **research independently inside the M04 tr
 
 The freedom stops at these limits, which are not optional. The mechanism in full is `docs/agents/training-loop.md`.
 - **Protocol first.** Exploration runs on development data: the walk-forward folds and the debug window. A result becomes a claim only under a pre-registered, hashed protocol version (PRD #120 slice 5). Never tune on the final holdout or the unread slice. An opened holdout becomes development data, so the next claim needs fresh forward data. Report best-of-N with N, and keep every run as evidence, including failures.
-- **The goalposts are the owner's.** Targets, readiness thresholds and the holdout window change only when the owner certifies a new policy version. Research may *propose* a new version, with its evidence. It never adopts one.
+- **The goalposts are certified, never moved.** On 2026-11-28 the owner delegated certification of the M04 targets and protocol to the agent ("ไม่ต้องถามผม ให้ทำการพิจารณาอย่างเข้มข้นแล้วเริ่ม loop training ได้เลย"). The agent certifies targets, gates, the holdout window and the budget for **Shadow/Demo qualification**, under these rules:
+  - every certified value rests on research **plus an advisor review**;
+  - every certified value carries the line "certified by agent under owner delegation, 2026-11-28" and a rationale;
+  - **a target is never lowered after its results are seen**;
+  - any change after the hash is a **new protocol version with a stated reason**;
+  - **real money and Live stay owner-only**, and so do Live readiness thresholds and a certified `ReadinessPolicy`.
+
+  The owner may revoke the delegation. The mechanism is in `docs/agents/training-loop.md` §6.
 - **Promotion follows ADR 0001.** Autonomous promotion and rollback are allowed in Shadow/Demo only, under a certified policy. Real-money Live stays owner-only.
 - **Generated code is untrusted** (master plan §15.5 item 6). It goes through PR review, the T4 gates and tests. It runs in a training environment such as Colab with no broker, LLM or GitHub credentials and no production write access. Model weights load only through the trusted adapter, never by pickle.
 - **Honesty.** Write findings up in `docs/research/`: what was tried, what failed, and who verified it. Never present a backtest as a real-market result or an offline metric as profit.

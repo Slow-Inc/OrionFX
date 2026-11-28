@@ -85,3 +85,50 @@ for n in [10, 15, 19]:
 for s in [0.03, 0.05, 0.07]:
     for tpd in [2, 4]:
         print(f"SRtrade={s} trades/day={tpd}: annual SR ~ {s * math.sqrt(tpd * 252):.2f}")
+print()
+# --- protocol v1 draft corrections (2026-11-28) ---
+print("== G1: smallest positive-fold count k_F with one-sided sign-test p < 0.05 ==")
+for F in range(8, 21):
+    for kk in range(F // 2, F + 1):
+        p = sum(comb(F, i) for i in range(kk, F + 1)) / 2**F
+        if p < 0.05:
+            print(f"F={F}: k_F={kk} (p={p:.4f})")
+            break
+print()
+print("== holdout minimum trades: ((E_N + 1.645 + 0.842)/SR)^2, independent trades ==")
+for n in [1, 2, 4, 8, 12, 20]:
+    f = 0 if n == 1 else (1 - g) * N.inv_cdf(1 - 1 / n) + g * N.inv_cdf(1 - 1 / (n * math.e))
+    print(
+        f"N={n}: E_N={f:.3f}",
+        {s: math.ceil(((f + 1.645 + 0.8416) / s) ** 2) for s in [0.05, 0.07, 0.10]},
+    )
+for tpd in [2, 3, 4]:
+    print(f"months for 1,260 trades at {tpd} trades/day: {1260 / (tpd * 252) * 12:.0f}")
+print()
+print("== F3: driftless P(FLAT), barriers +/- k*c*sigma, T M15 bars ==")
+
+
+def p_flat(k, c, T):
+    a = k * c
+    return (
+        4
+        / math.pi
+        * sum(
+            (-1) ** n / (2 * n + 1) * math.exp(-((2 * n + 1) ** 2) * math.pi**2 * T / (8 * a * a))
+            for n in range(200)
+        )
+    )
+
+
+for c in [1.6, 1.2]:
+    print(f"k=1 c={c}: " + "  ".join(f"T={T}:{p_flat(1, c, T):.3f}" for T in [1, 2, 3, 4]))
+print()
+print("== F4: approximate noise-only binned ECE, 15 bins: 0.8*sqrt(0.24*15/n_eff) ==")
+for n_eff in [3000, 6000, 36000]:
+    print(f"n_eff={n_eff}: {0.8 * math.sqrt(0.24 * 15 / n_eff):.3f}")
+print()
+print(
+    "== viability bound: non-FLAT accuracy needed for gross edge 0.17 (cost/d 0.10 + net 0.07) =="
+)
+for fl in [0.0, 0.2]:
+    print(f"FLAT share {fl}: a = {0.5 + 0.17 / (2 * (1 - fl)):.3f}")
