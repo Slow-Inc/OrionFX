@@ -38,7 +38,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        npm install -g --no-fund --no-audit opencode-ai@1.19.6
+        npm install -g --no-fund --no-audit opencode-ai@1.19.6 || {
+          echo "unavailable: installing opencode-ai@1.19.6 from npm failed" > "$RUNNER_TEMP/opencode-cause"
+          exit 1
+        }
         opencode --version
     # Sign in and run in ONE step: the 1-hour key lives only in this step's
     # process env (never GITHUB_ENV), so no later step ever sees it.
@@ -59,36 +62,51 @@ runs:
           "task": "deny"}}
       run: |
         set -euo pipefail
-        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-          echo "::error::No OIDC token available. The job needs 'id-token: write'; fork PRs never get one."
-          exit 1
-        fi
+        # The cause file tells the caller whether a failure is a config or
+        # security error (fail red) or OpenCode being unavailable (degrade).
+        export OPENCODE_CAUSE_FILE="$RUNNER_TEMP/opencode-cause"
+        cause() { echo "$1" > "$OPENCODE_CAUSE_FILE"; echo "::error::$1"; exit 1; }
+        [ -n "$CLIENT_ID" ] || cause "config: the OpenCode client-id (repo variable) is empty"
+        [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || cause "config: no OIDC token; the job needs id-token: write"
         oidc=$(curl -sSf --oauth2-bearer "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" | jq -r .value)
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" | jq -r .value) \
+          || cause "unavailable: the GitHub OIDC token request failed"
         echo "::add-mask::$oidc"
         token=$(curl -sSf https://opencode.ai/console/auth/oauth/token \
           -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
           -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
           -d client_id="$CLIENT_ID" \
-          -d subject_token="$oidc" | jq -r .access_token)
+          -d subject_token="$oidc" | jq -r .access_token) \
+          || cause "unavailable: OpenCode Console sign-in failed"
         unset oidc
         if [ -z "$token" ] || [ "$token" = "null" ]; then
-          echo "::error::OpenCode Console token exchange returned no access token (client $CLIENT_ID)."
-          exit 1
+          cause "unavailable: OpenCode Console returned no access token"
         fi
         echo "::add-mask::$token"
         export OPENCODE_API_KEY="$token"
         unset token
         events="$RUNNER_TEMP/opencode-events.jsonl"
-        status=0
-        timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
-          opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
-          < /dev/null > "$events" || status=$?
-        extract=0
-        env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE" || extract=$?
-        if [ "$status" -ne 0 ]; then
-          echo "::error::OpenCode exited with status $status (124 = timed out after ${TIMEOUT_MINUTES}m)."
-        fi
-        if [ "$extract" -ne 0 ] || [ "$status" -ne 0 ]; then
-          exit 1
+        # One retry, only when the model ended without any answer text (seen on
+        # e5d1606: skills loaded, then an empty final step). Never on a breach.
+        for attempt in 1 2; do
+          status=0
+          timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
+            opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
+            < /dev/null > "$events" || status=$?
+          extract=0
+          env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE" || extract=$?
+          if [ "$extract" -ne 0 ] && [ "$attempt" -eq 1 ] && [ "$status" -eq 0 ] \
+            && grep -q "no final answer" "$OPENCODE_CAUSE_FILE" 2> /dev/null; then
+            echo "::warning::OpenCode gave no final answer; retrying once."
+            rm -f "$OPENCODE_CAUSE_FILE"
+            continue
+          fi
+          break
+        done
+        # extract.py writes its own cause (policy breach, model error, no answer).
+        [ "$extract" -eq 0 ] || exit 1
+        if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+          cause "unavailable: OpenCode timed out after ${TIMEOUT_MINUTES}m"
+        elif [ "$status" -ne 0 ]; then
+          cause "unavailable: OpenCode exited with status $status"
         fi

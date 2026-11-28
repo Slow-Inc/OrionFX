@@ -34,11 +34,13 @@ jobs:
       && !github.event.pull_request.draft
       && github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25  # two OpenCode attempts of at most 10 minutes each, plus setup
+    # issues: write only for the "OpenCode unavailable" notice (an issue comment);
+    # the review itself is posted with the OpenCode App token.
     permissions:
       contents: read
       pull-requests: read
-      issues: read
+      issues: write
       id-token: write
     steps:
       - name: Checkout PR head
@@ -121,21 +123,49 @@ jobs:
           1. The review summary in Markdown: first line "OpenCode review of $HEAD_SHA (advisory)"; then one section per skill that ran, in the order above, in the exact format its SKILL.md defines, with severity tags [blocker], [major], [minor] or [nit] at the start of each finding bullet; then a "Skipped:" list with one "- <skill> — <reason>" line per skipped skill. Do not write a Verdict line; the poster computes it.
           2. At the very end, one fenced code block whose info string is exactly "json opencode-inline", holding a JSON array with one entry per finding that points at a line added or kept in the diff: {"path": "<file path as in the diff>", "line": <line number in the new version of the file>, "body": "[severity] finding. Why. Suggested fix."}. At most 15 entries. Findings that cannot be tied to a diff line stay only in the summary. Use [] if there are none.
           EOF
+      # Infrastructure failures (model 429, sign-in, App token, timeout) must not turn
+      # the check red: the merge-gate hook is the real gate, and its fallback needs
+      # green CI. The last step classifies the cause and fails red only on config or
+      # security errors.
       - name: Run OpenCode
+        id: run
+        continue-on-error: true
         uses: ./_trusted/actions/opencode-run
         with:
           client-id: ${{ vars.OPENCODE_PR_CLIENT_ID }}  # "OrionFX PR Review"; a credential ID, not a secret
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
-          timeout-minutes: '11'
+          timeout-minutes: '10'
       - name: Submit COMMENT review as the OpenCode app
+        id: post
+        if: steps.run.outcome == 'success'
+        continue-on-error: true
         env:
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          GH_TOKEN=$(bash _trusted/opencode/app-token.sh)
+          cause_file="$RUNNER_TEMP/opencode-cause"
+          rc=0
+          GH_TOKEN=$(bash _trusted/opencode/app-token.sh) || rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "security: the OpenCode App token was not scoped to exactly this repository" > "$cause_file"
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "unavailable: the OpenCode App token exchange failed" > "$cause_file"
+            exit 1
+          fi
           echo "::add-mask::$GH_TOKEN"
           export GH_TOKEN
           trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
-          python3 -I _trusted/opencode/post.py review "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA"
+          python3 -I _trusted/opencode/post.py review "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA" \
+            || { echo "unavailable: posting the review to GitHub failed" > "$cause_file"; exit 1; }
+      - name: OpenCode unavailable notice
+        if: ${{ !cancelled() && (steps.run.outcome == 'failure' || steps.post.outcome == 'failure') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Never a PR review: a bot review at the head with no threads could pass the gate.
+        # Exits 1 (red) only for config or security causes; otherwise 0 (green).
+        run: python3 -I _trusted/opencode/post.py notice "$RUNNER_TEMP/opencode-cause" "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA"

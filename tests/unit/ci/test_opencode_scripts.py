@@ -304,3 +304,78 @@ def test_a_denied_disallowed_tool_is_not_a_breach(tmp_path: Path) -> None:
     out = tmp_path / "out.md"
     events = [_tool("bash", status="error"), _text("m1", "answer")]
     assert extract.main(_events(tmp_path, events), str(out)) == 0
+
+
+# --- failure classification (green "unavailable" vs red config/security) -----------------
+
+
+@pytest.mark.parametrize(
+    ("cause", "category"),
+    [
+        ("config: the OpenCode client-id (repo variable) is empty", "config"),
+        ("security: tool policy breach, ['bash'] completed", "security"),
+        ("Security: token scoped to other repos", "security"),
+        ("unavailable: model error 429 FreeUsageLimitError", "unavailable"),
+        ("unavailable: OpenCode timed out after 11m", "unavailable"),
+        ("", "unavailable"),
+        ("garbage without a category", "unavailable"),
+        ("weird: unknown category", "unavailable"),
+    ],
+    ids=["config", "security", "security-case", "429", "timeout", "empty", "no-colon", "unknown"],
+)
+def test_classify_only_explicit_config_or_security_is_red(cause: str, category: str) -> None:
+    assert post.classify(cause)[0] == category
+
+
+def test_unavailable_notice_is_an_issue_comment_and_exits_green(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    cause = tmp_path / "cause"
+    cause.write_text("unavailable: model error 429\n", encoding="utf-8")
+    assert post.notice(str(cause), "o/r", "7", "abc") == 0
+    assert rec.endpoints == ["repos/o/r/issues/7/comments"]
+    assert "event" not in rec.calls[0]
+    assert "OpenCode unavailable: model error 429" in rec.calls[0]["body"]
+    assert "OpenCode unavailable" in summary.read_text(encoding="utf-8")
+
+
+def test_missing_cause_file_degrades_to_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    assert post.notice(str(tmp_path / "absent"), "o/r", "7", "abc") == 0
+    assert len(rec.calls) == 1
+
+
+@pytest.mark.parametrize("cause", ["config: variable empty", "security: wrong repo"])
+def test_config_or_security_cause_fails_red_and_posts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cause: str
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    path = tmp_path / "cause"
+    path.write_text(cause, encoding="utf-8")
+    assert post.notice(str(path), "o/r", "7", "abc") == 1
+    assert rec.calls == []
+
+
+def test_extract_records_breach_as_security_and_errors_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cause = tmp_path / "cause"
+    monkeypatch.setenv("OPENCODE_CAUSE_FILE", str(cause))
+    out = str(tmp_path / "out.md")
+    extract.main(_events(tmp_path, [_tool("bash"), _text("m", "a")]), out)
+    assert post.classify(cause.read_text(encoding="utf-8"))[0] == "security"
+    error = {"type": "error", "error": {"name": "APIError", "data": {"message": "429"}}}
+    extract.main(_events(tmp_path, [error]), out)
+    assert post.classify(cause.read_text(encoding="utf-8"))[0] == "unavailable"
+    extract.main(_events(tmp_path, [_tool("read")]), out)
+    assert "no final answer" in cause.read_text(encoding="utf-8")

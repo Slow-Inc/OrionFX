@@ -6,9 +6,11 @@ on a new issue. They validate everything the model chose before writing.
 
   post.py review ANSWER DIFF REPO PR HEAD_SHA
   post.py triage ANSWER REPO ISSUE BODY_FILE EXISTING_LABELS
+  post.py notice CAUSE_FILE REPO PR HEAD_SHA
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -198,10 +200,60 @@ def triage(answer_path: str, repo: str, issue: str, body_path: str, existing_csv
     return 0
 
 
+# Causes that mean a broken setup or a broken boundary: fail the check red. Everything
+# else is OpenCode being unavailable: degrade to a notice and keep the check green.
+RED_CATEGORIES = {"config", "security"}
+UNKNOWN_CAUSE = "unavailable: an OpenCode step failed without a recorded cause (see the job log)"
+
+
+def classify(cause: str) -> tuple[str, str]:
+    """Split a recorded cause `<category>: <detail>` into (category, detail).
+
+    An empty or malformed cause is "unavailable": only an explicit config or security
+    cause may turn the check red.
+    """
+    text = cause.strip().splitlines()[0].strip() if cause.strip() else UNKNOWN_CAUSE
+    category, sep, detail = text.partition(":")
+    category = category.strip().lower()
+    if not sep or category not in RED_CATEGORIES | {"unavailable"}:
+        return "unavailable", text
+    return category, detail.strip()
+
+
+def notice(cause_path: str, repo: str, pr: str, head_sha: str) -> int:
+    path = Path(cause_path)
+    category, detail = classify(path.read_text(encoding="utf-8") if path.exists() else "")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if category in RED_CATEGORIES:
+        line = f"OpenCode {category} error: {detail}"
+        if summary_path:
+            with open(summary_path, "a", encoding="utf-8") as fh:
+                fh.write(f"### {line}\n")
+        print(f"::error::{line}")
+        return 1
+    line = f"OpenCode unavailable: {detail}"
+    if summary_path:
+        with open(summary_path, "a", encoding="utf-8") as fh:
+            fh.write(f"### {line}\n\nNo OpenCode review was posted for `{head_sha}`.\n")
+    body = (
+        f"**{line}**\n\nNo OpenCode review was posted for `{head_sha}`. The developer runs the "
+        "fallback review. This is an issue comment on purpose, not a PR review.\n\n"
+        f"**OpenCode ใช้งานไม่ได้:** {detail}\n\nไม่มีรีวิวจาก OpenCode สำหรับ `{head_sha}` "
+        "developer จะรันรีวิวสำรองแทน และนี่เป็นคอมเมนต์ธรรมดาโดยตั้งใจ ไม่ใช่ PR review"
+    )
+    result = gh_api(f"repos/{repo}/issues/{pr}/comments", {"body": body})
+    if result.returncode != 0:
+        print(f"::warning::Could not post the notice: {result.stderr.strip()[:300]}")
+    print(f"::warning::{line}")
+    return 0
+
+
 if __name__ == "__main__":
     command, args = sys.argv[1], sys.argv[2:]
     if command == "review":
         sys.exit(review(*args))
     if command == "triage":
         sys.exit(triage(*args))
+    if command == "notice":
+        sys.exit(notice(*args))
     sys.exit(f"unknown command {command}")

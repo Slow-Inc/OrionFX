@@ -32,4 +32,14 @@ if [ "$status" != "200" ] || [ -z "$token" ]; then
   echo "::error::OpenCode App token exchange failed (HTTP $status): ${error:-no token returned}." >&2
   exit 1
 fi
+# Security check (exit 3, not "unavailable"): the token must cover exactly this repo.
+repos=$(GH_TOKEN="$token" gh api installation/repositories --jq '[.repositories[].full_name] | join(",")') || {
+  echo "::error::Could not verify the OpenCode App token's repository scope." >&2
+  exit 1
+}
+if [ "$repos" != "$GITHUB_REPOSITORY" ]; then
+  GH_TOKEN="$token" gh api --method DELETE installation/token > /dev/null || true
+  echo "::error::The OpenCode App token is scoped to '$repos', not exactly '$GITHUB_REPOSITORY'; refusing to use it." >&2
+  exit 3
+fi
 printf '%s' "$token"

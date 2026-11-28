@@ -69,9 +69,17 @@ The review summary has one section per skill that ran, a `Skipped: - <skill> —
 
 The review is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`. Issues filed by the audit enter the normal triage flow through `needs-triage`. `opencode-triage` skips bot-authored issues, so audit issues are triaged by hand.
 
+### When OpenCode is unavailable
+
+Infrastructure failures do **not** turn the `review` check red. These include a model 429, a Console sign-in or OpenCode App token failure, a timeout, and an empty answer. The run and post steps use step-level `continue-on-error`. A final step records the cause in the job summary and as a plain **issue comment** on the PR: `OpenCode unavailable: <cause>`. It then exits 0. That notice is never a PR review, because a bot review at the head with no threads could pass the merge gate. The merge-gate hook (xeno-skills #441, OrionFX PR #150) is the real gate. It needs green CI to reach its fallback path, where the developer runs the same skills through subagents.
+
+The check fails **red** only on config or security causes: an empty client-id variable, a missing `id-token` permission, a tool-policy canary breach, or an App token not scoped to exactly this repo. The run writes the cause as `<category>: <detail>` to `$RUNNER_TEMP/opencode-cause`, and `post.py classify` reads it. A missing or unknown cause counts as `unavailable`.
+
+The `review` check will **not** be made a required check. The hook is the gate.
+
 ### Honest limits
 
-- It is not a required check (none is configured yet; the public repo could enforce one — owner decision). A green check can still carry findings, so read the review. A **skipped** check means no review ran. Fork PRs get no review: `opencode-review` and `/oc` on review comments skip them in the `if:`. `/oc` on an *issue comment* in a fork PR does run, from `main` and only for a collaborator commenter. The fork's diff is then only data, and no token reaches the model.
+- It is not a required check, and will not become one (see above). A green check can still carry findings, so read the review. A **skipped** check means no review ran. Fork PRs get no review: `opencode-review` and `/oc` on review comments skip them in the `if:`. `/oc` on an *issue comment* in a fork PR does run, from `main` and only for a collaborator commenter. The fork's diff is then only data, and no token reaches the model.
 - The repo is **public**. Text in issues, PR bodies and comments may come from anyone, and can bias **what the answer says**. It cannot give the model new tools. The no-exfiltration claim is scoped to that case: an outsider's text cannot make the model read secrets or reach the network. A collaborator who edits the workflow or the shared action in a PR can, as with any workflow.
 - The **skills** (`.opencode/skills/`) are read from the PR head, so a PR can change its own reviewer's instructions. `security-review` therefore triggers on `.opencode/`. The token-holding **scripts** run from the base revision (see above). The one exception is the bootstrap PR that introduces them, while `main` has none yet. The workflow file itself always comes from the PR head on `pull_request`, so a collaborator who edits it is not stopped. The collaborator-only guard covers that case.
 - **Free models are refused from CI** (`429 FreeUsageLimitError`, 2026-11-28; that run hung for 18 minutes). Billing goes to the owner's Go plan. Every workflow has a hard `timeout-minutes`.

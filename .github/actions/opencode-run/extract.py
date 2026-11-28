@@ -10,10 +10,20 @@ so the answer is discarded and nothing is posted.
 """
 
 import json
+import os
 import sys
 from decimal import Decimal
 
 ALLOWED_TOOLS = {"read", "glob", "grep", "list", "skill"}
+
+
+def _cause(text: str) -> int:
+    """Record why the run failed (see .github/opencode/post.py `classify`); return 1."""
+    path = os.environ.get("OPENCODE_CAUSE_FILE")
+    if path:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+    return 1
 
 
 def main(events_path: str, output_path: str) -> int:
@@ -57,16 +67,17 @@ def main(events_path: str, output_path: str) -> int:
         print(f"::error::OpenCode error: {err}")
     if breaches:
         print(f"::error::Tool policy breach: {sorted(set(breaches))} completed; nothing is posted.")
-        return 1
+        return _cause(f"security: tool policy breach, {sorted(set(breaches))} completed")
     # The latest message that has text: a run can end on a tool-only step.
     texts = ["".join(messages[mid]).strip() for mid in order]
     answer = next((t for t in reversed(texts) if t), "")
     if answer and not texts[-1]:
         print("::warning::The last assistant message had no text; using the latest one that did.")
-    if errors or not answer:
-        if not answer:
-            print("::error::OpenCode produced no final answer.")
-        return 1
+    if errors:
+        return _cause(f"unavailable: model error {errors[0][:200]}")
+    if not answer:
+        print("::error::OpenCode produced no final answer.")
+        return _cause("unavailable: OpenCode produced no final answer")
     with open(output_path, "w", encoding="utf-8") as fh:
         fh.write(answer + "\n")
     return 0

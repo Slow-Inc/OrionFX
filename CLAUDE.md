@@ -86,6 +86,8 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 
   **Free models are refused from CI**, so billing goes to the owner's Go plan. The model is `opencode-go/deepseek-v4.1-flash`, set in one place (the action's `model` default). Every job has a hard timeout.
 
+  **When OpenCode is unavailable** (429, sign-in or App-token failure, timeout), the `review` check still finishes green. It posts `OpenCode unavailable: <cause>` as an issue comment, never as a review. The check goes red only on config or security causes. The `review` check will not be a required check: the merge-gate hook (#150) is the gate.
+
   **Limits:** these are not required checks; a skipped check means no review ran; fork PRs are skipped; the repo is public, so thread text can bias answers but cannot add tools; jobs on `main` events work only after merge.
 - Local `verify` is **armed** (ruff + format + mypy + pytest; backend only); `t4-gate` runs it before `gh pr merge`.
 - `.claude/hooks/` holds only the 16 files the wired hooks reach (dependency closure checked 2026-11-27); the unwired `clink`/canary/debt/receipt scripts and the unread `using-t4.snapshot.md` were left out. The scripts are vendored from `xeno-skills` — fix bugs upstream, not here.
