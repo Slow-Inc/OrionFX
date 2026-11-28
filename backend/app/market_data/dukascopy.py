@@ -25,6 +25,12 @@ The source (`DukascopyM1Source`):
 The fetcher (`DukascopyFetcher`) is polite by construction: one request at a time, a pause
 of `interval` seconds between requests, a few attempts with doubling backoff, a generic
 User-Agent with no personal data, and a local cache, so each file is requested once.
+
+Remote bytes are untrusted (security review 2026-11-28, no findings): only the fixed
+https host is read (certificates verified, redirects refused); the symbol and side that
+name the URL and the cache path are allow-listed; the body is capped at `MAX_RAW`,
+decompression at `MAX_RECORDS` records, and truncated streams, partial records and
+off-grid or out-of-order times are refused. Decoding uses only `lzma` and `struct`.
 """
 
 import lzma
