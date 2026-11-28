@@ -78,31 +78,43 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
     answer = Path(answer_path).read_text(encoding="utf-8")
     allowed = commentable_lines(Path(diff_path).read_text(encoding="utf-8"))
     comments: list[dict] = []
-    unanchored: list[str] = []
+    off_diff: list[str] = []
+    over_cap: list[str] = []
+    extra = ""
     match = INLINE_RE.search(answer)
     if match:
         try:
             items = json.loads(match.group(1))
         except ValueError:
             items = []
-            print("::warning::The inline-comment block is not valid JSON; skipped.")
+            print("::warning::The inline-comment block is not valid JSON; kept as text.")
+            extra += "\n\n#### Inline block that was not valid JSON\n" + match.group(1)[:3000]
         for item in items if isinstance(items, list) else []:
             if not isinstance(item, dict):
                 continue
             path, line, body = item.get("path"), item.get("line"), item.get("body")
             if not isinstance(body, str):
                 continue
-            anchored = isinstance(path, str) and isinstance(line, int)
-            if anchored and line in allowed.get(path, set()) and len(comments) < MAX_INLINE:
-                comments.append({"path": path, "line": line, "side": "RIGHT", "body": body[:2000]})
+            entry = f"- `{path}:{line}` {body[:500]}"
+            on_diff = (
+                isinstance(path, str) and isinstance(line, int) and line in allowed.get(path, set())
+            )
+            if not on_diff:
+                off_diff.append(entry)
+            elif len(comments) >= MAX_INLINE:
+                over_cap.append(entry)
             else:
-                unanchored.append(f"- `{path}:{line}` {body[:500]}")
+                comments.append({"path": path, "line": line, "side": "RIGHT", "body": body[:2000]})
         answer = INLINE_RE.sub("", answer).strip()
+    # The verdict counts the summary only: the prompt requires every finding to be in the
+    # summary, and the inline entries are copies of some of them (counting both would
+    # double-count).
     summary = VERDICT_RE.sub("", answer).strip()
     verdict = verdict_line(summary)
-    extra = ""
-    if unanchored:
-        extra = "\n\n#### Not anchored to a diff line\n" + "\n".join(unanchored)
+    if off_diff:
+        extra += "\n\n#### Not on a diff line\n" + "\n".join(off_diff)
+    if over_cap:
+        extra += f"\n\n#### Over the {MAX_INLINE}-comment inline cap\n" + "\n".join(over_cap)
     payload = {
         "commit_id": head_sha,
         "event": "COMMENT",
@@ -134,20 +146,26 @@ def has_thai(text: str) -> bool:
 def has_english(text: str) -> bool:
     # Words outside code spans; identifiers alone do not make an English body.
     prose = re.sub(r"`[^`]*`|```.*?```", " ", text, flags=re.S)
-    return len(re.findall(r"\b[A-Za-z]{3,}\b", prose)) >= 5
+    return len(re.findall(r"\b[A-Za-z]{2,}\b", prose)) >= 3
+
+
+def first_json_object(text: str) -> dict:
+    """The first JSON object in the model's answer, ignoring prose around it."""
+    decoder = json.JSONDecoder()
+    for start in (m.start() for m in re.finditer(r"\{", text)):
+        try:
+            value, _ = decoder.raw_decode(text, start)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return {}
 
 
 def triage(answer_path: str, repo: str, issue: str, body_path: str, existing_csv: str) -> int:
     existing = {x for x in existing_csv.split(",") if x}
-    answer = Path(answer_path).read_text(encoding="utf-8")
-    match = re.search(r"\{.*\}", answer, re.S)
-    try:
-        choice = json.loads(match.group(0)) if match else {}
-    except ValueError:
-        choice = {}
+    choice = first_json_object(Path(answer_path).read_text(encoding="utf-8"))
     labels = []
-    if not isinstance(choice, dict):
-        choice = {}
     component, role = str(choice.get("component")), str(choice.get("role"))
     if not existing & COMPONENTS and component in COMPONENTS:
         labels.append(component)

@@ -84,13 +84,19 @@ def test_deleted_file_has_no_commentable_lines() -> None:
 
 
 class _Recorder:
-    def __init__(self, fail_first_with_comments: bool = False) -> None:
+    def __init__(self, fail_first_with_comments: bool = False, fail_all: bool = False) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.endpoints: list[str] = []
         self.fail_first = fail_first_with_comments
+        self.fail_all = fail_all
 
     def __call__(self, endpoint: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:
         self.calls.append(json.loads(json.dumps(payload)))
-        if self.fail_first and payload["comments"] and len(self.calls) == 1:
+        self.endpoints.append(endpoint)
+        failing = self.fail_all or (
+            self.fail_first and payload.get("comments") and len(self.calls) == 1
+        )
+        if failing:
             return subprocess.CompletedProcess([], 1, "", "422 line not in diff")
         return subprocess.CompletedProcess([], 0, "{}", "")
 
@@ -125,7 +131,7 @@ def test_review_posts_comment_event_with_anchored_inline_and_computed_verdict(
         {"path": "x.py", "line": 2, "side": "RIGHT", "body": "[major] bug"}
     ]
     body = payload["body"]
-    assert "x.py:99" in body and "Not anchored" in body
+    assert "x.py:99" in body and "Not on a diff line" in body and "cap" not in body
     assert body.rstrip().splitlines()[-1] == "Verdict: 0 blocker, 1 major"
     assert "Verdict: 9 blocker" not in body and "opencode-inline" not in body
 
@@ -136,7 +142,9 @@ def test_inline_comments_are_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     inline = [{"path": "x.py", "line": 2, "body": f"n{i}"} for i in range(post.MAX_INLINE + 1)]
     post.review(_answer(tmp_path, inline), _diff(tmp_path), "o/r", "7", "abc")
     assert len(rec.calls[0]["comments"]) == post.MAX_INLINE
-    assert f"n{post.MAX_INLINE}" in rec.calls[0]["body"]
+    body = rec.calls[0]["body"]
+    assert f"n{post.MAX_INLINE}" in body and "inline cap" in body
+    assert "Not on a diff line" not in body
 
 
 def test_rejected_inline_comments_move_to_the_summary(
@@ -160,6 +168,83 @@ def test_invalid_inline_json_still_posts_the_summary(
     path.write_text("summary\n```json opencode-inline\n{not json\n```\n", encoding="utf-8")
     assert post.review(str(path), _diff(tmp_path), "o/r", "7", "abc") == 0
     assert rec.calls[0]["comments"] == []
+    assert "{not json" in rec.calls[0]["body"]
+
+
+def test_review_fails_when_the_retry_also_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rec = _Recorder(fail_all=True)
+    monkeypatch.setattr(post, "gh_api", rec)
+    inline = [{"path": "x.py", "line": 2, "body": "[major] bug"}]
+    assert post.review(_answer(tmp_path, inline), _diff(tmp_path), "o/r", "7", "abc") == 1
+    assert len(rec.calls) == 2
+
+
+# --- triage --------------------------------------------------------------------------------
+
+EN = "The settings page loses the risk profile after a reload and shows the default."
+TH = "หน้าตั้งค่าลืม risk profile หลังโหลดหน้าใหม่"
+
+
+@pytest.mark.parametrize(
+    ("text", "english", "thai"),
+    [
+        (EN, True, False),
+        (TH, False, True),
+        (f"{EN}\n\n{TH}", True, True),
+        ("CI job fails", True, False),
+        ("`backend/app/core/config.py` `risk_profile`", False, False),
+    ],
+    ids=["english", "thai", "both", "short-english", "code-only"],
+)
+def test_language_detection(text: str, english: bool, thai: bool) -> None:
+    assert post.has_english(text) is english
+    assert post.has_thai(text) is thai
+
+
+def _triage(
+    tmp: Path, monkeypatch: pytest.MonkeyPatch, answer: str, body: str, existing: str = ""
+) -> _Recorder:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    (tmp / "a.md").write_text(answer, encoding="utf-8")
+    (tmp / "b.md").write_text(body, encoding="utf-8")
+    assert post.triage(str(tmp / "a.md"), "o/r", "5", str(tmp / "b.md"), existing) == 0
+    return rec
+
+
+def test_triage_adds_allowed_component_and_role(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    answer = 'Here: {"component": "M06-risk-execution", "role": "needs-info"} done {x}'
+    rec = _triage(tmp_path, monkeypatch, answer, f"{EN}\n{TH}")
+    assert rec.calls == [{"labels": ["M06-risk-execution", "needs-info"]}]
+
+
+@pytest.mark.parametrize(
+    ("answer", "existing"),
+    [
+        ('{"component": "made-up", "role": "wontfix"}', ""),
+        ('{"component": ["M06-risk-execution"], "role": 1}', ""),
+        ('{"component": "M06-risk-execution", "role": "needs-info"}', "M02-market-data,wontfix"),
+        ("no json at all", ""),
+    ],
+    ids=["not-allowed-and-wontfix", "wrong-types", "groups-already-labelled", "no-json"],
+)
+def test_triage_never_adds_disallowed_or_duplicate_group_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: str, existing: str
+) -> None:
+    rec = _triage(tmp_path, monkeypatch, answer, f"{EN}\n{TH}", existing)
+    assert rec.calls == []
+
+
+def test_triage_asks_for_the_missing_thai_part(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rec = _triage(tmp_path, monkeypatch, "{}", EN)
+    assert len(rec.calls) == 1 and rec.endpoints == ["repos/o/r/issues/5/comments"]
+    assert "Thai" in rec.calls[0]["body"] and "English part" not in rec.calls[0]["body"]
 
 
 # --- extract.py ----------------------------------------------------------------------------

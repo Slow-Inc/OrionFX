@@ -11,6 +11,7 @@ so the answer is discarded and nothing is posted.
 
 import json
 import sys
+from decimal import Decimal
 
 ALLOWED_TOOLS = {"read", "glob", "grep", "list", "skill"}
 
@@ -20,7 +21,7 @@ def main(events_path: str, output_path: str) -> int:
     order: list[str] = []
     errors: list[str] = []
     breaches: list[str] = []
-    cost = 0.0
+    cost = Decimal(0)
     tokens_in = tokens_out = 0
     with open(events_path, encoding="utf-8") as fh:
         for line in fh:
@@ -44,7 +45,7 @@ def main(events_path: str, output_path: str) -> int:
                 if tool not in ALLOWED_TOOLS and status == "completed":
                     breaches.append(str(tool))
             elif kind == "step_finish":
-                cost += float(part.get("cost") or 0)
+                cost += Decimal(str(part.get("cost") or 0))
                 tok = part.get("tokens") or {}
                 cache_read = (tok.get("cache") or {}).get("read") or 0
                 tokens_in += int(tok.get("input") or 0) + int(cache_read)
