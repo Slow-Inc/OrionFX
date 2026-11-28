@@ -9,8 +9,10 @@ from decimal import Decimal
 from tests.integration.conftest import T0
 from tests.support.engine import Clock, _bot_positions, _running
 
+from app.core.bet import LABEL_VERSION
 from app.core.contracts import (
     CandleClosed,
+    ClassProbabilities,
     Confidence,
     DecisionCreated,
     EligibilityRecord,
@@ -79,6 +81,8 @@ def _calibrated(now: datetime) -> Evidence:
                                calibrated=True),
         data_quality=DataQuality.OK, input_refs=[], generated_at=now,
         valid_until=now + timedelta(minutes=15),
+        class_probabilities=ClassProbabilities(label_version=LABEL_VERSION, up=D("0.8"),
+                                               down=D("0.2"), flat=D(0)),
     ))  # fmt: skip
 
 

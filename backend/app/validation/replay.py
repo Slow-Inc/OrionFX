@@ -38,6 +38,7 @@ from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
 from app.market_data.techniques.indicators import Technique
 from app.prediction.engine import EvaluationPredictor, Refused, predict_for_evaluation
+from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
 from app.storage.registry import ArtifactRegistry
 from app.validation.metrics import Metric, expectancy, max_drawdown, profit_factor, win_rate
 
@@ -61,12 +62,21 @@ EvidenceProvider = Callable[[datetime, FeatureSnapshot], Evidence]
 
 @dataclass(frozen=True)
 class EvaluationEvidence:
-    """The forecast of an evaluation-loaded model on the step's snapshot. A refused
-    prediction (in-sample, missing feature, ...) is no forecast, so M05 waits."""
+    """The forecast of an evaluation-loaded model on the step's snapshot. A model that
+    reads the M04 transforms gets them from `transform_from_store`, as the recorder and
+    the dataset export do (#129), so it is scored on what it was trained on; give it the
+    replay's candles and session. A refused prediction (in-sample, missing feature, ...)
+    is no forecast, so M05 waits."""
 
     model: EvaluationPredictor
+    candles: CandleStore | None = None
+    session: SessionSchedule | None = None
 
     def __call__(self, now: datetime, snapshot: FeatureSnapshot) -> Evidence:
+        if self.model.predictor.card.feature_schema == TRANSFORM_SCHEMA:
+            if self.candles is None:
+                raise ValueError("a transform model needs the candles to transform from")
+            snapshot = transform_from_store(self.candles, snapshot, session=self.session)
         try:
             return Evidence(forecast=predict_for_evaluation(self.model, snapshot, now=now))
         except Refused:

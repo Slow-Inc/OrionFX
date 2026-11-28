@@ -109,11 +109,13 @@ def _assert_features_usable(log: BarLog) -> None:
     assert test and not unusable, f"H1/M15 features unusable: {sorted(unusable.items())[:3]}"
 
 
-def _export(conn: sqlite3.Connection, out: Path) -> list[dict[str, Any]]:
+def _export(conn: sqlite3.Connection, out: Path, session: SessionSchedule | None
+            ) -> list[dict[str, Any]]:  # fmt: skip
     manifest = export_dataset(conn, symbol="XAUUSD", timeframe=M5, horizons=HORIZONS,
                               dataset_version="tracer-v1", window_start=TRAIN.start,
                               window_end=END, splits=[TRAIN, VALIDATION, TEST],
-                              dataset_id="tracer", version="1", out=out)  # fmt: skip
+                              dataset_id="tracer", version="1", out=out,
+                              session=session)  # fmt: skip
     data = out.read_bytes()
     assert manifest.content_hash == sha256_ref(data)
     return [json.loads(line) for line in data.decode("utf-8").splitlines()]
@@ -166,7 +168,7 @@ def _chain(conn: sqlite3.Connection, folder: Path, session: SessionSchedule | No
     candles = _candles(conn, m5)
     log = _record(conn, candles, session)
     _assert_features_usable(log)
-    rows = _export(conn, folder / "dataset.jsonl")
+    rows = _export(conn, folder / "dataset.jsonl", session)
     _artifact(rows, folder)
     strategies = _approve_strategy(conn)
     # Registered today (the real clock), long after the fixture: only an evaluation load
@@ -182,7 +184,8 @@ def _chain(conn: sqlite3.Connection, folder: Path, session: SessionSchedule | No
     result = replay(candles, symbol="XAUUSD", timeframe=M5, context_timeframes=[M15, H1],
                     start=TEST.start, end=TEST.end, strategies=[STRATEGY],
                     enabled=[STRATEGY.manifest.strategy_id], registry=strategies,
-                    initial_lot=D("0.01"), cost=COST, evidence=EvaluationEvidence(model),
+                    initial_lot=D("0.01"), cost=COST,
+                    evidence=EvaluationEvidence(model, candles, session),
                     session=session, techniques=tracer.TECHNIQUES)  # fmt: skip
     store = EvidenceStore(conn)
     store.save_policy(DEFAULT_POLICY)
@@ -229,6 +232,19 @@ def test_the_card_is_trained_before_the_test_fold_and_calibrated_on_later_data(
     assert {r["split"] for r in chain.rows} == {"train", "validation", "holdout"}
 
 
+def test_the_session_aware_replay_lets_the_strategy_propose(chain: Chain) -> None:
+    """Replay builds its snapshots with the session too: `trend_following` (H1 ADX, M15
+    structure) gets past the chart gates on some bars of the test fold."""
+    chart_gates = {"NO_OPPORTUNITY", "CONFLICT_STRATEGIES", "STALE_INPUT"}
+    assert any(not chart_gates & set(d.reason_codes) for d in chain.result.decisions)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#129: EV is priced only from class probabilities of the current label version."
+    " The tracer's two-class model has none, so it cannot ENTER until its three-class"
+    " adapter is trained on that label (held for m07.labels.tb.v2).",
+)
 def test_the_model_drives_at_least_one_entry_in_the_test_fold(chain: Chain) -> None:
     enters = [d for d in chain.result.decisions if d.action is DecisionAction.ENTER]
     assert enters, sorted({c for d in chain.result.decisions for c in d.reason_codes})

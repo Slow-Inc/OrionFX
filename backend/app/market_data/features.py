@@ -51,6 +51,9 @@ def feature_key(tf: Timeframe, catalog_id: str, output: str) -> str:
     raise KeyError(f"no default technique for {catalog_id} with output {output!r}")
 
 
+ATR_M15 = feature_key(Timeframe.M15, "CAT-T01-06", "atr")
+"""The M15 ATR: the unit of EV's bet, the label's barriers and the session features."""
+
 SUMMARY_CATALOG_IDS = ("CAT-T03-04", "CAT-T03-06", "CAT-T03-07")
 """Structure, regime and multi-bar direction: the chart summary other modules may read."""
 SUMMARY_KEYS: frozenset[str] = frozenset(

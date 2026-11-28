@@ -1,5 +1,42 @@
 {
   "$defs": {
+    "ClassProbabilities": {
+      "additionalProperties": false,
+      "description": "Calibrated probabilities of the triple-barrier label's three outcomes (#129) for\nthe bet in the forecast's `direction`: that side's label, whose TP outcome is the\ndirection itself (a long's TP is UP, a short's TP is DOWN) and whose time barrier is\nFLAT. They sum to 1. `label_version` names the label they were calibrated on.",
+      "properties": {
+        "down": {
+          "ge": 0,
+          "le": 1,
+          "title": "Down",
+          "type": "string"
+        },
+        "flat": {
+          "ge": 0,
+          "le": 1,
+          "title": "Flat",
+          "type": "string"
+        },
+        "label_version": {
+          "minLength": 1,
+          "title": "Label Version",
+          "type": "string"
+        },
+        "up": {
+          "ge": 0,
+          "le": 1,
+          "title": "Up",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label_version",
+        "up",
+        "down",
+        "flat"
+      ],
+      "title": "ClassProbabilities",
+      "type": "object"
+    },
     "Confidence": {
       "additionalProperties": false,
       "description": "A 0-1 score is never shipped without what it means (master plan \u00a74.6).\n\n`semantics` names the target and method, e.g. \"calibrated P(close up) over 3 H1 bars\"\nor \"uncalibrated LLM score\". An LLM score is not a calibrated probability.",
@@ -68,6 +105,17 @@
   },
   "additionalProperties": false,
   "properties": {
+    "class_probabilities": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClassProbabilities"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "data_quality": {
       "$ref": "#/$defs/DataQuality"
     },

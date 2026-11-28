@@ -60,8 +60,9 @@ def test_positive_ev_with_agreeing_evidence_enters_with_the_initial_lot() -> Non
     d = _decide()
     assert d.created.action is DecisionAction.ENTER and d.created.side is Side.BUY
     # move = 1.0 x ATR 4 = 4.00 USD/oz; 0.01 lot x 100 oz -> 4.00 USD at stake
-    # EV = 4.00 x (2 x 0.70 - 1) - (0.20 x 1 + 3.5 x 0.01 x 2) = 1.60 - 0.27 = 1.33
-    assert d.created.expected_value_usd == D("1.33")
+    # EV = 4.00 x (2 x 0.70 - 1) - 3.5 x 0.01 x 2 = 1.60 - 0.07 = 1.53 (the spread is
+    # inside the label p is calibrated on, #129)
+    assert d.created.expected_value_usd == D("1.53")
     assert d.intent is not None
     assert d.intent.action is IntentAction.OPEN and d.intent.requested_lot == D("0.01")
     assert d.intent.decision_id == d.created.decision_id and d.intent.cycle_id == "cyc_1"
@@ -156,10 +157,10 @@ def test_missing_cost_input_waits() -> None:
 
 
 def test_ev_not_above_costs_waits() -> None:
-    d = _decide(evidence=Evidence(forecast=_forecast(p="0.53")))  # 4 x 0.06 = 0.24 < 0.27
+    d = _decide(evidence=Evidence(forecast=_forecast(p="0.505")))  # 4 x 0.01 = 0.04 < 0.07
     assert d.created.action is DecisionAction.WAIT and "EV_NOT_POSITIVE" in _reasons(d)
     assert d.created.expected_value_usd == D("-0.03")
-    break_even = _decide(evidence=Evidence(forecast=_forecast(p="0.53375")))  # EV exactly 0
+    break_even = _decide(evidence=Evidence(forecast=_forecast(p="0.50875")))  # EV exactly 0
     assert "EV_NOT_POSITIVE" in _reasons(break_even)
 
 

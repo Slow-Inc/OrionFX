@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from tests.support import tracer
 
+from app.core.bet import LABEL_VERSION
 from app.core.contracts import FeatureSnapshot, ParameterBound, sha256_ref
 from app.core.enums import DataQuality, Direction, ForecastLineage, Mode, Timeframe
 from app.decision.fusion import Costs
@@ -164,6 +165,20 @@ def test_a_snapshot_at_or_before_the_training_cutoff_is_refused(
             predict_for_evaluation(ev, _snapshot(as_of), now=as_of + timedelta(seconds=5))
     after = CUTOFF + timedelta(minutes=5)
     assert predict_for_evaluation(ev, _snapshot(after), now=after + timedelta(seconds=5))
+
+
+def test_the_evaluation_path_applies_the_label_rules_of_129(conn: sqlite3.Connection) -> None:
+    """A card calibrated on another label is refused at load, and a labelled model must
+    score all three classes, as on the live path."""
+    stale = _card(model_version="4", label_version="m07.labels.tb.v0")
+    labelled = _card(model_version="5", label_version=LABEL_VERSION)
+    reg = ArtifactRegistry(conn)
+    for card in (stale, labelled):
+        reg.register("model", card.manifest(), actor="m07")
+    with pytest.raises(Refused, match="another label"):
+        _evaluate(reg, card=stale)
+    with pytest.raises(Refused, match="UP, DOWN and NEUTRAL"):
+        predict_for_evaluation(_evaluate(reg, card=labelled), _snapshot(), now=NOW)
 
 
 class _CutBaseline:
