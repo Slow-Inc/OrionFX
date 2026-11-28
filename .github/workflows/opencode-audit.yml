@@ -1,0 +1,96 @@
+# Weekly OpenCode audit of main: advisory, read-only.
+#
+# Runs the review skills over the last week's changes on main, and checks that
+# the docs are honest (the ledger and catalog coverage match the code, and
+# stale TODO/[PROPOSED] items are flagged). Findings go to ONE bilingual issue
+# labelled needs-triage + repo-ops; an open audit issue gets a comment instead
+# of a duplicate. Nothing is posted when there are no findings. The issue is
+# filed by the OpenCode app bot, which opencode-triage skips (bot author), so
+# it enters the normal manual triage flow through the needs-triage label.
+#
+# OpenCode auth: service account "OrionFX Automation" (OIDC, pinned to repo ID
+# 1473623856, branch main only, permission Models: Request). Runs only from
+# main, so it can be verified only after merge.
+name: OpenCode audit
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: opencode-audit
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  audit:
+    # Only from main: token-holding scripts must be main's, and the Automation
+    # service account accepts main only.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # GITHUB_TOKEN is read-only; the issue is filed with the OpenCode App token.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gather context
+        run: |
+          set -euo pipefail
+          ctx=.git/opencode-ctx
+          mkdir -p "$ctx"
+          base=$(git rev-list -n 1 --before='7 days ago' HEAD || true)
+          if [ -n "$base" ]; then
+            git log --stat "$base..HEAD" > "$ctx/week-log.txt"
+            git diff "$base..HEAD" -- . ':(exclude)docs/contracts' > "$RUNNER_TEMP/week-full.diff"
+            head -c 300000 "$RUNNER_TEMP/week-full.diff" > "$ctx/week.diff"
+          else
+            git log --stat -n 30 > "$ctx/week-log.txt"
+            : > "$ctx/week.diff"
+          fi
+          cat > "$ctx/prompt.md" <<'EOF'
+          You run the weekly read-only audit of this repo's main branch. You must not change code: you have no shell and cannot edit files. Claude is this repo's developer; your findings are advisory and go to a maintainer for triage.
+
+          Context: the last week's commits are in .git/opencode-ctx/week-log.txt and their diff (possibly truncated) in .git/opencode-ctx/week.diff. Apply CLAUDE.md. Use the skill tool to load and follow scrutinize, then code-review (standards axis only), then t4-gates, over that week's changes. Then load and follow architecture-audit over main: deepening opportunities, duplication across modules, and docs/ledger/catalog drift (docs/OPEN-WORK-LEDGER.md and docs/catalog/coverage.json against the code, stale [PROPOSED] or TODO items, and claims the code contradicts). Report only findings you can cite as path:line. Be brief.
+
+          If you have no findings, your final answer is exactly: NO_FINDINGS
+
+          Otherwise your final answer is a GitHub issue body in Markdown: an English section "## Findings" with one bullet per finding ([severity] path:line — finding — suggested action), then a Thai section "## สิ่งที่พบ" that mirrors it at the same depth. Identifiers stay in English.
+          EOF
+      - name: Run OpenCode
+        uses: ./.github/actions/opencode-run
+        with:
+          client-id: ${{ vars.OPENCODE_AUTOMATION_CLIENT_ID }}  # "OrionFX Automation"; a credential ID, not a secret
+          prompt-file: .git/opencode-ctx/prompt.md
+          output-file: ${{ runner.temp }}/answer.md
+          timeout-minutes: '15'
+      - name: File or update the audit issue as the OpenCode app
+        run: |
+          set -euo pipefail
+          answer="$RUNNER_TEMP/answer.md"
+          if [ "$(tr -d '[:space:]' < "$answer")" = "NO_FINDINGS" ]; then
+            echo "No findings; nothing posted."
+            exit 0
+          fi
+          printf '\n\n_Weekly OpenCode audit of %s (advisory, read-only). / ตรวจรายสัปดาห์โดย OpenCode (เป็นคำแนะนำ อ่านอย่างเดียว)_\n' "$GITHUB_SHA" >> "$answer"
+          cat > "$RUNNER_TEMP/file-audit.sh" <<'EOF'
+          set -euo pipefail
+          answer=$1
+          title="OpenCode weekly audit findings"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label repo-ops \
+            --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$answer"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --label needs-triage --label repo-ops --body-file "$answer"
+          fi
+          EOF
+          bash .github/opencode/with-app-token.sh bash "$RUNNER_TEMP/file-audit.sh" "$answer"
