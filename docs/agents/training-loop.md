@@ -107,7 +107,7 @@ Rules, adopted from mip-research (PRD #120):
 | Rule | Mechanism | Status |
 |---|---|---|
 | Protocol record | `protocol.Protocol`, `protocol_hash`, `load_protocol(text, expected_hash)` refuses a document whose content does not hash to the expected value. | [built #132] |
-| 1, 10 | `runlog.RunLog` (migration `0015_claim_protocol`). A run counts only under a registered protocol hash. N is the number of distinct config hashes with an `ok` or `failed` run. A new counted config past the budget is refused. `aa` and `bugfix-rerun` (with a bug note and fix SHA) are logged but never counted, and only for a config already counted. `open_holdout` records the single opening, for a counted config with no errata; after it, no new config counts. | [built #132] |
+| 1, 10 | `runlog.RunLog` (migration `0015_claim_protocol`). A run counts only under a registered protocol hash. N is the number of distinct config hashes with an `ok` or `failed` run. A new counted config past the budget is refused. `aa` and `bugfix-rerun` (with a bug note and fix SHA) are logged but never counted, and only for a config already counted. `open_holdout` records the single opening, for a counted config whose current result (its latest `ok` or `bugfix-rerun` run) carries no erratum; after it, no new config counts. | [built #132] |
 | 2 | `claimstats.mean_ci`, `brier_skill_ci`: stationary or circular block bootstrap over days, one- or two-sided. | [built #132] |
 | 3 | `claimstats.simulated_power`, `mean_lb_power`, `min_track_record_length`; `ece_noise_floor`, `expected_binned_ece` for the ECE gate. | [built #132] |
 | 4 | `claimstats.best_of_n` (N from the run log), `deflated_sharpe`, `pbo_cscv`, `sign_test`, `holm`. | [built #132] |

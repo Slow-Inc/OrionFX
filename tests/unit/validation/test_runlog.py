@@ -204,6 +204,27 @@ def test_the_holdout_opens_only_for_a_counted_clean_config(log: RunLog, ph: str)
     assert not log.holdout_consumed(ph)
 
 
+def test_a_failed_config_without_a_rerun_has_no_result(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0", RunStatus.FAILED))
+    with pytest.raises(NotCounted):
+        log.open_holdout(ph, "B0")
+
+
+def test_a_bugfix_rerun_supersedes_a_marked_run_for_the_holdout(log: RunLog, ph: str) -> None:
+    first = log.record(run(ph, "B0"))
+    log.record(bugfix(ph, "B0"))
+    log.add_erratum(first, ErrataState.SUPERSEDED, "label bug fixed in the rerun")
+    assert log.open_holdout(ph, "B0").config_id == "B0"
+
+
+def test_an_erratum_on_the_current_result_blocks_the_holdout(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    rerun = log.record(bugfix(ph, "B0"))
+    log.add_erratum(rerun, ErrataState.INVALID, "the fix was wrong too")
+    with pytest.raises(NotCounted):
+        log.open_holdout(ph, "B0")
+
+
 def test_the_holdout_needs_a_registered_protocol(log: RunLog) -> None:
     with pytest.raises(UnknownProtocol):
         log.open_holdout("f" * 64, "B0")

@@ -14,8 +14,9 @@ single-use holdout, and errata (#132; PRD #120; training-loop.md §6 rules 1, 4,
     the fix's commit SHA) are logged but never counted, and only for a config hash that
     is already counted, so relabelling cannot sneak a new config past the budget.
   - A `config_id` names one `config_hash` within a protocol, and the other way round.
-- **The holdout opens once** per protocol (`open_holdout`), for a counted config none of
-  whose runs carries an erratum. After that it is consumed: development data.
+- **The holdout opens once** per protocol (`open_holdout`), for a counted config whose
+  current result (its latest `ok` or `bugfix-rerun` run) carries no erratum. After that it
+  is consumed: development data, and no new config counts.
 - **Retention:** nothing is updated or deleted (database triggers). Errata mark a run
   with a state, a reason and a time. They never refund budget: N counts what was tried.
 """
@@ -258,22 +259,24 @@ class RunLog:
     # --- the holdout -----------------------------------------------------------------------
 
     def open_holdout(self, digest: str, config_id: str, *, actor: str = "x02") -> HoldoutOpening:
-        """Record the single opening of this protocol's holdout, for one clean counted config."""
+        """Record the single opening of this protocol's holdout, for one counted config whose
+        current result (its latest `ok` or `bugfix-rerun` run) carries no erratum. An
+        erratum on a superseded run does not block: that is what a bug-fix rerun is for."""
         with transaction(self._conn):
             self._require(digest)
             if self.holdout_consumed(digest):
                 raise HoldoutConsumed(f"the holdout of {digest} was already opened")
-            counted, flagged = self._conn.execute(
-                "SELECT EXISTS (SELECT 1 FROM claim_runs WHERE protocol_hash = ?1"
-                "   AND config_id = ?2 AND status IN (?3, ?4)),"
-                " EXISTS (SELECT 1 FROM claim_run_errata JOIN claim_runs USING (run_id)"
-                "   WHERE protocol_hash = ?1 AND config_id = ?2)",
-                (digest, config_id, *COUNTED),
+            latest = self._conn.execute(
+                "SELECT run_id, EXISTS (SELECT 1 FROM claim_run_errata e"
+                "   WHERE e.run_id = claim_runs.run_id) FROM claim_runs"
+                " WHERE protocol_hash = ? AND config_id = ? AND status IN (?, ?)"
+                " ORDER BY run_id DESC LIMIT 1",
+                (digest, config_id, RunStatus.OK, RunStatus.BUGFIX_RERUN),
             ).fetchone()
-            if not counted:
-                raise NotCounted(f"{config_id} is not a counted config of this protocol")
-            if flagged:
-                raise NotCounted(f"{config_id} has a run with an erratum")
+            if latest is None:
+                raise NotCounted(f"{config_id} has no result under this protocol")
+            if latest[1]:
+                raise NotCounted(f"the current result of {config_id} carries an erratum")
             opened_at = self._now()
             self._conn.execute(
                 "INSERT INTO claim_holdout_openings (protocol_hash, config_id, opened_at)"
