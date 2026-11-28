@@ -35,6 +35,7 @@ export CLAUDE_PROJECT_DIR="$TMP/proj"
 HEAD=1111111111111111111111111111111111111111
 OLD=2222222222222222222222222222222222222222
 URL=https://github.com/Slow-Inc/OrionFX/pull/7
+OK_BODY='OpenCode review of x (advisory)\n\n- no findings\n\nVerdict: 0 blocker, 0 major'
 
 set_cfg() {  # $1 = true|false, $2 = bot login
   sed -e "s/\"requireOpenCodeReview\": *[a-z]*/\"requireOpenCodeReview\": $1/" \
@@ -42,14 +43,30 @@ set_cfg() {  # $1 = true|false, $2 = bot login
       "$ROOT/.claude/t4.json" > "$TMP/proj/.claude/t4.json"
 }
 
-# Fixture builders. reset() gives a PR at HEAD touching docs only, with a resolved
-# OpenCode review at HEAD and no comments: the passing baseline.
+# rev <id> <commit> [body] [login] [type]: one REST review object.
+rev() {
+  printf '{"id":%s,"user":{"login":"%s","type":"%s"},"commit_id":"%s","state":"COMMENTED","body":"%s"}' \
+    "$1" "${4:-opencode-agent[bot]}" "${5:-Bot}" "$2" "${3-$OK_BODY}"
+}
+# thr <resolved> <outdated> <reviewId> [reply|untrusted-reply]: one GraphQL thread
+# opened by the bot, optionally with a human reply.
+thr() {
+  local c="{\"authorAssociation\":\"NONE\",\"author\":{\"login\":\"opencode-agent\",\"__typename\":\"Bot\"},\"pullRequestReview\":{\"databaseId\":$3}}"
+  case "${4:-}" in
+    reply) c+=",{\"authorAssociation\":\"OWNER\",\"author\":{\"login\":\"top00\",\"__typename\":\"User\"},\"pullRequestReview\":{\"databaseId\":555}}" ;;
+    untrusted-reply) c+=",{\"authorAssociation\":\"NONE\",\"author\":{\"login\":\"stranger\",\"__typename\":\"User\"},\"pullRequestReview\":{\"databaseId\":556}}" ;;
+  esac
+  printf '{"isResolved":%s,"isOutdated":%s,"path":"a.py","line":3,"comments":{"nodes":[%s]}}' "$1" "$2" "$c"
+}
+
+# reset(): a PR at HEAD touching docs only, with a clean OpenCode review at HEAD whose
+# one thread is resolved and answered, and no comments -- the passing baseline.
 reset() {
   rm -rf "$FIX"; mkdir -p "$FIX"
   set_cfg true
   files '[{"filename":"docs/x.md"}]'
-  reviews "[{\"id\":101,\"user\":{\"login\":\"opencode-agent[bot]\",\"type\":\"Bot\"},\"commit_id\":\"$HEAD\",\"state\":\"COMMENTED\"}]"
-  threads '{"isResolved":true,"path":"docs/x.md","line":3,"comments":{"nodes":[{"pullRequestReview":{"databaseId":101}}]}}'
+  reviews "[$(rev 101 $HEAD)]"
+  threads "$(thr true false 101 reply)"
   comments '[]'
 }
 files() {
@@ -90,33 +107,46 @@ called() {  # $1 = name, $2 = regex the calls log must match ("" = gh must not b
     fail=$((fail + 1)); echo "FAIL - $1 (calls: $(tr '\n' ';' < "$FIX/calls.log" 2>/dev/null))"
   fi
 }
+no_escalation() {  # $1 = name; the last block message must not say STOP
+  if printf '%s' "$err" | grep -q "STOP AND ASK"; then fail=$((fail + 1)); echo "FAIL - $1"; else pass=$((pass + 1)); echo "ok   - $1"; fi
+}
 
-M="gh pr merge 7 --squash"
+MHC="--match-head-commit $HEAD"
+M="gh pr merge 7 --squash $MHC"
+UNPARSED="form the gate cannot check"
 
 # --- scope ------------------------------------------------------------------------
 reset; run allow "non-merge command is not touched" "git status"; called "non-merge: gh never called" ""
+reset; run allow "git merge is not a PR merge" "git merge --ff-only origin/main"; called "git merge: gh never called" ""
 reset; set_cfg false; reviews '[]'; run allow "opt-in off allows" "$M"; called "opt-in off: gh never called" ""
-reset; run allow "merge mentioned inside a quoted body" 'gh issue comment 5 --body "then (gh pr merge 5) later"'; called "quoted mention: gh never called" ""
+reset; rm "$TMP/proj/.claude/t4.json"; run allow "no t4.json: allowed, with a notice" "$M" "gate is DISABLED"
 reset; run allow "merge mentioned inside a heredoc" "cat > f <<'EOF'
 gh pr merge 5 --squash
 EOF"
 called "heredoc mention: gh never called" ""
+reset; run allow "merge mentioned inside a PowerShell here-string" "\$b = @'
+then gh pr merge 5
+'@" "" PowerShell
+reset; run block "merge mentioned in a quoted body fails closed" 'gh issue comment 5 --body "then (gh pr merge 5) later"' "$UNPARSED"
+called "quoted mention: gh never called" ""
 
 # --- normal pass ----------------------------------------------------------------
-reset; run allow "review at head, all threads resolved" "$M"
-reset; reviews '[]'; run block "no review" "$M" "no review by opencode-agent\[bot\] at the head SHA"
-reset; reviews "[{\"id\":101,\"user\":{\"login\":\"opencode-agent[bot]\",\"type\":\"Bot\"},\"commit_id\":\"$OLD\"}]"
-run block "review only on an old SHA" "$M" "no review by"
-reset; reviews "[{\"id\":101,\"user\":{\"login\":\"github-actions[bot]\",\"type\":\"Bot\"},\"commit_id\":\"$HEAD\"}]"
-run block "review at head by a different bot" "$M" "no review by"
-reset; reviews "[{\"id\":101,\"user\":{\"login\":\"opencode-agent\",\"type\":\"User\"},\"commit_id\":\"$HEAD\"}]"
-run block "user account named like the bot does not count" "$M" "no review by"
-reset; threads '{"isResolved":false,"path":"docs/x.md","line":3,"comments":{"nodes":[{"pullRequestReview":{"databaseId":101}}]}}'
-run block "unresolved OpenCode thread" "$M" "1 OpenCode review thread.*not resolved: docs/x.md:3"
-reset; threads '{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"pullRequestReview":{"databaseId":999}}]}}'
-run allow "unresolved thread from another review does not count" "$M"
-reset; threads '' true; run block "more than 100 threads" "$M" "more than 100 review threads"
+reset; run allow "review at head, verdict 0/0, thread resolved and answered" "$M"
+reset; reviews '[]'; run block "no review" "$M" "no review by opencode-agent\[bot\] at the PR head"
+reset; reviews "[$(rev 101 $OLD)]"; run block "review only on an old SHA" "$M" "no review by"
+reset; reviews "[$(rev 101 $HEAD "$OK_BODY" github-actions[bot])]"; run block "review at head by a different bot" "$M" "no review by"
+reset; reviews "[$(rev 101 $HEAD "$OK_BODY" opencode-agent User)]"; run block "user account named like the bot does not count" "$M" "no review by"
 reset; set_cfg true opencode-agent; run allow "bot login configured without [bot]" "$M"
+reset; threads "$(thr false false 101)"; run block "unresolved OpenCode thread" "$M" "1 OpenCode review thread.*not resolved: a.py:3"
+reset; threads "$(thr true false 101)"; run block "resolved with no reply and not outdated" "$M" "resolved with no fix and no reply"
+reset; threads "$(thr true false 101 untrusted-reply)"; run block "resolved with only an untrusted reply" "$M" "no fix and no reply"
+reset; threads "$(thr true true 101)"; run allow "resolved and outdated (line changed)" "$M"
+reset; threads '{"isResolved":false,"isOutdated":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"github-actions","__typename":"Bot"},"pullRequestReview":{"databaseId":999}}]}}'
+run allow "unresolved thread from another reviewer does not count" "$M"
+reset; threads '' true; run block "more than 100 threads" "$M" "more than 100 review threads"
+reset; reviews "[$(rev 101 $HEAD 'OpenCode review\n\n- [major] x\n\nVerdict: 0 blocker, 1 major')]"; run block "verdict with a major finding" "$M" "0 blocker and 1 major"
+reset; reviews "[$(rev 101 $HEAD 'OpenCode review\n\n- no findings')]"; run block "review without a Verdict line" "$M" "no .Verdict"
+reset; reviews "[$(rev 100 $HEAD 'Verdict: 1 blocker, 0 major'),$(rev 101 $HEAD)]"; run allow "only the latest review at head counts for the verdict" "$M"
 
 # --- risk paths -----------------------------------------------------------------
 reset; files '[{"filename":"backend/app/risk/veto.py"}]'
@@ -135,31 +165,34 @@ reset; files '[{"filename":".claude/hooks/x"}]'; comments "[$(comment "${IND//$H
 run block "record at an old SHA" "$M" "risk paths"
 reset; files '[{"filename":".claude/hooks/x"}]'; comments "[$(comment "<!-- t4:independent-review head=$HEAD -->")]"
 run block "record with no written summary" "$M" "risk paths"
+reset; files '[{"filename":".claude/hooks/x"}]'; comments "[$(comment "Notes first.
+$IND")]"
+run block "record that is not on the first line" "$M" "risk paths"
 reset; files '[{"filename":"docs/a.md"}]' 3; run block "file list shorter than changedFiles" "$M" "listed 1 of 3 changed files"
 
 # --- fallback -------------------------------------------------------------------
 reset; reviews '[]'; comments "[$(comment "$FB"),$(comment "$IND" COLLABORATOR)]"
 run allow "fallback with both markers" "$M"
 reset; reviews '[]'; comments "[$(comment "$FB")]"
-run block "fallback without the self-review record" "$M" "t4:independent-review head=$HEAD.*\[missing\]"
+run block "fallback without the self-review record" "$M" "t4:independent-review head=<sha>.*\[missing\]"
 reset; reviews '[]'; comments "[$(comment "<!-- t4:opencode-fallback head=$HEAD reason=\"\" -->"),$(comment "$IND")]"
 run block "fallback with an empty reason" "$M" "opencode-fallback.*\[missing\]"
-reset; threads '{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"pullRequestReview":{"databaseId":101}}]}}'
-comments "[$(comment "$FB"),$(comment "$IND")]"
+reset; reviews '[]'; comments "[$(comment "<!-- t4:opencode-fallback head=$HEAD reason=\"...\" -->"),$(comment "$IND")]"
+run block "fallback with the placeholder reason" "$M" "opencode-fallback.*\[missing\]"
+reset; threads "$(thr false false 101)"; comments "[$(comment "$FB"),$(comment "$IND")]"
 run block "fallback does not excuse unresolved threads when the review exists" "$M" "not resolved"
+reset; reviews '[]'; run block "block message never prints the real SHA in a marker" "$M" "head=<sha> reason=\"\.\.\.\""
+if printf '%s' "$err" | grep -q "head=$HEAD"; then fail=$((fail + 1)); echo "FAIL - real SHA leaked into a marker template"; else pass=$((pass + 1)); echo "ok   - real SHA not in any marker template"; fi
 
 # --- round cap (opencodeMaxRounds, default 5) ----------------------------------------
-# rounds <n> [head-resolved]: n OpenCode reviews on distinct commits, the last one at HEAD
+# rounds <n> [resolved]: n OpenCode reviews on distinct commits, the last one at HEAD
 # (id 101) with an unresolved thread, unless $2 = resolved.
 rounds() {
   local i list=""
-  for ((i = 1; i < $1; i++)); do list+="{\"id\":$i,\"user\":{\"login\":\"opencode-agent[bot]\",\"type\":\"Bot\"},\"commit_id\":\"$(printf '%040d' "$i")\"},"; done
-  reviews "[$list{\"id\":101,\"user\":{\"login\":\"opencode-agent[bot]\",\"type\":\"Bot\"},\"commit_id\":\"$HEAD\"}]"
+  for ((i = 1; i < $1; i++)); do list+="$(rev "$i" "$(printf '%040d' "$i")"),"; done
+  reviews "[$list$(rev 101 $HEAD)]"
   [ "${2:-}" = resolved ] && return
-  threads '{"isResolved":false,"path":"a.py","line":9,"comments":{"nodes":[{"pullRequestReview":{"databaseId":101}}]}}'
-}
-no_escalation() {  # $1 = name; the last block message must not say STOP
-  if printf '%s' "$err" | grep -q "STOP AND ASK"; then fail=$((fail + 1)); echo "FAIL - $1"; else pass=$((pass + 1)); echo "ok   - $1"; fi
+  threads "$(thr false false 101)"
 }
 reset; rounds 3; run block "below the cap: plain block" "$M" "not resolved"; no_escalation "below the cap: no escalation"
 reset; rounds 5; run block "at the cap (5 rounds): plain block" "$M" "not resolved"; no_escalation "at the cap: no escalation yet"
@@ -175,22 +208,71 @@ reset; echo "HTTP 502: Bad Gateway" > "$FIX/fail.reviews"; run block "API error 
 reset; echo "no pull requests found" > "$FIX/fail.view"; run block "API error on pr view" "$M" "fail closed"
 reset; reviews '[]'; echo "HTTP 403" > "$FIX/fail.comments"; run block "API error on comments" "$M" "fail closed"
 reset; echo "not json" > "$FIX/reviews.json"; run block "garbled API reply" "$M" "could not parse"
+reset; printf '{"errors":[{"message":"boom"}],"data":null}' > "$FIX/threads.json"; run block "GraphQL errors" "$M" "GraphQL reply has errors"
 reset; perl -0777 -i -pe 's/"riskPaths": \[.*?\]/"riskPaths": []/s' "$TMP/proj/.claude/t4.json"
 run block "empty riskPaths while opted in" "$M" "riskPaths"
-reset; run block "merge via the GitHub MCP tool" "" "GitHub MCP tool" mcp__github__merge_pull_request
+reset; run block "merge via the GitHub MCP tool" "" "can merge without this gate" mcp__github__merge_pull_request
 
-# --- PR selector parsing (xeno-skills #437) ------------------------------------------
-reset; run allow "flag before the number" "gh pr merge --squash 42"; called "flag before the number -> PR 42" "^pr view 42 "
-reset; run allow "number inside a quoted flag value" 'gh pr merge --subject "Release 2026" 12 --squash'
+# --- PR selector and merge flags ----------------------------------------------------
+reset; run allow "flag before the number" "gh pr merge --squash 42 $MHC"; called "flag before the number -> PR 42" "^pr view 42 "
+reset; run allow "number inside a quoted flag value" "gh pr merge --subject \"Release 2026\" 12 --squash $MHC"
 called "quoted value skipped -> PR 12" "^pr view 12 "
-reset; run allow "PR URL" "gh pr merge $URL --merge"; called "PR URL passed to pr view" "^pr view $URL "
-reset; run allow "no selector" "gh pr merge --squash --delete-branch"; called "no selector -> current branch" "^pr view --json"
-reset; run allow "--repo flag" "gh pr merge -R Slow-Inc/OrionFX 9"; called "--repo passed through" "^pr view 9 --repo Slow-Inc/OrionFX "
-reset; reviews '[]'; run block "quoted absolute gh path is gated" '"/c/Program Files/GitHub CLI/gh.exe" pr merge 7 --squash' "no review by"
-reset; reviews '[]'; run block "merge after cd && is gated" "cd /x && gh pr merge 7" "no review by"
-reset; run block "env-prefixed merge is refused" "GH_REPO=other/repo gh pr merge 7" "environment prefix"
-reset; run block "env prefix + quoted gh path is refused" 'GH_REPO=x "/usr/bin/gh" pr merge 7' "environment prefix"
-reset; run block "two merges in one command" "gh pr merge 1; gh pr merge 2" "one .gh pr merge. per command"
+reset; run allow "PR URL" "gh pr merge $URL --merge $MHC"; called "PR URL passed to pr view" "^pr view $URL "
+reset; run block "no selector is refused" "gh pr merge --squash $MHC" "name the PR explicitly"; called "no selector: gh never called" ""
+reset; run block "branch selector is refused" "gh pr merge feature/x $MHC" "name the PR explicitly"
+reset; run allow "--repo flag" "gh pr merge -R Slow-Inc/OrionFX 9 $MHC"; called "--repo passed through" "^pr view 9 --repo Slow-Inc/OrionFX "
+reset; run allow "-R<repo> without a space" "gh pr merge -RSlow-Inc/OrionFX 9 $MHC"; called "-R<repo> passed through" "^pr view 9 --repo Slow-Inc/OrionFX "
+reset; run block "missing --match-head-commit" "gh pr merge 7 --squash" "add .--match-head-commit"
+reset; run block "--match-head-commit of another commit" "gh pr merge 7 --match-head-commit $OLD" "is not the PR head"
+reset; run allow "--match-head-commit=<sha> form" "gh pr merge 7 --squash --match-head-commit=$HEAD"
+reset; run allow "redirection after the merge" "gh pr merge 7 --squash $MHC 2>&1"
+reset; reviews '[]'; run block "quoted absolute gh path is gated" "\"/c/Program Files/GitHub CLI/gh.exe\" pr merge 7 $MHC" "no review by"
+reset; reviews '[]'; run block "merge after cd && is gated" "cd /x && gh pr merge 7 $MHC" "no review by"
+reset; run block "two merges in one command" "gh pr merge 1 $MHC; gh pr merge 2 $MHC" "$UNPARSED"
+reset; run block "env-prefixed merge is refused" "GH_REPO=other/repo gh pr merge 7 $MHC" "$UNPARSED"
+reset; reviews '[]'; run block "PowerShell call operator is gated" "& 'C:\\Program Files\\GitHub CLI\\gh.exe' pr merge 7 $MHC" "no review by" PowerShell
+reset; reviews '[]'; run block "Monitor command is gated" "$M" "no review by" Monitor
+
+# --- probes from the independent review of PR #150 (review150/probe.sh) -------------
+# Every probe must block: reviews '[]' means any gated merge blocks, so "allow" = bypass.
+P() { reset; reviews '[]'; run block "probe: $1" "$2" "" "${3:-Bash}"; }
+P "Bash tool, plain merge"     "gh pr merge 7"
+P "PowerShell tool name"       "gh pr merge 7" PowerShell
+P "brace group"                "{ gh pr merge 7; }"
+P "if/then"                    "if true; then gh pr merge 7; fi"
+P "bash -c"                    'bash -c "gh pr merge 7"'
+P "eval"                       "eval 'gh pr merge 7'"
+P "time prefix"                "time gh pr merge 7"
+P "command prefix"             "command gh pr merge 7"
+P "env prefix cmd"             "env gh pr merge 7"
+P "backslash-newline"          $'gh pr \\\n merge 7'
+P "escaped letter (probe.sh literal)" $'gh pr \\n merge 7'
+P "gh -R before pr"            "gh -R Slow-Inc/OrionFX pr merge 7"
+P "gh api PUT merge"           "gh api -X PUT repos/Slow-Inc/OrionFX/pulls/7/merge"
+P "graphql mergePullRequest"   "gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'"
+P "graphql auto-merge"         "gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'"
+P "alias"                      "gh alias set m 'pr merge' && gh m 7"
+P "--auto"                     "gh pr merge 7 --auto --squash $MHC"
+P "&&-chained"                 "true && gh pr merge 7"
+P "subshell"                   "(gh pr merge 7)"
+P "xargs"                      "echo 7 | xargs gh pr merge"
+reset; reviews '[]'; comments "[$(comment "Gate output:
+\`\`\`
+      <!-- t4:opencode-fallback head=$HEAD reason=\"...\" -->   (state the cause)  [missing]
+      <!-- t4:independent-review head=$HEAD -->   followed by the findings and how each was handled  [missing]
+\`\`\`")]"
+run block "probe: pasted gate message unlocks fallback" "$M"
+reset; reviews '[]'; comments "[$(comment "> <!-- t4:opencode-fallback head=$HEAD reason=\"x\" -->"),$(comment "> $IND")]"
+run block "probe: blockquoted markers" "$M"
+reset; reviews "[$(rev 101 $HEAD '- [blocker] bad\n\nVerdict: 1 blocker, 0 major')]"; threads ''
+run block "probe: summary-only blocker (Verdict: 1 blocker)" "$M" "1 blocker"
+reset; reviews "[$(rev 100 $OLD),$(rev 101 $HEAD)]"; threads "$(thr false false 100)"
+run block "probe: unresolved thread from previous round" "$M" "not resolved"
+reset; reviews '[{"id":1,"user":"x","commit_id":"1"}]'; run block "probe: malformed user field" "$M"
+reset; printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":["x"]}}}},"errors":[{"message":"partial"}]}' > "$FIX/threads.json"
+run block "probe: graphql partial data + errors" "$M" "errors"
+# Out of scope by design: a direct push to main is blocked by the GitHub ruleset, not by this hook.
+reset; reviews '[]'; run allow "probe: git push to main is the ruleset's job (documented)" "git push origin HEAD:main"
 
 echo
 echo "$pass passed, $fail failed"

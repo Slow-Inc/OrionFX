@@ -37,34 +37,55 @@ Local verify is `.claude/t4.json` `"verify"` (backend: ruff, format, mypy, pytes
 
 ## Review gates — OpenCode merge gate (#149, owner decision 2026-11-28)
 
-This section **supersedes** the "Before merge / ship → `/code-review` + `/scrutinize`" row in the table above, and any wording elsewhere in this file that calls the OpenCode review advisory only or says it "does not replace" those gates. `.claude/hooks/orionfx-opencode-merge-gate` enforces it on `gh pr merge` when `.claude/t4.json` has `"requireOpenCodeReview": true`.
+This section **supersedes** the "Before merge / ship → `/code-review` + `/scrutinize`" row in the table above. It also supersedes any wording elsewhere in this file that calls the OpenCode review advisory only, or says it "does not replace" those gates.
+
+**The hook is the real gate.** `.claude/hooks/orionfx-opencode-merge-gate` enforces this section on Bash, PowerShell and Monitor commands, and on GitHub MCP merge tools, when `.claude/t4.json` has `"requireOpenCodeReview": true`.
 
 ### Who reviews
 
 | Case | Review | Record the gate checks |
 |---|---|---|
-| Every PR | OpenCode: the `review` check, posted by `opencodeBotLogin` (`opencode-agent[bot]`) | A PR review whose `commit_id` is the head SHA, with every thread it opened **resolved** |
-| A changed file (or a rename's old path) matches `riskPaths` | OpenCode **plus** one independent subagent review | PR comment `<!-- t4:independent-review head=<sha> -->` followed by the findings and how each was handled |
-| OpenCode is down: model 429, App token failure, timeout, or the check is missing or failed for an infra reason | Fallback self-review with subagents: `code-review`, `scrutinize`, `simplify`, plus `security-review` when relevant | PR comment `<!-- t4:opencode-fallback head=<sha> reason="..." -->` **and** the independent-review comment, both at the head SHA |
+| Every PR | OpenCode: the `review` check, posted by `opencodeBotLogin` (`opencode-agent[bot]`) | The latest review at the head SHA ends with `Verdict: 0 blocker, 0 major`. Every thread the bot opened on the PR, in any round, is resolved and either answered by you or outdated. |
+| A changed file (or a rename's old path) matches `riskPaths` | OpenCode **plus** one independent subagent review | PR comment whose first line is `<!-- t4:independent-review head=<sha> -->`, followed by the findings and how each was handled |
+| OpenCode is down: model 429, App token failure, timeout, or the review is missing for an infra reason | Fallback self-review with subagents: `code-review`, `scrutinize`, `simplify`, plus `security-review` when relevant | PR comment whose first line is `<!-- t4:opencode-fallback head=<sha> reason="<cause>" -->`, **and** the independent-review comment, both at the head SHA |
 
-Outside these cases the agent does not spawn subagents to review its own work. TDD, `verify`, and the in-session `simplify` / `security-review` triggers stay the agent's own work.
+Outside these cases, the agent does not spawn subagents to review its own work. TDD, `verify`, and the in-session `simplify` / `security-review` triggers stay the agent's own work.
+
+### The only merge command that passes
+
+```
+gh pr merge <number|PR URL> --squash --match-head-commit <head sha>
+```
+
+Run it as its own plain command. The gate refuses, fail-closed, any other text that looks like a merge outside a heredoc body. That text is `pr merge`, `/pulls/<n>/merge`, `mergePullRequest` or `enablePullRequestAutoMerge`, and the refusal covers:
+- wrappers and prefixes: `bash -c`, `eval`, `xargs`, `{ …; }`, `if …; then`, `time`, `env`, `command`, `VAR=x`;
+- other routes: aliases, `gh -R x pr merge`, `gh api … merge`, two merges in one command.
+
+It also refuses a missing or branch selector, a missing or stale `--match-head-commit`, and `--auto`.
+
+`--match-head-commit` makes GitHub refuse the merge if someone pushed after the check. Text that only *mentions* a merge, such as a PR body or a commit message, belongs in a file (`--body-file`, `-F`) or a heredoc.
 
 ### The review → fix loop
 
 1. **Push.** OpenCode reviews the new head. Wait for it: `gh pr checks <n> --watch`.
-2. **Read the review at the current head:** `gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`, author `opencode-agent[bot]`, `commit_id` = head SHA, plus its inline threads.
-3. **Handle every thread.** Fix it if the finding is valid. Otherwise reply on the thread with the reason. Then **resolve the thread**; a reply alone does not pass the gate. Get thread ids from `pullRequest.reviewThreads { id isResolved }` in GraphQL, then resolve with `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"<id>"}){thread{isResolved}}}'`.
-4. **If you pushed a fix, go back to step 1.** The new head needs its own review. Resolved threads on an older SHA do not count for the new head.
-5. **Merge only when the latest review at the current head has no unresolved thread.** On a risk-path PR, the independent-review comment must also name the current head. Re-post it after a push, covering the new commits.
+2. **Read the latest review at the current head:** `gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`, author `opencode-agent[bot]`, `commit_id` = head SHA. Read its summary, its last line `Verdict: <n> blocker, <n> major`, and its inline threads. A finding can live only in the summary, because inline comments are capped at 15.
+3. **Handle every finding.** Fix it if it is valid. Otherwise reply on its thread with the reason. Then **resolve the thread**. To pass, a resolved thread needs your reply, or it must be outdated because the fix changed its line. Get thread ids from `pullRequest.reviewThreads { id isResolved }` in GraphQL. Resolve with `gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:"<id>"}){thread{isResolved}}}'`.
+4. **If you pushed a fix, go back to step 1.** The new head needs its own review with `Verdict: 0 blocker, 0 major`. Threads from older rounds still count, so a new commit cannot hide an old finding.
+5. **Merge only when the gate passes** with the command above:
+   - the latest review at the current head has verdict 0/0;
+   - no bot thread is unresolved or resolved silently;
+   - on a risk-path PR, an independent-review comment names the current head. Re-post it after each push, covering the new commits.
 6. **Round cap.** `opencodeMaxRounds` in `.claude/t4.json` (default 5) caps the loop. The gate counts OpenCode reviews on the PR, one per distinct `commit_id`. If the count is above the cap and the gate still fails, it blocks with **stop and ask the owner**. Do not push another round. Report the open findings to the owner and wait for a decision.
 
 ### Markers
 
-Post markers from your own account with `gh pr comment <n> --body-file <file>`. The gate accepts a marker only when all of these hold:
+Post each marker as the **first line** of its own comment, from your own account, with `gh pr comment <n> --body-file <file>`. The gate ignores a marker inside a code fence, a blockquote or later lines. It accepts a marker only when all of these hold:
 - The author is not a bot, and their `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`. The repo is public, so anyone else's comment is ignored.
-- The SHA is the full 40-character head SHA.
-- The fallback `reason` is not empty.
-- The independent-review comment has text besides the marker.
+- The SHA is the full 40-character head SHA (`gh pr view <n> --json headRefOid`).
+- The fallback `reason` is a real cause, not empty and not `...`.
+- The independent-review comment has text below the marker line.
+
+The gate's block message prints the markers with placeholders only. Pasting it into a comment satisfies nothing.
 
 ```
 <!-- t4:independent-review head=<40-char head sha> -->
@@ -77,6 +98,13 @@ Independent review (subagent: code-review + scrutinize) of <sha>:
 <!-- t4:opencode-fallback head=<40-char head sha> reason="model 429 FreeUsageLimitError on run <id>" -->
 ```
 
+### Fallback, CI and the ruleset
+
+- **OpenCode infra failures finish green.** When OpenCode fails for an infrastructure reason, its job is meant to finish green with an "unavailable" notice, so the vendored `t4-gate` (`requireGreenCI`) does not block the fallback. That change belongs to PR #144. Until it lands, a red `review` check still trips `requireGreenCI`; re-run the check or ask the owner.
+- **The `review` check is not a required check, and will not become one.** That would make the fallback unreachable. The hook is the gate.
+- **The ruleset on `main` will require a PR plus the `t4-verify` checks, and will block direct pushes.** So `git push … :main` is covered by the ruleset, not by this hook.
+- **Dependabot PRs get no OpenCode review**, because the review job skips bot authors. To merge one, run the fallback self-review and post both markers. No Dependabot exemption exists in the hook yet: Dependabot can change `.github/workflows/`, a risk path. An exemption that mirrors the `guards` one is an owner decision.
+
 ### `T4-Gates` trailer
 
 `code-review=ran` (and `scrutinize=ran`) means OpenCode reviewed the work, or the fallback subagent review ran. The trailer is written when you commit, usually before OpenCode has run, so `not-run` is the honest value then. The merge gate enforces the review; the trailer does not.
@@ -84,6 +112,9 @@ Independent review (subagent: code-review + scrutinize) of <sha>:
 ### Limits
 
 - The hook binds Claude only. A human merging on the web is not blocked.
-- With `requireGreenCI: true`, the vendored `t4-gate` also blocks while any check is red. A **failed** OpenCode `review` check therefore blocks the merge even with a recorded fallback. Re-run the check, or get an owner decision.
-- When opted in, merges through `mcp__github__merge_pull_request` are blocked; use `gh pr merge <n>`.
+- Fail-closed paths:
+  - a `gh` or API error, GraphQL `errors`, or a runtime error (any exit other than 0 or 2 becomes 2);
+  - the 100-second budget for `gh` calls running out;
+  - the hook timing out (`onFailure: "block"`, timeout 150 s).
 - A PR with more than 100 review threads is blocked, because the gate does not page them.
+- If `.claude/t4.json` or its `requireOpenCodeReview` key is missing, the gate is off. It prints a notice on every merge-looking command, so it never turns off silently.
