@@ -14,7 +14,10 @@ plan, data sources, SHA-256 of the exact bytes). Each row is point in time:
 - `labelled`: true only if every horizon has a label (a trainer must not read a missing
   label as zero).
 - `data_source`: the feed the bar came from (`SourceRegistry`). A dataset version with
-  no registered source is refused.
+  no registered source is refused (`UnknownSource`, fail-closed). `import_history`
+  registers its versions. A version recorded otherwise must be bound with
+  `SourceRegistry.register` before it can be exported. That covers versions recorded
+  before #128 and the live recorder's versions, which are not registered yet (#17).
 Only one feature schema is exported.
 
 Folds come from X02 `walk_forward` over [window_start, window_end). The last `holdout` is

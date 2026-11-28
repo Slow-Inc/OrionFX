@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from app.core.enums import Timeframe
+from app.learning.bars import BarLog, Provenance
 from app.market_data.candles import Issue
 from app.market_data.history import CsvM1Source, import_history
 from app.market_data.port import M1Bar
@@ -269,18 +270,79 @@ def test_a_csv_file_imports_end_to_end(conn: sqlite3.Connection, tmp_path: Path)
 def test_a_recorder_over_an_imported_version_uses_its_sources_schedule(
     conn: sqlite3.Connection,
 ) -> None:
-    _import(conn, ListSource([]))
-    store = CandleStore(conn, dataset_version="duka-v1")
+    """Across the daily break, a bound version recorded with no schedule given gives the
+    same features as its bars recorded on that schedule, and not those of 24/7. A
+    different schedule given is refused."""
+    _import(conn, ListSource(_minutes(WED.replace(hour=20), WED + timedelta(days=1))))
+    bound = CandleStore(conn, dataset_version="duka-v1")
+    for version in ("on-schedule", "all-week"):  # unbound copies of the same bars
+        copy = CandleStore(conn, dataset_version=version)
+        for tf in Timeframe:
+            for b in bound.bars("XAUUSD", tf, as_of=LATER):
+                copy.save(b)
 
-    def recorder(session: SessionSchedule | None) -> MarketRecorder:
-        return MarketRecorder(conn, candles=store, symbol="XAUUSD", timeframe=Timeframe.M5,
-                              context_timeframes=[], horizons=[], session=session)  # fmt: skip
+    def recorder(version: str, session: SessionSchedule | None) -> MarketRecorder:
+        return MarketRecorder(conn, candles=CandleStore(conn, dataset_version=version),
+                              symbol="XAUUSD", timeframe=Timeframe.M5, context_timeframes=[],
+                              horizons=[], provenance=Provenance.BACKFILL, session=session,
+                              clock=lambda: LATER)  # fmt: skip
 
-    assert recorder(None)._session is XAUUSD_NY_1700
-    assert recorder(XAUUSD_NY_1700)._session is XAUUSD_NY_1700
+    recorder("duka-v1", None).tick()
+    recorder("on-schedule", XAUUSD_NY_1700).tick()
+    recorder("all-week", None).tick()
+    recorder("duka-v1", XAUUSD_NY_1700)  # the same schedule given is accepted
     other = SessionSchedule("other", "Europe/Zurich", time(22, 0), time(23, 0))
     with pytest.raises(ValueError, match="xauusd-ny-1700"):
-        recorder(other)
-    unbound = CandleStore(conn, dataset_version="live-v1")
-    assert MarketRecorder(conn, candles=unbound, symbol="XAUUSD", timeframe=Timeframe.M5,
-                          context_timeframes=[], horizons=[])._session is None  # fmt: skip
+        recorder("duka-v1", other)
+    after_break = WED.replace(hour=23, minute=30)
+    rows = {r.dataset_version: r.snapshot for r in BarLog(conn).snapshots(
+        "XAUUSD", Timeframe.M5, start=after_break, end=after_break + M1)}  # fmt: skip
+    assert rows["duka-v1"].values == rows["on-schedule"].values
+    assert rows["duka-v1"].values != rows["all-week"].values
+
+
+# --- review fixes (PR #156) ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(WED.replace(hour=19), WED.replace(hour=21)),  # overlaps: would skip 19:00-20:00
+     (WED.replace(hour=19), WED.replace(hour=20))],  # disjoint: 20:00 would miss its GAP
+    ids=["overlapping", "disjoint"],
+)  # fmt: skip
+def test_extending_a_version_backwards_is_refused(
+    conn: sqlite3.Connection, start: datetime, end: datetime
+) -> None:
+    hole = (WED.replace(hour=19, minute=55), WED.replace(hour=20))
+    source = ListSource(_minutes(WED.replace(hour=19), WED.replace(hour=21), skip=hole))
+    _import(conn, source, end=WED.replace(hour=21))
+    before = conn.execute("SELECT * FROM candles ORDER BY 1, 2, 3, 4").fetchall()
+    with pytest.raises(ValueError, match="backwards"):
+        _import(conn, source, start=start, end=end)
+    assert conn.execute("SELECT * FROM candles ORDER BY 1, 2, 3, 4").fetchall() == before
+
+
+def test_a_range_starting_before_the_first_bar_can_be_rerun(conn: sqlite3.Connection) -> None:
+    """The oldest stored bar is after `start` only because the source has nothing before
+    it: re-running the same range (a resume) is not an extension."""
+    source = ListSource(_minutes(WED.replace(hour=20, minute=10), WED.replace(hour=21)))
+    _import(conn, source, end=WED.replace(hour=21))
+    _import(conn, source, end=WED.replace(hour=21))
+    assert len(_stored(conn, Timeframe.M5)) == 10
+
+
+def test_a_changed_schedule_for_a_bound_version_is_refused(conn: sqlite3.Connection) -> None:
+    """The code now maps the source to another schedule than the bars were validated on."""
+    conn.execute("INSERT INTO candle_sources VALUES ('old-v1', 'dukascopy', 'old-schedule',"
+                 " '2026-01-01T00:00:00+00:00')")  # fmt: skip
+    registry = SourceRegistry(conn)
+    with pytest.raises(SourceConflict):
+        registry.register("old-v1", "dukascopy")
+    with pytest.raises(SourceConflict, match="old-schedule"):
+        registry.schedule_of("old-v1")
+
+
+def test_insert_or_replace_cannot_rewrite_a_binding(conn: sqlite3.Connection) -> None:
+    SourceRegistry(conn).register("duka-v1", "dukascopy")
+    conn.execute("INSERT OR REPLACE INTO candle_sources VALUES ('duka-v1', 'mt5', 'x', 'y')")
+    assert SourceRegistry(conn).source_of("duka-v1") == "dukascopy"

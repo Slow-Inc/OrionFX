@@ -15,3 +15,11 @@ CREATE TRIGGER candle_rolls_no_update BEFORE UPDATE ON candle_rolls
 BEGIN SELECT RAISE(ABORT, 'candle rolls are append-only'); END;
 CREATE TRIGGER candle_rolls_no_delete BEFORE DELETE ON candle_rolls
 BEGIN SELECT RAISE(ABORT, 'candle rolls are append-only'); END;
+-- INSERT OR REPLACE would delete and reinsert without firing the triggers above: an
+-- insert for a recorded roll is ignored instead (the roll log compares the contracts).
+CREATE TRIGGER candle_rolls_no_replace BEFORE INSERT ON candle_rolls
+WHEN EXISTS (
+    SELECT 1 FROM candle_rolls
+    WHERE dataset_version = NEW.dataset_version AND roll_at = NEW.roll_at
+)
+BEGIN SELECT RAISE(IGNORE); END;

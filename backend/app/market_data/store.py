@@ -88,6 +88,15 @@ class CandleStore:
         ).fetchone()
         return None if row is None else datetime.fromisoformat(row[0])
 
+    def earliest_open(self, symbol: str, timeframe: Timeframe) -> datetime | None:
+        """The open time of the oldest stored `timeframe` bar (the primary key's order)."""
+        row = self.conn.execute(
+            "SELECT open_time FROM candles WHERE dataset_version = ? AND symbol = ?"
+            " AND timeframe = ? ORDER BY open_time LIMIT 1",
+            (self.dataset_version, symbol, timeframe.value),
+        ).fetchone()
+        return None if row is None else datetime.fromisoformat(row[0])
+
     def bar_at(
         self, symbol: str, timeframe: Timeframe, open_time: datetime, *, as_of: datetime
     ) -> CandleClosed | None:
