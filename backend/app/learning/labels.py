@@ -156,11 +156,12 @@ def label_at(
     horizon: Horizon,
     *,
     now: datetime,
-    session: SessionSchedule | None = None,
+    session: SessionSchedule | None,
 ) -> TripleBarrierLabel | None:
     """The label of the bar closing at `as_of`, from bars known at `now`, on the finest
     stored timeframe whose bars measure it (M5 first); None when the ATR is missing or
-    no timeframe has the entry bar and every bar until it resolves (or not yet)."""
+    no timeframe has the entry bar and every bar until it resolves (or not yet).
+    `session` has no default: the export, the recorder and scoring must share it."""
     if atr is None or atr <= 0:
         return None
     for tf in FINEST_FIRST:
@@ -235,7 +236,8 @@ def prediction_labels(
 ) -> list[tuple[RecordedPrediction, TripleBarrierLabel | None]]:
     """Each recorded prediction of `model_id` with `start <= as_of < end`, scored on the
     label the training export carries (LABEL_VERSION, the model's own horizon, the ATR
-    of the bar's recorded M02 snapshot on `timeframe`), from bars known at `now`.
+    of the bar's recorded M02 snapshot on `timeframe`), from bars known at `now`. Only
+    predictions recorded on `candles`' dataset version are scored.
     `session` has no default: it must be the schedule the export and recorder used."""
     log = BarLog(conn)
     atr = {r.snapshot.as_of: r.snapshot.values.get(ATR_M15)
@@ -243,7 +245,8 @@ def prediction_labels(
            if r.dataset_version == candles.dataset_version
            and r.snapshot.feature_schema == FEATURE_SCHEMA}  # fmt: skip
     out = []
-    for r in log.predictions(symbol, model_id, start=start, end=end, model_version=model_version):
+    for r in log.predictions(symbol, model_id, start=start, end=end, model_version=model_version,
+                             dataset_version=candles.dataset_version):  # fmt: skip
         h = Horizon(r.prediction.horizon, r.prediction.horizon_bars)
         lab = label_at(candles, symbol, r.as_of, atr.get(r.as_of), h, now=now, session=session)
         out.append((r, lab))

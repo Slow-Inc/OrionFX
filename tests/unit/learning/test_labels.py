@@ -22,8 +22,8 @@ from app.market_data.store import CandleStore
 from app.storage.db import connect, migrate
 
 D = Decimal
-M5, M15 = Timeframe.M5, Timeframe.M15
-STEP = {M5: timedelta(minutes=5), M15: timedelta(minutes=15)}
+M5, M15, H1 = Timeframe.M5, Timeframe.M15, Timeframe.H1
+STEP = {M5: timedelta(minutes=5), M15: timedelta(minutes=15), H1: timedelta(hours=1)}
 T0 = datetime(2026, 1, 6, 15, 0, tzinfo=UTC)  # a Tuesday, market open
 ATR = D(4)  # upper barrier 2004, lower 1996
 
@@ -164,10 +164,10 @@ def test_the_finest_stored_timeframe_resolves_what_a_coarser_bar_cannot(
     h = Horizon(M15, 1)
     as_of = T0 + STEP[M15]
     now = as_of + 2 * STEP[M15]
-    lab = label_at(candles, "XAUUSD", as_of, ATR, h, now=now)
+    lab = label_at(candles, "XAUUSD", as_of, ATR, h, now=now, session=None)
     assert lab is not None and lab.outcome is Outcome.AMBIGUOUS and lab.timeframe is M15
     _save(candles, [_bar(2), _bar(3, high="2005"), _bar(4), _bar(5, low="1995")])
-    lab = label_at(candles, "XAUUSD", as_of, ATR, h, now=now)
+    lab = label_at(candles, "XAUUSD", as_of, ATR, h, now=now, session=None)
     assert lab is not None and lab.outcome is Outcome.UP and lab.timeframe is M5
 
 
@@ -177,17 +177,40 @@ def test_a_hole_in_the_finest_path_falls_back_to_a_complete_coarser_one(
     _save(candles, [_bar(0, tf=M15), _bar(1, tf=M15, high="2005")])
     _save(candles, [_bar(2), _bar(4), _bar(5)])  # M5 entry, then a hole at slot 3
     as_of = T0 + STEP[M15]
-    lab = label_at(candles, "XAUUSD", as_of, ATR, Horizon(M15, 1), now=as_of + 2 * STEP[M15])
+    lab = label_at(
+        candles, "XAUUSD", as_of, ATR, Horizon(M15, 1), now=as_of + 2 * STEP[M15], session=None
+    )
     assert lab is not None and lab.timeframe is M15 and lab.outcome is Outcome.UP
+
+
+def test_a_timeframe_that_does_not_divide_the_horizon_is_not_used(
+    candles: CandleStore,
+) -> None:
+    # 75 minutes is not a whole number of H1 bars: H1 cannot measure it, even though
+    # its next bar would show the upper barrier
+    _save(candles, [_bar(0, tf=H1), _bar(1, tf=H1, high="2005")])
+    as_of = T0 + STEP[H1]
+    assert (
+        label_at(
+            candles, "XAUUSD", as_of, ATR, Horizon(M15, 5), now=as_of + 2 * STEP[H1], session=None
+        )
+        is None
+    )
+    assert label_at(candles, "XAUUSD", as_of, ATR, Horizon(H1, 1),
+                    now=as_of + 2 * STEP[H1], session=None).outcome is Outcome.UP  # type: ignore[union-attr]  # fmt: skip
 
 
 def test_a_label_reads_only_bars_known_at_now(candles: CandleStore) -> None:
     _save(candles, [_bar(0), _bar(1), _bar(2, high="2004"), _bar(3)])
     as_of, h = T0 + STEP[M5], Horizon(M15, 1)
-    assert label_at(candles, "XAUUSD", as_of, ATR, h, now=_bar(1).available_at) is None
-    lab = label_at(candles, "XAUUSD", as_of, ATR, h, now=_bar(2).available_at)
+    assert (
+        label_at(candles, "XAUUSD", as_of, ATR, h, now=_bar(1).available_at, session=None) is None
+    )
+    lab = label_at(candles, "XAUUSD", as_of, ATR, h, now=_bar(2).available_at, session=None)
     assert lab is not None and lab.outcome is Outcome.UP
-    assert label_at(candles, "XAUUSD", as_of, None, h, now=_bar(3).available_at) is None
+    assert (
+        label_at(candles, "XAUUSD", as_of, None, h, now=_bar(3).available_at, session=None) is None
+    )
 
 
 def test_label_stats_report_the_dual_touch_rate_and_the_flat_share() -> None:
@@ -201,3 +224,5 @@ def test_label_stats_report_the_dual_touch_rate_and_the_flat_share() -> None:
         5, 1, 1, 1, 0, 2)  # fmt: skip
     assert stats.dual_touch_rate == D(1) / D(4) and stats.flat_share == D(2) / D(3)
     assert LabelStats.of([]).dual_touch_rate is None
+    only_ambiguous = LabelStats.of([lab([_bar(1, high="2004", low="1996")]), None])
+    assert only_ambiguous.flat_share is None and only_ambiguous.dual_touch_rate == 1

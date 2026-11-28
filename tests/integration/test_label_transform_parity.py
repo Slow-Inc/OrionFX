@@ -111,6 +111,10 @@ def test_live_inputs_are_the_exported_transforms(
             assert Decimal(row["features"][KEY]) == seen
             compared += 1
     assert compared > 0
+    flags = {r["barrier_labelled"] for r in rows.values()}
+    assert flags == {True, False}  # early rows have no ATR, so no barrier label
+    for r in rows.values():
+        assert r["barrier_labelled"] == all(b is not None for b in r["barrier_labels"].values())
 
 
 def test_predictions_are_scored_on_the_exported_label_version(
@@ -156,7 +160,7 @@ def test_a_dual_touch_row_is_left_out_of_the_export_and_counted(
     assert ambiguous.isoformat() not in rows and _bar_close(spike - 5).isoformat() in rows
     snaps = BarLog(conn).snapshots("XAUUSD", M15, start=T0, end=_bar_close(N - 5))
     stats = LabelStats.of([label_at(store, "XAUUSD", s.snapshot.as_of,
-                                    s.snapshot.values.get(ATR_M15), H4, now=END)
+                                    s.snapshot.values.get(ATR_M15), H4, now=END, session=None)
                            for s in snaps])  # fmt: skip
     assert stats.ambiguous >= 1 and stats.dual_touch_rate is not None
     # the manifest carries the rate per era (each split) and for the whole export
@@ -242,3 +246,22 @@ def test_the_recorder_and_the_export_read_the_same_session_schedule(
         row = rows.get(as_of.isoformat())
         if row is not None:
             assert {k: Decimal(row["features"][k]) for k in features} == features
+
+
+def test_predictions_are_scored_only_against_their_own_dataset_version(
+    conn: sqlite3.Connection, candles: CandleStore, model: Stationary
+) -> None:
+    other = CandleStore(conn, dataset_version="v2")
+    _bars(other, [str(3000 + i) for i in range(N)])
+    MarketRecorder(conn, candles=other, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
+                   horizons=[H4], provenance=Provenance.BACKFILL,
+                   predictors=[load_baseline(model, mode=Mode.DEMO)],
+                   clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
+    log = BarLog(conn)
+    v1 = log.predictions("XAUUSD", "tb-m15", start=T0, end=END, dataset_version="v1")
+    both = log.predictions("XAUUSD", "tb-m15", start=T0, end=END)
+    assert len(both) == 2 * len(v1) > 0
+    scored = prediction_labels(conn, candles, "XAUUSD", "tb-m15", M15, start=T0, end=END,
+                               now=END, session=None)  # fmt: skip
+    assert [p.prediction.prediction_id for p, _ in scored] == [
+        p.prediction.prediction_id for p in v1]  # fmt: skip

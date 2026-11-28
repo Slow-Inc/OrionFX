@@ -11,8 +11,9 @@ splits, SHA-256 of the exact bytes). Each row is point in time:
   same refusal-first rule as `journal_evidence`). Joining at the close, not at when the
   snapshot was taken, keeps news that arrived after the close (e.g. over a weekend) out
   of a row whose label is measured from that close.
-- `labelled`: true only if every horizon has a label (a trainer must not read a missing
-  label as zero).
+- `labelled`: true only if every horizon has a raw `move` label (a trainer must not read
+  a missing label as zero). `barrier_labelled` is the same for `barrier_labels`: a
+  three-class trainer filters on it, never on `labelled`.
 - `barrier_labels`: the bar's triple-barrier label per horizon (#129; `label_version`,
   UP/DOWN/FLAT, its bid move and the timeframe it was read on), measured from bars known
   by `window_end`, else null. It carries `ends_at`, the close of the label's last slot:
@@ -149,6 +150,7 @@ def _row(
             for k, o in sorted(labels.items())
         },
         "barrier_labels": {k: _barrier(b) for k, b in sorted(barriers.items())},
+        "barrier_labelled": all(b is not None for b in barriers.values()),
         "news": None
         if news is None
         else {
