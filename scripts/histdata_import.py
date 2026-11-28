@@ -27,7 +27,13 @@ from pathlib import Path
 from app.core.enums import Timeframe
 from app.core.time import TIMEFRAME_DURATION, utc_now
 from app.market_data.candles import floor_time
-from app.market_data.histdata import FetchFailed, HistDataFetcher, HistDataM1Source, Period
+from app.market_data.histdata import (
+    MIN_INTERVAL,
+    FetchFailed,
+    HistDataFetcher,
+    HistDataM1Source,
+    Period,
+)
 from app.market_data.history import import_history
 from app.storage.db import connect, migrate
 
@@ -94,7 +100,7 @@ def main() -> None:
     f = sub.add_parser("fetch")
     f.add_argument("--start-year", type=int, required=True)
     f.add_argument("--end-year", type=int, required=True)
-    f.add_argument("--interval", type=float, default=3.0)
+    f.add_argument("--interval", type=float, default=MIN_INTERVAL)
     f.add_argument("--min-free-gb", type=float, default=3.0)
     i = sub.add_parser("import")
     i.add_argument("--db", type=Path, required=True)

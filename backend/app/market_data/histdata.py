@@ -33,9 +33,6 @@ import csv
 import io
 import re
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -43,12 +40,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import IO, Any
 
+from app.market_data._http import USER_AGENT, FetchFailed, http_request, write_atomic
 from app.market_data.port import M1Bar
 
 __all__ = [
     "GET_URL",
-    "MAX_CSV",
     "MAX_ZIP",
     "USER_AGENT",
     "FetchFailed",
@@ -62,7 +60,6 @@ __all__ = [
 SITE = "https://www.histdata.com"
 PAGE_BASE = f"{SITE}/download-free-forex-historical-data/?/ascii/1-minute-bar-quotes/xauusd"
 GET_URL = f"{SITE}/get.php"
-USER_AGENT = "Mozilla/5.0 (compatible; historical-data-client/1.0)"
 MIN_INTERVAL = 3.0
 """Seconds between requests, at least: a polite client."""
 MAX_ZIP = 64 * 1024 * 1024
@@ -72,15 +69,11 @@ MAX_CSV = 256 * 1024 * 1024
 EST = timedelta(hours=5)
 """HistData's clock is UTC-5 all year: UTC = file time + 5 hours."""
 TOKEN = re.compile(r"[A-Za-z0-9_-]{1,128}")
-TIME_FORMAT = "%Y%m%d %H%M%S"
 STAMP = re.compile(r"\d{8} \d{6}")
+PREFIX = "HISTDATA_XAUUSD_M1_"
 
 Transport = Callable[[str, str, dict[str, str], dict[str, str] | None], tuple[int, bytes]]
 """(method, url, headers, form or None) -> (HTTP status, body)."""
-
-
-class FetchFailed(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -135,43 +128,55 @@ def _token(page: bytes) -> str:
     return parser.token
 
 
+def _zip_path(cache_dir: Path, period: Period) -> Path:
+    return cache_dir / "XAUUSD" / f"{PREFIX}{period.tag}.zip"
+
+
+def _member(z: zipfile.ZipFile, period: Period, max_bytes: int) -> zipfile.ZipInfo:
+    """The one expected CSV member, by exact name (no other CSV, no path in the name)."""
+    name = f"DAT_ASCII_XAUUSD_M1_{period.tag}.csv"
+    csvs = [i for i in z.infolist() if i.filename.lower().endswith(".csv")]
+    if len(csvs) != 1 or csvs[0].filename != name:
+        raise ValueError(f"expected exactly one member {name}, found "
+                         f"{[i.filename for i in csvs]}")  # fmt: skip
+    if csvs[0].file_size > max_bytes:
+        raise ValueError(f"{name}: {csvs[0].file_size} bytes is over the {max_bytes} cap")
+    return csvs[0]
+
+
+class _Capped(io.RawIOBase):
+    """A read-only stream that refuses to yield more than `cap` bytes (the zip header's
+    size can lie)."""
+
+    def __init__(self, raw: IO[bytes], cap: int) -> None:  # a zipfile member stream
+        self._raw, self._left = raw, cap
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buf: Any) -> int:
+        data = self._raw.read(len(buf))
+        n = len(data)
+        buf[:n] = data
+        self._left -= n
+        if self._left < 0:
+            raise ValueError(f"the CSV member is over the {MAX_CSV}-byte cap")
+        return n
+
+
 def read_csv_member(zipped: bytes, period: Period, *, max_bytes: int = MAX_CSV) -> bytes:
     """The bytes of the one expected CSV member, read in memory (never extracted)."""
-    name = f"DAT_ASCII_XAUUSD_M1_{period.tag}.csv"
-    with zipfile.ZipFile(io.BytesIO(zipped)) as z:
-        csvs = [i for i in z.infolist() if i.filename.lower().endswith(".csv")]
-        if len(csvs) != 1 or csvs[0].filename != name:
-            raise ValueError(f"expected exactly one member {name}, found "
-                             f"{[i.filename for i in csvs]}")  # fmt: skip
-        if csvs[0].file_size > max_bytes:
-            raise ValueError(f"{name}: {csvs[0].file_size} bytes is over the {max_bytes} cap")
-        with z.open(csvs[0]) as f:
-            data = f.read(max_bytes + 1)
+    with zipfile.ZipFile(io.BytesIO(zipped)) as z, z.open(_member(z, period, max_bytes)) as f:
+        data = f.read(max_bytes + 1)
     if len(data) > max_bytes:
-        raise ValueError(f"{name}: over the {max_bytes}-byte cap")
+        raise ValueError(f"{period.tag}: the CSV member is over the {max_bytes}-byte cap")
     return data
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args: object, **kwargs: object) -> None:
-        return None  # a 3xx comes back as an HTTP error: only the fixed host is read
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def _urllib(
     method: str, url: str, headers: dict[str, str], form: dict[str, str] | None
 ) -> tuple[int, bytes]:
-    data = None if form is None else urllib.parse.urlencode(form).encode()
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with _OPENER.open(req, timeout=120) as r:
-            return r.status, r.read(MAX_ZIP + 1)
-    except urllib.error.HTTPError as e:
-        return e.code, b""
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return 0, b""
+    return http_request(method, url, headers, form, cap=MAX_ZIP, timeout=120)
 
 
 class HistDataFetcher:
@@ -195,7 +200,7 @@ class HistDataFetcher:
         self.requests = 0
 
     def path(self, period: Period) -> Path:
-        return self.cache_dir / "XAUUSD" / f"HISTDATA_XAUUSD_M1_{period.tag}.zip"
+        return _zip_path(self.cache_dir, period)
 
     def fetch(self, period: Period) -> bytes:
         path = self.path(period)
@@ -209,13 +214,11 @@ class HistDataFetcher:
         body = self._request("POST", GET_URL, {**headers, "Referer": referer}, form)
         if len(body) > MAX_ZIP:
             raise FetchFailed(f"{period.tag}: the zip is over the {MAX_ZIP}-byte cap")
-        if not body.startswith(b"PK") or not zipfile.is_zipfile(io.BytesIO(body)):
-            raise FetchFailed(f"{period.tag}: the answer is not a zip")
-        read_csv_member(body, period)  # refuse a zip without the expected member
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(body)
-        tmp.replace(path)
+        try:
+            read_csv_member(body, period)  # a zip holding the expected member, or refused
+        except (zipfile.BadZipFile, ValueError) as exc:
+            raise FetchFailed(f"{period.tag}: the answer is not the expected zip ({exc})") from exc
+        write_atomic(path, body)
         return body
 
     def _request(
@@ -238,33 +241,40 @@ class HistDataM1Source:
     """M1 bars from the cached zips, in time order; reads no network."""
 
     def __init__(self, cache_dir: Path) -> None:
-        self._dir = cache_dir / "XAUUSD"
+        self._cache = cache_dir
 
     def periods(self) -> list[Period]:
-        found = []
-        for p in sorted(self._dir.glob("HISTDATA_XAUUSD_M1_*.zip")):
-            found.append(Period.from_tag(p.stem.removeprefix("HISTDATA_XAUUSD_M1_")))
-        return sorted(found)
+        return sorted(Period.from_tag(p.stem.removeprefix(PREFIX))
+                      for p in (self._cache / "XAUUSD").glob(f"{PREFIX}*.zip"))  # fmt: skip
 
     def m1_bars(self, start: datetime, end: datetime) -> Iterator[M1Bar]:
         for period in self.periods():
             a, b = period.utc_span()
             if b <= start or end <= a:
                 continue
-            path = self._dir / f"HISTDATA_XAUUSD_M1_{period.tag}.zip"
-            data = read_csv_member(path.read_bytes(), period)
-            for line, row in enumerate(csv.reader(io.StringIO(data.decode()), delimiter=";"), 1):
-                bar = _parse(row, line, period)
-                if start <= bar.open_time < end:
-                    yield bar
+            # Streamed from the zip, never extracted and never held whole in memory.
+            with (
+                zipfile.ZipFile(_zip_path(self._cache, period)) as z,
+                z.open(_member(z, period, MAX_CSV)) as raw,
+            ):
+                text = io.TextIOWrapper(io.BufferedReader(_Capped(raw, MAX_CSV)),
+                                        encoding="ascii", newline="")  # fmt: skip
+                for line, row in enumerate(csv.reader(text, delimiter=";"), 1):
+                    bar = _parse(row, line, period, start, end)
+                    if bar is not None:
+                        yield bar
 
 
-def _parse(row: list[str], line: int, period: Period) -> M1Bar:
+def _parse(row: list[str], line: int, period: Period, start: datetime, end: datetime
+           ) -> M1Bar | None:  # fmt: skip
+    """The row's bar, or None outside [start, end) (checked before any price is parsed)."""
     try:
         t, o, h, lo, c, v = row
         if not STAMP.fullmatch(t):
             raise ValueError(f"time {t!r} is not YYYYMMDD HHMMSS")
-        at = datetime.strptime(t, TIME_FORMAT).replace(tzinfo=UTC) + EST
+        at = datetime.fromisoformat(t).replace(tzinfo=UTC) + EST
+        if not start <= at < end:
+            return None
         volume = Decimal(v)
         return M1Bar(at, Decimal(o), Decimal(h), Decimal(lo), Decimal(c),
                      None if volume == 0 else volume, spread=None)  # fmt: skip

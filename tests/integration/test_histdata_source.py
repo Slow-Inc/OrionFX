@@ -30,7 +30,6 @@ from app.market_data.session import XAUUSD_NY_1700
 from app.market_data.sources import NO_TRADE_FILL, SEALED_FROM, SOURCE_SCHEDULES, UNREAD_SLICE
 
 D = Decimal
-EST = timedelta(hours=-5)
 LATER = datetime(2030, 1, 1, tzinfo=UTC)
 PAGE = '<form id="file_down"><input type="hidden" name="tk" id="tk" value="{tk}" /></form>'
 
@@ -154,20 +153,35 @@ def test_a_member_larger_than_its_cap_is_refused() -> None:
 
 
 def test_est_without_dst_converts_to_utc_and_spread_is_none(tmp_path: Path) -> None:
-    site = FakeSite({"2026": b""})
-    fetcher = _fetcher(tmp_path, site, [])
     rows = [(datetime(2025, 1, 7, 15, 0), 2650.0), (datetime(2025, 7, 8, 15, 0), 3300.0)]
-    path = fetcher.path(Period(2025))
+    path = tmp_path / "XAUUSD" / "HISTDATA_XAUUSD_M1_2025.zip"
     path.parent.mkdir(parents=True)
     path.write_bytes(_year_zip(2025, rows))
-    winter, summer = HistDataM1Source(fetcher.cache_dir).m1_bars(
+    winter, summer = HistDataM1Source(tmp_path).m1_bars(
         datetime(2025, 1, 1, tzinfo=UTC), datetime(2026, 1, 1, tzinfo=UTC))  # fmt: skip
     assert winter.open_time == datetime(2025, 1, 7, 20, tzinfo=UTC)  # EST is UTC-5 ...
     assert summer.open_time == datetime(2025, 7, 8, 20, tzinfo=UTC)  # ... in summer too
     assert (winter.open, winter.high, winter.low, winter.close) == (
         D("2650.000"), D("2650.300"), D("2649.800"), D("2650.100"))  # fmt: skip
     assert winter.spread is None and winter.volume is None  # no spread; volume column is 0
-    assert site.calls == []  # the source reads the cache only
+
+
+def test_only_bars_in_the_requested_range_are_yielded(tmp_path: Path) -> None:
+    rows = [(datetime(2025, 3, 3, 9, m), 2900.0) for m in range(5)]
+    path = tmp_path / "XAUUSD" / "HISTDATA_XAUUSD_M1_2025.zip"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(_year_zip(2025, rows))
+    start = datetime(2025, 3, 3, 14, 1, tzinfo=UTC)  # 09:01 EST
+    bars = list(HistDataM1Source(tmp_path).m1_bars(start, start + timedelta(minutes=2)))
+    assert [b.open_time for b in bars] == [start, start + timedelta(minutes=1)]
+
+
+def test_the_streamed_member_is_capped_even_if_its_header_lies() -> None:
+    from app.market_data.histdata import _Capped
+
+    capped = io.BufferedReader(_Capped(io.BytesIO(b"x" * 10), 5))
+    with pytest.raises(ValueError, match="cap"):
+        capped.read()
 
 
 def test_a_malformed_row_refuses_the_file(tmp_path: Path) -> None:

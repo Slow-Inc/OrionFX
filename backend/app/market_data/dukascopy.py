@@ -37,14 +37,13 @@ import lzma
 import re
 import struct
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from app.market_data._http import USER_AGENT, FetchFailed, http_request, write_atomic
 from app.market_data.port import M1Bar
 from app.market_data.session import SATURDAY
 
@@ -63,7 +62,6 @@ __all__ = [
 BASE = "https://datafeed.dukascopy.com/datafeed"
 PRICE_DIVISOR = 1000
 """XAUUSD prices are stored as integers of 1/1000 [PROPOSED: verify on a known day]."""
-USER_AGENT = "Mozilla/5.0 (compatible; historical-data-client/1.0)"
 RECORD = struct.Struct(">5if")
 MAX_RECORDS = 24 * 60
 """A day file holds at most one candle per minute."""
@@ -76,10 +74,6 @@ SIDES = ("BID", "ASK")
 
 Transport = Callable[[str, str, float], tuple[int, bytes]]
 """(url, user_agent, timeout) -> (HTTP status, body)."""
-
-
-class FetchFailed(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,23 +143,9 @@ def check_day(bid: list[Candle], ask: list[Candle], low: Decimal, high: Decimal)
     return problems
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args: object, **kwargs: object) -> None:
-        return None  # a 3xx comes back as an HTTP error: only the fixed host is read
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect)
-
-
 def _urllib(url: str, user_agent: str, timeout: float) -> tuple[int, bytes]:
-    req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-    try:
-        with _OPENER.open(req, timeout=timeout) as r:
-            return r.status, r.read(MAX_RAW + 1)
-    except urllib.error.HTTPError as e:
-        return e.code, b""
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return 0, b""  # a network error: retried like a 5xx
+    return http_request("GET", url, {"User-Agent": user_agent}, None, cap=MAX_RAW,
+                        timeout=timeout)  # fmt: skip
 
 
 class DukascopyFetcher:
@@ -200,10 +180,7 @@ class DukascopyFetcher:
         if path.exists():
             return path.read_bytes()
         body = self._get(day_url(symbol, side, day))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(body)
-        tmp.replace(path)
+        write_atomic(path, body)
         return body
 
     def _get(self, url: str) -> bytes:

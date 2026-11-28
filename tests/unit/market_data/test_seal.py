@@ -14,6 +14,14 @@ def _t(y: int, m: int, d: int) -> datetime:
     return datetime(y, m, d, tzinfo=UTC)
 
 
+def test_every_real_market_source_is_sealed() -> None:
+    """Fail closed: a new source key must be sealed unless it is on this short list."""
+    from app.market_data.sources import SEALED_FROM, SOURCE_SCHEDULES
+
+    unsealed = {"dukascopy", "mt5"}  # synthetic tests' CSV key; the live broker feed
+    assert set(SOURCE_SCHEDULES) - unsealed == set(SEALED_FROM)
+
+
 def test_the_windows_follow_the_30_month_length_rule() -> None:
     assert (_t(2024, 5, 28), _t(2026, 11, 28)) == HOLDOUT
     assert (_t(2023, 11, 28), _t(2024, 5, 28)) == UNREAD_SLICE
