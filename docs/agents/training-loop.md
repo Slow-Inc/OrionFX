@@ -29,7 +29,10 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 |---|---|---|
 | Live bars | `CandleEngine` builds M5/M15/H1 from bid ticks and flags real gaps. With a `SessionSchedule`, scheduled breaks and weekends are not gaps. | [built] #29, #124 |
 | Session schedule | `SessionSchedule` uses the New York zone and is DST-aware. `XAUUSD_NY_1700` is [PROPOSED]. `audit(schedule, bars)` checks it against the data. Each data source has its own schedule. | [built] #124. Per-source wiring: [planned #128] |
-| Historical bars | Import M1 bars (Dukascopy first) and resample to M5/M15/H1, with spread and a **data-source** tag separate from LIVE/BACKFILL. Validation matches live bars, and chunks are resumable. | [planned #128] |
+| Historical bars | Import M1 bars and resample to M5/M15/H1, with spread (if the vendor has it) and a **data-source** tag separate from LIVE/BACKFILL. Validation matches live bars, and chunks are resumable. Sources: `CsvM1Source` (generic format) and `FirstRateGcSource`. | [planned #128] |
+| Training source | **FirstRate GC 1m** (gold futures, a proxy for spot XAUUSD), data source `firstrate-gc`, schedule `cme-globex-gc-et`. Chosen for its licence; see `docs/research/2026-11-28-xauusd-data-sources.md`. Dukascopy was rejected on its terms. | [planned] until the owner buys the data and places it in `data/historical/` (ledger) |
+| No-trade minutes | FirstRate omits minutes with no trade. A run of ≤ 15 open-session minutes between two trades is filled flat at the previous close, volume 0; a bar made only of such minutes is flagged `NO_TRADE`, not `GAP`, and is labelled normally. A run never spans a scheduled closure. A longer run is a real gap, and so is a run that holds a row validation dropped. The import report lists every filled run's length. | [planned #128]; limit [PROPOSED] |
+| Rolls | Only the **ratio-adjusted** continuous series is read (multiplicative back-adjustment: scale-free features are unchanged). Roll-crossing rows are kept. Roll dates are recorded per dataset version in `candle_rolls` from FirstRate's contract listing. | [planned #128] |
 | Features | `build_feature_snapshot`, schema `m02.features.v2`, point-in-time, session-aware. | [built] #31, #124 |
 | Per-bar dataset | `MarketRecorder` records one snapshot per closed bar (LIVE or BACKFILL) into `learning_snapshots`, in one transaction per pass. | [built] #108 |
 | Outcomes | `BarLog.label_due` measures the move on the finest timeframe with bars closing at both ends. A row that cannot be labelled is marked once, point-in-time (`learning_unlabellable`). | [built] #108, #125 |
@@ -39,6 +42,14 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 **Rules for the data layer:**
 - Data is point-in-time everywhere: a row uses only what was available at its `as_of`.
 - Raw vendor data is never committed.
+- FirstRate GC rules (planned until the data arrives; pre-declared in `docs/research/2026-11-28-xauusd-data-sources.md` §5):
+  - Prices are futures **trades**, not bid, and have no spread: labels use the locked spread buffer (#129).
+  - Adjusted prices are not tradable levels. Never compare them with the broker's spot prices; use scale-free features only.
+  - Ratio-adjusted history is rescaled at every new roll, so a later download is a **new dataset version**, never an append.
+  - Volume is contracts traded, not tick volume: normalise or exclude it per data source (#129).
+  - No holiday calendar: CME holidays and early closes are reported as real gaps.
+  - Before the first training run, check the import report (no bars in closed time, the unexpected gaps, the filled-run lengths) and the raw minute gaps against the 15-minute limit.
+  - Price-unit quantities (the raw outcome `move`, a fixed spread or slippage buffer) are scaled by the cumulative roll factor in older history: express them in ATR or percent terms (#129).
 - News features are only `news.assessment` rows recorded live. The LLM never re-interprets past news, because of look-ahead through its training cutoff.
 
 ## 3. Labels and features for training

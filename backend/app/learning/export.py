@@ -1,9 +1,9 @@
-"""Deterministic, leak-free dataset export for training M04 later (#110, PRD #107;
-LRN-04, LRN-06; AT-15). Nothing here trains.
+"""Deterministic, leak-free dataset export for training M04 (#110, #128; PRD #107, #120;
+LRN-04, LRN-06, VAL-02; AT-15). Nothing here trains.
 
-`export_dataset` turns the recorded bars of one candle dataset version into sorted JSONL,
-one row per bar, and registers it as an M07 `DatasetManifest` (window, time-ordered
-splits, SHA-256 of the exact bytes). Each row is point in time:
+`export_dataset` turns the recorded bars of one or more candle dataset versions into
+sorted JSONL, one row per bar, and registers it as an M07 `DatasetManifest` (window, fold
+plan, data sources, SHA-256 of the exact bytes). Each row is point in time:
 - features: the bar's recorded snapshot (as of the bar's close);
 - labels: the bar's outcome per horizon, only if known by `window_end` (else null);
 - news: the newest news assessment already available at the bar's close (`as_of`), and
@@ -13,14 +13,30 @@ splits, SHA-256 of the exact bytes). Each row is point in time:
   of a row whose label is measured from that close.
 - `labelled`: true only if every horizon has a label (a trainer must not read a missing
   label as zero).
-Only one candle dataset version and one feature schema are exported.
+- `data_source`: the feed the bar came from (`SourceRegistry`). A dataset version with
+  no registered source is refused (`UnknownSource`, fail-closed). `import_history`
+  registers its versions. A version recorded otherwise must be bound with
+  `SourceRegistry.register` before it can be exported. That covers versions recorded
+  before #128 and the live recorder's versions, which are not registered yet (#17).
+Only one feature schema is exported.
 
-A row belongs to the split whose [start, end) holds its `as_of`. A row whose longest
-label horizon would end after its split's end is purged, so no label is built from
-prices of the next split. With splits in time order (train, validation, holdout, which
-the manifest enforces) this purge is enough; an embargo would be needed only for k-fold
-or walk-forward schemes that train on data after the test split. Rows outside every
-split are left out.
+Folds come from X02 `walk_forward` over [window_start, window_end). The last `holdout` is
+sealed, and each fold trains, waits an embargo, then tests. A row belongs to a window (a
+fold's train or test, or the holdout) only if `start <= as_of`, its longest label ends by
+the window's end (`as_of + longest <= end`: the purge by label end), and its snapshot was
+available by then (`available_at <= end`). Each row is written once, with the folds it
+trains and tests in. Development rows in no fold (embargo gaps, purged edges) are left
+out. The PR #147 review constraints hold:
+- (a) every fold, train and test, is purged by label end, and the embargo must also be
+  at least the longest horizon;
+- (b) labels are wall-clock horizons, so `as_of + longest` is the end bar's close. A
+  session-aware horizon that counts bars across a break must purge on that bar's real
+  close time instead;
+- (c) no fold trains on or after its test (the manifest refuses such a plan);
+- (d) holdout rows are purged too, and the embargo separates the last test window from
+  the holdout.
+One fold plan on one time axis serves every data source, so each test (validation)
+window comes after the training data of every source.
 
 The manifest is validated and registered before any byte is written, and the file is
 written to a temporary name and moved into place, so a refused export never overwrites a
@@ -34,17 +50,20 @@ import hashlib
 import json
 import os
 import sqlite3
-from collections.abc import Iterable
-from datetime import datetime
+from collections.abc import Collection, Iterable
+from dataclasses import asdict
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from app.core.contracts import NewsAssessment
+from app.core.contracts import FeatureSnapshot, NewsAssessment
 from app.core.enums import Timeframe
 from app.core.time import live
 from app.learning.bars import BarLog, BarOutcome, Horizon, Provenance, SnapshotRow
-from app.learning.lifecycle import DatasetManifest, DatasetStore, Split
+from app.learning.lifecycle import DatasetManifest, DatasetStore, FoldWindow, Split
 from app.market_data.features import FEATURE_SCHEMA
+from app.market_data.sources import SourceRegistry
 from app.storage.journal import Journal, payload_as
+from app.validation.splits import WalkForward, walk_forward
 
 __all__ = ["export_dataset", "horizon_key"]
 
@@ -123,10 +142,13 @@ def export_dataset(
     symbol: str,
     timeframe: Timeframe,
     horizons: Iterable[Horizon],
-    dataset_version: str,
+    dataset_versions: Collection[str],
     window_start: datetime,
     window_end: datetime,
-    splits: list[Split],
+    train: timedelta,
+    test: timedelta,
+    embargo: timedelta,
+    holdout: timedelta,
     dataset_id: str,
     version: str,
     out: Path,
@@ -136,6 +158,14 @@ def export_dataset(
     """Write the dataset to `out`, register its manifest, and return it."""
     hs = sorted(horizons, key=horizon_key)
     longest = max(h.length for h in hs)
+    if embargo < longest:
+        raise ValueError(f"embargo {embargo} is shorter than the longest horizon {longest}")
+    if holdout <= timedelta(0):
+        raise ValueError("a dataset needs a sealed holdout")
+    registry = SourceRegistry(conn)
+    sources = {v: registry.require(v)[0] for v in sorted(dataset_versions)}
+    plan = walk_forward(window_start, window_end, train=train, test=test, embargo=embargo,
+                        holdout=holdout)  # fmt: skip
     log = BarLog(conn)
     outcomes = {
         horizon_key(h): {(o.as_of, o.dataset_version): o
@@ -145,30 +175,36 @@ def export_dataset(
     news = _News(conn, before=window_end)
     lines: list[str] = []
     for snap in log.snapshots(symbol, timeframe, start=window_start, end=window_end):
-        if (snap.dataset_version, snap.snapshot.feature_schema) != (dataset_version,
-                                                                     feature_schema):  # fmt: skip
+        s = snap.snapshot
+        if snap.dataset_version not in sources or s.feature_schema != feature_schema:
             continue
         if provenance is not None and snap.provenance not in provenance:
             continue
-        as_of = snap.snapshot.as_of
-        split = next((s for s in splits if s.start <= as_of < s.end), None)
-        if split is None or as_of + longest > split.end:
-            continue  # outside every split, or its label would reach into the next one
+        member = _membership(s, plan, longest)
+        if member is None:
+            continue  # purged, in an embargo gap, or outside every window
+        split, folds = member
         labels = {}
         for key, by_bar in outcomes.items():
-            o = by_bar.get((as_of, dataset_version))
+            o = by_bar.get((s.as_of, snap.dataset_version))
             labels[key] = o if o is not None and o.available_at <= window_end else None
-        row = _row(snap, split.name, labels, news.at(as_of))
+        row = _row(snap, split, labels, news.at(s.as_of))
+        row["folds"] = folds
+        row["data_source"] = sources[snap.dataset_version]
         lines.append(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
     data = "".join(line + "\n" for line in lines).encode("utf-8")
     tag = "all" if provenance is None else "+".join(sorted(p.value for p in provenance))
     manifest = DatasetManifest(
         dataset_id=dataset_id, version=version,
-        source_refs=[f"learning_snapshots:{symbol}:{timeframe.value}:{dataset_version}:"
-                     f"{feature_schema}:{tag}",
+        source_refs=[*(f"learning_snapshots:{symbol}:{timeframe.value}:{v}:{feature_schema}:{tag}"
+                       for v in sources),
                      *(f"learning_outcomes:{horizon_key(h)}" for h in hs),
                      "journal:news.assessment"],
-        window_start=window_start, window_end=window_end, splits=splits,
+        window_start=window_start, window_end=window_end,
+        splits=[Split(name="development", start=window_start, end=plan.holdout.start),
+                Split(name="holdout", start=plan.holdout.start, end=plan.holdout.end)],
+        folds=[FoldWindow(**asdict(f)) for f in plan.folds],
+        embargo=embargo, data_sources=sources,
         content_hash=f"sha256:{hashlib.sha256(data).hexdigest()}",
     )  # fmt: skip
     DatasetStore(conn).save(manifest)  # validated and registered before any write
@@ -176,3 +212,24 @@ def export_dataset(
     tmp.write_bytes(data)
     os.replace(tmp, out)
     return manifest
+
+
+def _membership(
+    s: FeatureSnapshot, plan: WalkForward, longest: timedelta
+) -> tuple[str, dict[str, list[int]]] | None:
+    """The row's split and the folds it trains and tests in (none for a holdout row), or
+    None if it belongs to no window. A row is inside [start, end) only if its longest label ends and
+    its snapshot was available by `end`: the purge by label end, per window."""
+
+    need = max(s.as_of + longest, s.available_at)  # what must be known by a window's end
+
+    def inside(start: datetime, end: datetime) -> bool:
+        return start <= s.as_of and need <= end
+
+    if inside(plan.holdout.start, plan.holdout.end):
+        return "holdout", {"train": [], "test": []}
+    folds = {
+        "train": [k for k, f in enumerate(plan.folds) if inside(f.train_start, f.train_end)],
+        "test": [k for k, f in enumerate(plan.folds) if inside(f.test_start, f.test_end)],
+    }
+    return ("development", folds) if folds["train"] or folds["test"] else None
