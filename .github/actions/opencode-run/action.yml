@@ -34,8 +34,9 @@ inputs:
     default: '4'
   hard-minutes:
     description: >-
-      Hard cap for the whole step, the retry included, however chatty the run.
-      The caller's job timeout must exceed it plus setup. Empty means
+      Hard cap for the whole OpenCode run (all attempts, the retry included),
+      however chatty it is. Install, sign-in and posting come on top, so the
+      caller's job timeout must exceed it plus setup. Empty means
       timeout-minutes, then 20.
     default: ''
   timeout-minutes:
@@ -74,6 +75,8 @@ runs:
         OUTPUT_FILE: ${{ inputs.output-file }}
         IDLE_MINUTES: ${{ inputs.idle-minutes }}
         HARD_MINUTES: ${{ inputs.hard-minutes || inputs.timeout-minutes || '20' }}
+        HARD_INPUT: ${{ inputs.hard-minutes }}
+        TIMEOUT_ALIAS: ${{ inputs.timeout-minutes }}
         RETRIES: ${{ inputs.retries }}
         OPENCODE_CONFIG_CONTENT: >-
           {"permission": {"*": "deny", "read": "allow", "glob": "allow",
@@ -118,9 +121,12 @@ runs:
         [[ "$RETRIES" =~ ^[01]$ ]] || cause "config: retries must be 0 or 1"
         [[ "$IDLE_MINUTES" =~ ^[1-9][0-9]?$ ]] || cause "config: idle-minutes must be 1-99"
         [[ "$HARD_MINUTES" =~ ^[1-9][0-9]?$ ]] || cause "config: hard-minutes must be 1-99"
-        echo "OpenCode budgets: idle ${IDLE_MINUTES} min, hard cap ${HARD_MINUTES} min for the step."
+        if [ -z "${HARD_INPUT:-}" ] && [ -n "${TIMEOUT_ALIAS:-}" ]; then
+          echo "::warning::timeout-minutes is deprecated: use hard-minutes. It now caps all attempts together, not each one."
+        fi
+        echo "OpenCode budgets: idle ${IDLE_MINUTES} min, hard cap ${HARD_MINUTES} min for all attempts."
         # No fixed per-attempt timeout. watchdog.py (tested) stops OpenCode only when
-        # it writes nothing for IDLE_MINUTES or the step's HARD_MINUTES run out, and
+        # it writes nothing for IDLE_MINUTES or the run's HARD_MINUTES run out, and
         # logs a heartbeat every minute. It runs inside the scrubbed env as well.
         deadline=$((SECONDS + HARD_MINUTES * 60))
         for attempt in $(seq 0 "$RETRIES"); do

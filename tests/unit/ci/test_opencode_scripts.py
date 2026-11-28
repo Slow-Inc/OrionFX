@@ -1215,6 +1215,37 @@ def test_watchdog_causes_name_their_budget(
     assert post.classify(cause)[0] == "unavailable"
 
 
+def test_the_hard_cap_cause_names_the_configured_cap_not_a_retrys_remainder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cause = tmp_path / "cause"
+    monkeypatch.setenv("OPENCODE_CAUSE_FILE", str(cause))
+    monkeypatch.setenv("HARD_MINUTES", "20")
+    stats = tmp_path / "stats.json"
+    stats.write_text(json.dumps({"hard_seconds": 480}), encoding="utf-8")  # a retry's rest
+    events = _events(tmp_path, [_tool("read")])
+    assert extract.main(events, str(tmp_path / "out.md"), 124, str(stats)) == 1
+    assert cause.read_text(encoding="utf-8").strip() == (
+        "unavailable: OpenCode hit the hard cap (20 min)"
+    )
+
+
+@pytest.mark.parametrize("stats_text", [None, "{}", "not json"], ids=["none", "empty", "corrupt"])
+def test_no_summary_line_without_watchdog_stats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stats_text: str | None
+) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    stats = None
+    if stats_text is not None:
+        stats = tmp_path / "stats.json"
+        stats.write_text(stats_text, encoding="utf-8")
+    events = _events(tmp_path, [_text("m", "answer")])
+    out = str(tmp_path / "out.md")
+    assert extract.main(events, out, 0, str(stats) if stats else None) == 0
+    assert not summary.exists()
+
+
 def test_an_unwritable_summary_never_hides_a_breach(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1356,7 +1387,7 @@ def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
     summary = tmp_path / "summary.md"
     assert result.returncode == rc, result.stdout + result.stderr
     assert said in result.stdout
-    assert f"OpenCode budgets: idle 1 min, hard cap {hard} min for the step." in result.stdout
+    assert f"OpenCode budgets: idle 1 min, hard cap {hard} min for all attempts." in result.stdout
     assert (tmp_path / "calls").read_text(encoding="utf-8").count("call") == attempts
     assert summary.read_text(encoding="utf-8").count("- OpenCode attempt: exited") == attempts
     # The budgets reach the watchdog: idle in seconds, and the step's remaining hard cap.
@@ -1372,6 +1403,19 @@ def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
     else:
         cause = (tmp_path / "opencode-cause").read_text(encoding="utf-8")
         assert cause.strip() == "unavailable: OpenCode produced no final answer"
+
+
+@POSIX_BASH_JQ
+@pytest.mark.parametrize(
+    ("hard_input", "warned"), [("", True), ("2", False)], ids=["alias-only", "hard-minutes-set"]
+)
+def test_the_deprecated_alias_warns_that_it_now_caps_all_attempts(
+    tmp_path: Path, hard_input: str, warned: bool
+) -> None:
+    # HARD_MINUTES is what `inputs.hard-minutes || inputs.timeout-minutes || '20'` gave.
+    result = _run_action(tmp_path, HARD_INPUT=hard_input, TIMEOUT_ALIAS="2")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("timeout-minutes is deprecated" in result.stdout) is warned
 
 
 @POSIX_BASH_JQ

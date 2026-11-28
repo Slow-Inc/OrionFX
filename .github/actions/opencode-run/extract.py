@@ -129,7 +129,9 @@ def main(
         idle = _minutes(stats.get("idle_seconds"))
         return _cause(f"unavailable: OpenCode stalled (no progress for {idle})")
     if exit_status == HARD_CAP:
-        hard = _minutes(stats.get("hard_seconds"))
+        # The configured cap for all attempts, not what was left of it for a retry.
+        configured = os.environ.get("HARD_MINUTES", "")
+        hard = f"{configured} min" if configured.isdigit() else _minutes(stats.get("hard_seconds"))
         return _cause(f"unavailable: OpenCode hit the hard cap ({hard})")
     if exit_status == KILLED:
         return _cause(f"unavailable: OpenCode was killed (status {exit_status})")

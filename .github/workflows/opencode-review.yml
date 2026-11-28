@@ -140,7 +140,7 @@ jobs:
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
           idle-minutes: '4'  # stop only after 4 minutes with no event or output
-          hard-minutes: '20'  # for the whole step, the retry included
+          hard-minutes: '20'  # for all attempts together, the retry included
           retries: '1'
       - name: Submit COMMENT review as the OpenCode app
         id: post

@@ -76,7 +76,7 @@ The review is advisory evidence. It does not replace `/code-review`, `/scrutiniz
 A fixed per-attempt `timeout` killed big reviews that were still working: PR #156 (+2023/−148) timed out in all 3 run attempts at 10 minutes (status 124), mid-way through tool calls. `.github/actions/opencode-run/watchdog.py` replaced it (#160). It runs `opencode run` in its own process group, inside the same scrubbed env, writes the `--format json` events to `$RUNNER_TEMP/opencode-events.jsonl`, and passes stderr through. Any new byte on either counts as progress. It stops OpenCode (TERM to the whole group, then KILL after 30 s) in two cases only:
 
 - **Idle** (`idle-minutes`, default 4): no progress for that long. Cause `unavailable: OpenCode stalled (no progress for N min)`.
-- **Hard cap** (`hard-minutes`): the budget of the whole step, the no-answer retry included, however chatty the run. Cause `unavailable: OpenCode hit the hard cap (N min)`.
+- **Hard cap** (`hard-minutes`): the budget of the whole OpenCode run (all attempts, the no-answer retry included; install, sign-in and posting come on top), however chatty it is. A retry gets only what is left of it; the cause names the configured cap. Cause `unavailable: OpenCode hit the hard cap (N min)`.
 
 Neither is retried; a policy breach still outranks both (`extract.py` owns the cause). Every minute the log shows `heartbeat: <elapsed> elapsed, <n> events, last progress <t> ago`, never event content. The `tool:`/`usage:` lines appear only after the run, because `extract.py` prints them from the event file. Each attempt adds one line to the job summary: outcome, duration, event count, longest silence, budgets and token usage.
 
@@ -90,7 +90,7 @@ Why 4 minutes idle: OpenCode 1.19.6 in `--format json` emits a `step_start` when
 | `opencode-dispatch.yml` | 4 | 12 | 17 |
 | `opencode-triage.yml` | 4 | 7 | 12 |
 
-Each job timeout must exceed the hard cap plus setup (a test checks at least 5 minutes of headroom). Otherwise GitHub cancels the job before the notice step runs. `timeout-minutes` on the action is a deprecated alias of `hard-minutes`, kept for workflow files that predate it. Its meaning changed: it was per attempt and is now the whole step, so an old caller with `retries: 1` gets one budget, not two. On a PR the workflow file comes from the PR, but the action from the base revision, so a PR that changes these inputs is reviewed with the base action's budgets.
+Each job timeout must exceed the hard cap plus setup (a test checks at least 5 minutes of headroom). Otherwise GitHub cancels the job before the notice step runs. `timeout-minutes` on the action is a deprecated alias of `hard-minutes`, kept for workflow files that predate it. Its meaning changed: it was per attempt and now covers all attempts, so an old caller with `retries: 1` gets one budget, not two; the action logs a deprecation warning when only `timeout-minutes` is set. On a PR the workflow file comes from the PR, but the action from the base revision, so a PR that changes these inputs is reviewed with the base action's budgets.
 
 ### When OpenCode is unavailable
 
