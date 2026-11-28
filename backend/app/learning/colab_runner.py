@@ -339,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = runner.run(args.job)
     except CuFloorRefused as exc:
-        print(f"REFUSED (owner: top up or lower --min-cu): {exc}", file=sys.stderr)
+        print(f"REFUSED (stop and report to the owner): {exc}", file=sys.stderr)
         return 3
     except (RunRefused, ReturnRefused) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
