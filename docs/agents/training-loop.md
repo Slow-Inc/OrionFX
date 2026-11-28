@@ -57,9 +57,9 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Calibration | Isotonic or Platt, on a slice separated in time from the fold's training data. | [planned #130] |
 | Metric baseline | Multiclass Brier against class priors from **that training fold only**. | [planned #130] |
 | Artifact | Native model file (never pickle). The manifest records the commit SHA, dataset version, label and transform versions, seeds and library versions. | [planned #130] |
-| Card | `ModelCard` gains a training cutoff, dataset ref, label version and transform version. `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. | [planned #130] |
-| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | **[decision]** in the tracer PR #127: decide whether `build` receives the card and the verified weight bytes. Generating a module per version would break "allowlisted packages hold reviewed code only". |
-| Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and is marked so that no live path accepts it. | **[decision]** #127 |
+| Card | `ModelCard.training_cutoff` and `weights_hash`: `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. Dataset ref, label version and transform version are still to come. | cutoff and weights pin [built] #127; the other fields [planned #130] |
+| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | [built] #127, see §10 |
+| Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and no live path accepts it. | [built] #127, see §10 |
 | Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit, the VM holds no secrets, and only the artifact and manifest come back. Locally they are registered only after a hash check. Every VM is stopped after use. | [planned #134] |
 
 ## 5. Evaluation tiers (always reported separately)
@@ -70,7 +70,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
    - direction accuracy with a block-bootstrap 95% CI over trading days;
    - precision at high confidence, with coverage;
    - per-regime buckets, each with `n`; thin buckets get no verdict. [planned #130/#132]
-2. **System backtest.** `DecisionLoop`, M06 and `FakeBroker` run over stored bars on a fresh DB per run. The clock follows bar availability. The model's forecast reaches M05 through a **model-backed evidence provider**; the snapshot is passed in, not rebuilt (**[decision]** #127). Reported:
+2. **System backtest.** `DecisionLoop`, M06 and `FakeBroker` run over stored bars on a fresh DB per run. The clock follows bar availability. The model's forecast reaches M05 through a **model-backed evidence provider** (`EvaluationEvidence`); the snapshot is passed in, not rebuilt ([built] #127). Reported:
    - expectancy after costs, PF, max DD and trade count;
    - open positions at fold end and refused trades, reported separately.
 
@@ -157,9 +157,46 @@ Source: `docs/research/2026-11-28-m04-quant-upgrade-proposals.md`.
 | Real-money Live | ✅ only | never |
 | External resources: MT5, Demo account, news licence | ✅ | — |
 
-## 10. Open design decisions (resolve in #127)
+## 10. Design decisions from the tracer (#127)
 
-- **Evaluation load path** for historical scoring: no eligibility needed, and never accepted by a live path.
-- **Adapter and weights:** how `build` gets the card and the verified weight bytes, with one reviewed adapter for many versions.
-- **Evidence provider input:** it receives the snapshot instead of rebuilding it.
-- **Tracer fixture:** a daily break, a weekend, M5 recording and M15/H1 horizons. It asserts usable features, label coverage and at least one ENTER in the test fold. A negative control with `session=None` must fail. Readiness must be NOT_READY under the default policy.
+All four were open before #127; each is now **[built]** in #127 (branch `feat/127-training-tracer`).
+
+**1. Evaluation load path [built #127].**
+- `load_for_evaluation(loader, registry, card=, weights=, module=)` in `prediction/engine.py`. It reads no eligibility. It refuses:
+  - a card with no training cutoff;
+  - a card that is not the registered one;
+  - adapter bytes that fail the hash check (`ArtifactLoader.load_for_research`);
+  - weights the adapter rejects.
+- It returns an **`EvaluationPredictor`**. This is a distinct type, so the `LoadedPredictor` gate is unchanged. Only `predict_for_evaluation` accepts it.
+- **Live paths refuse it:**
+  - `predict` refuses it with its existing isinstance gate.
+  - `MarketRecorder` refuses any non-`LoadedPredictor` at construction, whatever the provenance. It used to drop such a model silently in `_predict`.
+  - `DecisionLoop` refuses `EvaluationEvidence` at construction. Its evidence signature `(now)` also differs from replay's `(now, snapshot)`, so mypy rejects the mix.
+- **Limit:** a hand-written lambda that wraps an evaluation predictor defeats the runtime check. Only review catches that.
+
+**2. Adapter and weights [built #127].**
+- One reviewed adapter module per model family lives in the allowlisted package `app.prediction.adapters`. Today that is `logistic_json`; LightGBM comes in #130.
+- It defines `build(card, weights: bytes) -> Predictor`. `load_for_evaluation` checks the weights with `verified_weights` (in `prediction/card.py`) before calling `build`, and the adapter checks again before it parses anything. It never uses pickle, and JSON numbers parse as Decimals.
+- **Three pins per version, all immutable:**
+  - the adapter source is the registered `artifact_hash`, the same for many versions;
+  - the card's `weights_hash` pins the weights file;
+  - the card itself is pinned through its manifest: `ModelCard.manifest()` adds `CARD_PIN` + `<sha256 of the canonical card JSON>` to `StrategyManifest.dependencies` whenever `weights_hash` is set. A card is no longer inside the hashed module, so an edited cutoff or `calibrated` claim is refused as "not the registered card".
+- No contract schema changed: `ModelCard` is not in `docs/contracts`, and `gen_schemas.py` produced no diff.
+
+**3. Evidence provider input [built #127].**
+- Replay's `EvidenceProvider` is `(now, snapshot) -> Evidence`. The step passes the snapshot it already built, with the session and techniques it used. `EvaluationEvidence(model)` is the model-backed provider; a refused prediction gives no forecast, so M05 waits.
+- `DecisionLoop` keeps `(now)` for now: `journal_evidence` has about 20 call sites. Switch it when a live model provider is wired (#131/#133).
+
+**4. Tracer fixture [built #127]** (`tests/integration/test_training_tracer.py`, `tests/support/tracer.py`).
+- **Fixture:** seeded synthetic M5 bars on `XAUUSD_NY_1700` with trend legs of 18-36 h. M15/H1 are resampled from them. The import link is stubbed until #128.
+- **Chain:** record (BACKFILL, `session=`) → label → export → train a 2-feature logistic on train → Platt-calibrate on validation → card + JSON weights → `propose_candidate` → `load_for_evaluation` → `replay(session=)` on the holdout with real `trend_following` → `EvidenceStore`.
+- **Asserts:**
+  - H1/M15 features set on the test fold and after both reopens;
+  - every row labelled or marked unlabellable exactly at a closure;
+  - at least one calibrated ENTER;
+  - `NOT_READY` with `POLICY_UNCERTIFIED`.
+- **Negative control:** with `session=None`, H1 ADX and M15 structure never come back, so the feature assertion fails.
+- **CI-time deviations from "7+ days of M5":**
+  - The library is the default one cut to the techniques the chain reads (`tracer.TECHNIQUES`): same ids and values.
+  - M5 is stored only from the train split on, while M15/H1 history starts a week earlier.
+  - The full library over the whole week took about 45 s; the tracer takes about 9 s.

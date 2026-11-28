@@ -21,15 +21,16 @@ from tests.integration.test_market_recorder import (
 
 from app.core.enums import Direction, ForecastLineage, Mode
 from app.learning.bars import BarLog, Provenance
-from app.market_data.features import FEATURE_SCHEMA
+from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, lookback
 from app.market_data.store import CandleStore
 from app.prediction.card import ModelCard
 from app.prediction.engine import LoadedPredictor, load_baseline
-from app.runtime.market_recorder import LOOKBACK, MarketRecorder
+from app.runtime.market_recorder import MarketRecorder
 from app.runtime.news_worker import journal_evidence
 from app.storage.journal import Journal
 
 KEY = "M15.direction_10.direction"
+LOOKBACK = lookback(DEFAULT_TECHNIQUES)
 
 
 class TrendM15:

@@ -19,6 +19,14 @@ predicts, and the semantics say so. News-enhanced inference is refused until
 news features exist (#48); passing news to a chart-only model is a wiring error
 and refused too. The forecast covers `horizon_bars` from the snapshot's bar and
 expires no later than the snapshot. It describes market risk only.
+
+Evaluation (#127): scoring history needs a model registered today to run at past
+`now`s, which no approval covers. `load_for_evaluation` therefore reads no eligibility:
+the card must be the registered one, the adapter's bytes are hash-verified, the adapter
+checks the weights against the card, and the card must state a training cutoff. It
+returns an `EvaluationPredictor`, a distinct type that only `predict_for_evaluation`
+accepts; `predict`, `MarketRecorder` and `DecisionLoop` refuse it. Every prediction
+refuses a snapshot at or before the card's training cutoff (in-sample).
 """
 
 import types
@@ -32,7 +40,7 @@ from app.core.enums import DataQuality, Direction, ForecastLineage, Mode
 from app.core.ids import new_id
 from app.core.time import TIMEFRAME_DURATION
 from app.market_data.features import snapshot_problem
-from app.prediction.card import ModelCard, Predictor, unique_leader
+from app.prediction.card import ModelCard, Predictor, unique_leader, verified_weights
 from app.storage.artifacts import ArtifactLoader, UntrustedArtifact
 from app.storage.registry import ArtifactRegistry
 
@@ -112,6 +120,46 @@ def load_model(
     return LoadedPredictor(predictor, mode, _GATE, record.expires_at)
 
 
+@dataclass(frozen=True, slots=True)
+class EvaluationPredictor:
+    """A hash-verified model for scoring history, with no approval behind it."""
+
+    predictor: Predictor
+    _gate: object
+
+    def __post_init__(self) -> None:
+        if self._gate is not _GATE:
+            raise Refused("evaluation predictors are loaded through load_for_evaluation")
+
+
+def load_for_evaluation(
+    loader: ArtifactLoader,
+    registry: ArtifactRegistry,
+    *,
+    card: ModelCard,
+    weights: bytes,
+    module: str,
+) -> EvaluationPredictor:
+    """`module` is a reviewed adapter defining `build(card, weights) -> Predictor`; it gets
+    weights already checked against the card, and checks them again before parsing."""
+    if card.training_cutoff is None:
+        raise Refused(f"{card.ref} states no training cutoff: history cannot be scored")
+    manifest = registry.get("model", card.model_id, card.model_version)
+    if card.artifact_hash is None or manifest != card.manifest():
+        raise Refused(f"{card.ref}: this card is not the registered one")
+    try:
+        code = loader.load_for_research("model", card.model_id, card.model_version, module)
+    except UntrustedArtifact as exc:
+        raise Refused(str(exc)) from None
+    try:
+        built: Predictor = code.build(card, verified_weights(card, weights))
+    except Exception as exc:
+        raise Refused(f"{module} refused {card.ref}: {exc}") from None
+    if built.card != card:
+        raise Refused(f"{module} built another card than {card.ref}")
+    return EvaluationPredictor(built, _GATE)
+
+
 def _features(card: ModelCard, values: Mapping[str, Decimal | None]) -> dict[str, Decimal]:
     out: dict[str, Decimal] = {}
     for key in card.required_features:
@@ -145,9 +193,31 @@ def predict(
 ) -> PredictionGenerated:
     if not isinstance(loaded, LoadedPredictor):
         raise Refused("predict accepts only a loaded predictor")
-    card = loaded.card
     if loaded.approved_until is not None and now >= loaded.approved_until:
-        raise Refused(f"{card.ref}: its approval expired at {loaded.approved_until.isoformat()}")
+        raise Refused(f"{loaded.card.ref}: its approval expired at "
+                      f"{loaded.approved_until.isoformat()}")  # fmt: skip
+    return _forecast(loaded.predictor, snapshot, now, news_assessment_ids)
+
+
+def predict_for_evaluation(
+    model: EvaluationPredictor, snapshot: FeatureSnapshot, *, now: datetime
+) -> PredictionGenerated:
+    """`predict` for a model loaded by `load_for_evaluation`: history only."""
+    if not isinstance(model, EvaluationPredictor):
+        raise Refused("predict_for_evaluation accepts only an evaluation predictor")
+    return _forecast(model.predictor, snapshot, now, ())
+
+
+def _forecast(
+    predictor: Predictor,
+    snapshot: FeatureSnapshot,
+    now: datetime,
+    news_assessment_ids: Sequence[str],
+) -> PredictionGenerated:
+    card = predictor.card
+    if card.training_cutoff is not None and snapshot.as_of <= card.training_cutoff:
+        raise Refused(f"{card.ref}: {snapshot.ref} is not after its training cutoff "
+                      f"{card.training_cutoff.isoformat()} (in-sample)")  # fmt: skip
     if card.lineage is ForecastLineage.NEWS_ENHANCED:
         raise Refused(f"{card.ref}: news-enhanced inference needs news features (not built, #48)")
     if news_assessment_ids:
@@ -156,7 +226,7 @@ def predict(
     if problem is not None:
         raise Refused(problem)
     try:
-        scores = loaded.predictor.predict(_features(card, snapshot.values))
+        scores = predictor.predict(_features(card, snapshot.values))
     except Refused:
         raise
     except Exception as exc:

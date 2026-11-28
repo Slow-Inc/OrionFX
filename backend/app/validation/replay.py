@@ -10,7 +10,11 @@ strategies and `decide`, and simulates any ENTER with an explicit cost model:
 - a round-trip commission.
 Costs are never negative, so a fill never improves on the close. Evidence (forecasts,
 news) comes from a provider that is itself point-in-time; by default there is none,
-and then M05 waits, which is the honest result without a calibrated model.
+and then M05 waits, which is the honest result without a calibrated model. The provider
+gets the snapshot the step already built (#127): rebuilding it would double the cost and
+could drift from the session and techniques actually used. `EvaluationEvidence` is the
+model-backed provider: the forecast of an evaluation-loaded model (no approval needed,
+never accepted by a live path).
 
 The output is a run record, not a claim: decisions, simulated trades, metrics, the
 no-trade baseline, and the list of simplifications this replay makes.
@@ -22,23 +26,23 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from app.core.contracts import CandleClosed, DecisionCreated
+from app.core.contracts import CandleClosed, DecisionCreated, FeatureSnapshot
 from app.core.enums import DecisionAction, Mode, Side, Timeframe
 from app.core.time import TIMEFRAME_DURATION
 from app.decision.context import DecisionContext
 from app.decision.decide import decide
 from app.decision.fusion import Costs, CycleView, Evidence
 from app.decision.gate import Strategy, eligible
-from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot
+from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot, lookback
 from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
+from app.market_data.techniques.indicators import Technique
+from app.prediction.engine import EvaluationPredictor, Refused, predict_for_evaluation
 from app.storage.registry import ArtifactRegistry
 from app.validation.metrics import Metric, expectancy, max_drawdown, profit_factor, win_rate
 
 D = Decimal
 CENT = D("0.01")
-LOOKBACK = max(t.lookback for t in DEFAULT_TECHNIQUES)
-"""Exactly what the slowest default technique reads; more would be wasted parsing."""
 AVAILABILITY_SLACK = timedelta(minutes=1)
 """How long after its close a bar may still arrive and be replayed."""
 SIMPLIFICATIONS = (
@@ -51,7 +55,22 @@ SIMPLIFICATIONS = (
     "spread from the bar when present, else the cost model's",
 )
 
-EvidenceProvider = Callable[[datetime], Evidence]
+EvidenceProvider = Callable[[datetime, FeatureSnapshot], Evidence]
+"""Evidence at `now`, given the feature snapshot the replay step built."""
+
+
+@dataclass(frozen=True)
+class EvaluationEvidence:
+    """The forecast of an evaluation-loaded model on the step's snapshot. A refused
+    prediction (in-sample, missing feature, ...) is no forecast, so M05 waits."""
+
+    model: EvaluationPredictor
+
+    def __call__(self, now: datetime, snapshot: FeatureSnapshot) -> Evidence:
+        try:
+            return Evidence(forecast=predict_for_evaluation(self.model, snapshot, now=now))
+        except Refused:
+            return Evidence()
 
 
 @dataclass(frozen=True)
@@ -157,11 +176,13 @@ def replay(
     registry: ArtifactRegistry,
     initial_lot: Decimal,
     cost: CostModel,
-    evidence: EvidenceProvider = lambda _t: Evidence(),
+    evidence: EvidenceProvider = lambda _t, _s: Evidence(),
     policy_version: str = "replay",
     session: SessionSchedule | None = None,
+    techniques: Sequence[Technique] = DEFAULT_TECHNIQUES,
 ) -> ReplayResult:
     enabled = list(enabled)
+    window = lookback(techniques)
     tfs = list(dict.fromkeys([timeframe, *context_timeframes]))
     # every bar opening in [start, end), including the last one, which only becomes
     # available after `end`
@@ -183,10 +204,10 @@ def replay(
         bars_by_tf = {}
         for tf in tfs:
             i = bisect.bisect_right(available[tf], now)
-            bars_by_tf[tf] = history[tf][max(0, i - LOOKBACK) : i]
+            bars_by_tf[tf] = history[tf][max(0, i - window) : i]
         seen.append(max(b.available_at for bs in bars_by_tf.values() for b in bs))
         snapshot = build_feature_snapshot(symbol, {k: v for k, v in bars_by_tf.items() if v}, now,
-                                          session=session)  # fmt: skip
+                                          techniques, session=session)  # fmt: skip
         spread = cost.spread(bar)
         ctx = DecisionContext(now=now, mode=Mode.SHADOW, snapshot=snapshot, price=bar.close,
                               spread=spread, initial_lot=initial_lot)  # fmt: skip
@@ -194,8 +215,8 @@ def replay(
         ctx = gate.with_allowed(ctx)
         proposals = [p for s in gate.allowed if (p := s.propose(ctx)) is not None]
         cycle = CycleView("replay", 1 if open_ else 0, last_closed)
-        d = decide(ctx, proposals, evidence(now), cycle=cycle, costs=cost.costs, symbol=symbol,
-                   policy_version=policy_version)  # fmt: skip
+        d = decide(ctx, proposals, evidence(now, snapshot), cycle=cycle, costs=cost.costs,
+                   symbol=symbol, policy_version=policy_version)  # fmt: skip
         decisions.append(d.created)
         intent = d.intent
         if d.created.action is DecisionAction.ENTER and intent is not None:

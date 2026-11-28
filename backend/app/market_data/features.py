@@ -32,6 +32,11 @@ DEFAULT_TECHNIQUES: tuple[Technique, ...] = (
 )
 
 
+def lookback(techniques: Sequence[Technique]) -> int:
+    """Closed bars to read per timeframe: exactly what the slowest technique needs."""
+    return max(t.lookback for t in techniques)
+
+
 def _key(tf: Timeframe, technique_id: str, output: str) -> str:
     """The snapshot key format: the contract between M02 and every consumer."""
     return f"{tf}.{technique_id}.{output}"

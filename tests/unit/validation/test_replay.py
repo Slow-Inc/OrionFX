@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -94,7 +95,8 @@ def _store(conn: sqlite3.Connection, bars: list[CandleClosed]) -> CandleStore:
     return store
 
 
-def _calibrated(now: datetime, horizon: Timeframe = M15) -> Evidence:
+def _calibrated(now: datetime, _snapshot: object = None, horizon: Timeframe = M15) -> Evidence:
+    """A replay evidence provider: it ignores the step's snapshot."""
     return Evidence(forecast=PredictionGenerated(
         prediction_id=f"pred-{now.isoformat()}", model_id="m", model_version="1",
         lineage=ForecastLineage.CHART_ONLY, horizon=horizon, horizon_bars=1, direction=Direction.UP,
@@ -149,7 +151,7 @@ def test_one_position_at_a_time_then_a_cooldown(
     conn: sqlite3.Connection, registry: ArtifactRegistry
 ) -> None:
     result = _run(conn, registry, TREND, strategies=[AlwaysUp(horizon=H1)],
-                  evidence=lambda now: _calibrated(now, H1))  # fmt: skip
+                  evidence=partial(_calibrated, horizon=H1))  # fmt: skip
     reasons = [d.reason_codes[0] for d in result.decisions if d.action is DecisionAction.WAIT]
     assert "POSITION_OPEN" in reasons and "COOLDOWN" in reasons
     for a, b in zip(result.trades, result.trades[1:], strict=False):
@@ -213,7 +215,10 @@ def test_a_trade_exits_at_its_horizon_bar_not_one_later(
 def test_a_position_open_at_the_end_is_closed_and_counted(
     conn: sqlite3.Connection, registry: ArtifactRegistry
 ) -> None:
-    h1 = {"strategies": [AlwaysUp(horizon=H1)], "evidence": lambda now: _calibrated(now, H1)}
+    h1 = {
+        "strategies": [AlwaysUp(horizon=H1)],
+        "evidence": partial(_calibrated, horizon=H1),
+    }
     first = _run(conn, registry, TREND, **h1).trades[0]
     # end the window two bars after that entry, long before its 1-hour horizon
     entry_open = first.entry_time - timedelta(minutes=15, seconds=1)
