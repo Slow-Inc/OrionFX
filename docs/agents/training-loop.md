@@ -81,7 +81,7 @@ The synthetic scenarios (`validation/scenarios.py`) are behaviour tests. They ne
 
 ## 6. The claim protocol (anti-overfitting)
 
-A **protocol version** is a hashed record saved before the first run of a claim [planned #132]. It holds:
+A **protocol version** is a hashed record saved before the first run of a claim [built #132 machinery: `validation/protocol.py`, a full sha256 of canonical JSON; the certified values themselves live in the protocol document, not in code]. It holds:
 - the targets [PROPOSED; certified by the owner];
 - the configuration space and the iteration budget (20);
 - the regime rule;
@@ -101,6 +101,22 @@ Rules, adopted from mip-research (PRD #120):
 8. **Keep errata.** Evidence can be marked withdrawn, corrected, unconfirmed or superseded.
 9. **Say who verified.** Every report states what was verified and by whom.
 10. **Stop rule.** If the budget runs out before the targets are met, stop and report. Never lower the targets.
+
+**What the #132 machinery builds** (built #132 machinery, not yet wired into a trainer or the system backtest):
+
+| Rule | Mechanism | Status |
+|---|---|---|
+| Protocol record | `protocol.Protocol`, `protocol_hash`, `load_protocol(text, expected_hash)` refuses a document whose content does not hash to the expected value. | [built #132] |
+| 1, 10 | `runlog.RunLog` (migration `0015_claim_protocol`). A run counts only under a registered protocol hash. N is the number of distinct config hashes with an `ok` or `failed` run. A new counted config past the budget is refused. `aa` and `bugfix-rerun` (with a bug note and fix SHA) are logged but never counted, and only for a config already counted. `open_holdout` records the single opening, for a counted config with no errata; after it, no new config counts. | [built #132] |
+| 2 | `claimstats.mean_ci`, `brier_skill_ci`: stationary or circular block bootstrap over days, one- or two-sided. | [built #132] |
+| 3 | `claimstats.simulated_power`, `mean_lb_power`, `min_track_record_length`; `ece_noise_floor`, `expected_binned_ece` for the ECE gate. | [built #132] |
+| 4 | `claimstats.best_of_n` (N from the run log), `deflated_sharpe`, `pbo_cscv`, `sign_test`, `holm`. | [built #132] |
+| 5 | `claimstats.aa_noise_floor`, `compare_to_floor`. | [built #132] |
+| 6 | `recompute.recheck`: a second implementation recomputes Brier, accuracy, log loss and Brier skill from per-prediction outputs and flags each mismatch. The train/serve skew check is not built. | recompute [built #132]; skew [planned] |
+| 7 | The retention benchmark against the previous version is not built. Runs are never deleted (database triggers). | [planned] |
+| 8 | `RunLog.add_erratum`: INVALID, WITHDRAWN, CORRECTED, UNCONFIRMED or SUPERSEDED, with a reason and a time. The run stays, and its budget is never refunded. | [built #132] |
+
+The ECE estimators are stated in `claimstats`: `ece_binned` is the plug-in L1 on equal-mass bins, and `ece_debiased` is Kumar, Liang & Ma 2019, the debiased **L2** calibration error. Which one a gate uses is a protocol value.
 
 **Readiness** is judged per subject: `EvidenceStore` qualifies only subjects common to every run [built #126]. `DEFAULT_POLICY` is uncertified, so the verdict is NOT_READY until the owner certifies thresholds.
 
