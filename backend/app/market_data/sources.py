@@ -65,7 +65,7 @@ SOURCE_SCHEDULES: Mapping[str, SessionSchedule] = {
     "mt5": XAUUSD_NY_1700,  # [PROPOSED] confirm against the broker's symbol spec (#17)
     "firstrate-gc": CME_GLOBEX_GC,  # [PROPOSED] CME Globex hours; no holiday calendar
     "dukascopy-xauusd": XAUUSD_NY_1700,  # [PROPOSED] broker-style; checked by audit on import
-    "histdata-xauusd": XAUUSD_NY_1700,  # [PROPOSED] broker-style after EST(+5h) to UTC
+    "histdata-xauusd": XAUUSD_NY_1700,  # [PROPOSED] New York local time (DST) to UTC
 }
 """XAUUSD session schedule per data source."""
 

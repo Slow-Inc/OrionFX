@@ -17,9 +17,16 @@ real fetch confirms it**):
 - The zip holds `DAT_ASCII_XAUUSD_M1_<period>.csv` (and a `.txt` gap report).
 
 Format of the CSV: `YYYYMMDD HHMMSS;open;high;low;close;volume`, semicolon-separated,
-**bid** prices, one row per minute with a tick. The time is **EST with no daylight
-saving** (fixed UTC-5 all year), so it converts to UTC by adding five hours; in summer the
-New York 17:00 break is 16:00 in the file. There is no spread column (`spread` is None, so
+**bid** prices, one row per minute with a tick. The time is **New York local time with
+daylight saving** (America/New_York: UTC-5 in winter, UTC-4 in summer). HistData's FAQ says
+"EST WITHOUT Day Light Savings", but the data says otherwise: a Colab cross-check of
+HistData closes against Dukascopy's UTC closes (2026-11-28) matched at +4 h on 2021-07-14
+(median |diff| 0.0 over 1,140 minutes; +5 h gave 1.24) and at +5 h on 2021-01-13 (+4 h
+gave 1.49), and a fixed-EST import put the daily break at 22:00-23:00 UTC all year. Both
+US clock changes fall on a Sunday 01:00-03:00 New York, when the market is closed, so an
+ambiguous or non-existent local time is a data error and refuses the file.
+
+There is no spread column (`spread` is None, so
 the backtest's stressed spread applies), and the volume column is 0 (`volume` is None
 when it is 0).
 
@@ -36,11 +43,12 @@ import time
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import IO, Any
+from zoneinfo import ZoneInfo
 
 from app.market_data._http import USER_AGENT, FetchFailed, http_request, write_atomic
 from app.market_data.port import M1Bar
@@ -66,8 +74,8 @@ MAX_ZIP = 64 * 1024 * 1024
 """A year of XAUUSD M1 is about 5 MB zipped; anything over this cap is refused."""
 MAX_CSV = 256 * 1024 * 1024
 """A year of XAUUSD M1 is about 20 MB as CSV; the member is read with this cap."""
-EST = timedelta(hours=5)
-"""HistData's clock is UTC-5 all year: UTC = file time + 5 hours."""
+NEW_YORK = ZoneInfo("America/New_York")
+"""HistData's clock: New York local time, DST included (see the module docstring)."""
 TOKEN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 STAMP = re.compile(r"\d{8} \d{6}")
 PREFIX = "HISTDATA_XAUUSD_M1_"
@@ -88,13 +96,13 @@ class Period:
         return f"{self.year}" if self.month is None else f"{self.year}{self.month:02d}"
 
     def utc_span(self) -> tuple[datetime, datetime]:
-        """[start, end) of the period's bars in UTC (file time is EST, UTC-5)."""
+        """[start, end) of the period's bars in UTC (file time is New York local)."""
         if self.month is None:
             a, b = datetime(self.year, 1, 1), datetime(self.year + 1, 1, 1)
         else:
             a = datetime(self.year, self.month, 1)
             b = datetime(self.year + self.month // 12, self.month % 12 + 1, 1)
-        return a.replace(tzinfo=UTC) + EST, b.replace(tzinfo=UTC) + EST
+        return _utc(a), _utc(b)
 
     @classmethod
     def from_tag(cls, tag: str) -> "Period":
@@ -272,7 +280,7 @@ def _parse(row: list[str], line: int, period: Period, start: datetime, end: date
         t, o, h, lo, c, v = row
         if not STAMP.fullmatch(t):
             raise ValueError(f"time {t!r} is not YYYYMMDD HHMMSS")
-        at = datetime.fromisoformat(t).replace(tzinfo=UTC) + EST
+        at = _utc(datetime.fromisoformat(t))
         if not start <= at < end:
             return None
         volume = Decimal(v)
@@ -280,3 +288,12 @@ def _parse(row: list[str], line: int, period: Period, start: datetime, end: date
                      None if volume == 0 else volume, spread=None)  # fmt: skip
     except (ValueError, InvalidOperation) as exc:
         raise ValueError(f"HistData {period.tag} line {line}: {exc}") from exc
+
+
+def _utc(local: datetime) -> datetime:
+    """A New York wall time in UTC; refused if the clock change makes it ambiguous or skips
+    it (the two folds then disagree on the offset)."""
+    first, second = local.replace(tzinfo=NEW_YORK), local.replace(tzinfo=NEW_YORK, fold=1)
+    if first.utcoffset() != second.utcoffset():
+        raise ValueError(f"{local} is ambiguous or does not exist in New York time")
+    return first.astimezone(UTC)
