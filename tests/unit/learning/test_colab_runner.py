@@ -16,8 +16,9 @@ import pytest
 from tests.support.colab import FakeColab
 
 from app.core.contracts import sha256_ref
+from app.learning import colab_runner
 from app.learning import colab_vm as vm
-from app.learning.colab_job import CODE, DATASET, JOB, JobSpec
+from app.learning.colab_job import CODE, DATASET, JOB, BundleRefused, JobSpec
 from app.learning.colab_runner import (
     ColabCli,
     ColabError,
@@ -74,7 +75,13 @@ def job_path(tmp_path: Path) -> Path:
     return bundle / JOB
 
 
+def _same_code(tmp_path: Path) -> Any:
+    """Stands in for `git_archive`: the fixture's code.tar is the archive of its pin."""
+    return lambda sha: (tmp_path / "bundle" / CODE).read_bytes()
+
+
 def _runner(fake: FakeColab, conn: sqlite3.Connection, tmp_path: Path, **kw: Any) -> ColabRunner:
+    kw.setdefault("archive", _same_code(tmp_path))
     return ColabRunner(
         fake, ArtifactRegistry(conn), artifacts=tmp_path / "models", work=tmp_path / "runs", **kw
     )
@@ -129,6 +136,27 @@ def test_an_already_registered_version_is_refused_before_spending(
     with pytest.raises(RunRefused, match="already"):
         _runner(fake, conn, tmp_path).run(job_path)
     assert fake.calls == []
+
+
+def test_a_code_archive_that_is_not_the_pinned_commit_is_refused_before_spending(
+    conn: sqlite3.Connection, tmp_path: Path, job_path: Path
+) -> None:
+    fake = FakeColab()
+    with pytest.raises(BundleRefused, match="not the git archive of code_sha"):
+        _runner(fake, conn, tmp_path, archive=lambda sha: b"another commit").run(job_path)
+    assert fake.calls == []
+    _nothing_registered(conn, tmp_path)
+
+
+def test_an_artifact_directory_already_on_disk_is_refused_before_spending(
+    conn: sqlite3.Connection, tmp_path: Path, job_path: Path
+) -> None:
+    (tmp_path / "models" / "stub-colab" / "0.0.1").mkdir(parents=True)
+    fake = FakeColab()
+    with pytest.raises(RunRefused, match="already"):
+        _runner(fake, conn, tmp_path).run(job_path)
+    assert fake.calls == []
+    assert ArtifactRegistry(conn).get("model", "stub-colab", "0.0.1") is None
 
 
 @pytest.mark.parametrize("step", ["new", "upload", "exec"])
@@ -202,6 +230,29 @@ def test_a_failed_stop_is_loud(conn: sqlite3.Connection, tmp_path: Path, job_pat
     _nothing_registered(conn, tmp_path)
 
 
+def test_a_failed_stop_after_a_started_vm_is_loud_even_when_a_step_failed(
+    conn: sqlite3.Connection, tmp_path: Path, job_path: Path
+) -> None:
+    fake = FakeColab(fail={"exec": ColabError("exec broke"), "stop": ColabError("stop broke")})
+    with pytest.raises(VmStopFailed, match="may still be billing") as err:
+        _runner(fake, conn, tmp_path).run(job_path)
+    assert isinstance(err.value.__context__, ColabError)  # the exec failure is chained
+    _nothing_registered(conn, tmp_path)
+
+
+def test_a_failed_new_keeps_its_own_error_when_the_stop_also_fails(
+    conn: sqlite3.Connection, tmp_path: Path, job_path: Path
+) -> None:
+    fake = FakeColab(fail={"new": ColabError("quota exceeded"), "stop": ColabError("no such")})
+    with pytest.raises(ColabError, match="quota exceeded") as err:
+        _runner(fake, conn, tmp_path).run(job_path)
+    assert not isinstance(err.value, VmStopFailed)  # the real cause is not masked
+    assert fake.calls[-1] == "stop"  # the stop was still attempted
+    notes = " ".join(getattr(err.value, "__notes__", []))
+    assert "may still be billing" in notes and "colab-state.json" in notes
+    _nothing_registered(conn, tmp_path)
+
+
 def _edit_json(path: Path, **changes: Any) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
     data.update(changes)
@@ -218,6 +269,8 @@ def _edit_json(path: Path, **changes: Any) -> None:
         (lambda out: _edit_json(out / vm.MANIFEST, job={"job_id": "other"}), "bound"),
         (lambda out: _rehash_card(out, horizon_bars=0), "not a valid ModelCard"),
         (lambda out: (out / vm.MANIFEST).write_text("[]"), "not bound"),
+        (lambda out: _manifest_files(out, extra="sha256:" + "0" * 64), "the manifest lists"),
+        (lambda out: _rehash_card(out, artifact_hash="sha256:" + "0" * 64), "artifact_hash"),
     ],
     ids=[
         "hash-mismatch",
@@ -227,6 +280,8 @@ def _edit_json(path: Path, **changes: Any) -> None:
         "unbound",
         "bad-card",
         "manifest-not-an-object",
+        "manifest-files-extra-key",
+        "card-names-other-weights",
     ],
 )
 def test_a_return_that_fails_verification_is_refused_and_nothing_is_registered(
@@ -254,6 +309,53 @@ def _rehash_card(out: Path, **changes: Any) -> None:
     manifest = json.loads((out / vm.MANIFEST).read_text(encoding="utf-8"))
     manifest["files"][vm.CARD] = sha256_ref((out / vm.CARD).read_bytes())
     (out / vm.MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _manifest_files(out: Path, **extra: str) -> None:
+    manifest = json.loads((out / vm.MANIFEST).read_text(encoding="utf-8"))
+    manifest["files"].update(extra)
+    (out / vm.MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _main(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job_path: Path, fake: FakeColab, *extra: str
+) -> int:
+    monkeypatch.setattr(colab_runner, "ColabCli", lambda **kw: fake)
+    monkeypatch.setattr(colab_runner, "git_archive", lambda repo, sha: _same_code(tmp_path)(sha))
+    return colab_runner.main(
+        ["run", str(job_path), "--db", str(tmp_path / "cli.db"),
+         "--artifacts", str(tmp_path / "models"), "--work", str(tmp_path / "runs"), *extra]
+    )  # fmt: skip
+
+
+def test_main_exits_3_on_the_cu_floor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job_path: Path, capsys: Any
+) -> None:
+    fake = FakeColab()
+    assert _main(monkeypatch, tmp_path, job_path, fake, "--min-cu", "1000") == 3
+    assert "stop and report to the owner" in capsys.readouterr().err
+    assert fake.calls == ["usage"]
+
+
+def test_main_exits_2_on_a_refused_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job_path: Path, capsys: Any
+) -> None:
+    (job_path.parent / "extra.txt").write_text("x")
+    fake = FakeColab()
+    assert _main(monkeypatch, tmp_path, job_path, fake) == 2
+    assert "REFUSED" in capsys.readouterr().err
+    assert fake.calls == []
+
+
+def test_main_prints_the_summary_on_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, job_path: Path, capsys: Any
+) -> None:
+    fake = FakeColab()
+    assert _main(monkeypatch, tmp_path, job_path, fake) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["registered"] == "stub-colab@0.0.1"
+    assert summary["balance_before"] == "136.64"
+    assert fake.sessions == set()
 
 
 def test_parse_balance_reads_the_real_usage_output() -> None:

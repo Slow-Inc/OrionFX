@@ -18,6 +18,7 @@ from app.learning.colab_job import (
     BundleRefused,
     JobSpec,
     build_bundle,
+    git_archive,
     scan_bundle,
 )
 
@@ -64,6 +65,14 @@ def _rewrite_code(bundle: Path, extra: dict[str, bytes]) -> None:
             tar.addfile(info, io.BytesIO(data))
 
 
+def _add_link(bundle: Path, name: str, kind: bytes) -> None:
+    with tarfile.open(bundle / CODE, "a") as tar:
+        info = tarfile.TarInfo(name)
+        info.type = kind
+        info.linkname = "backend/app/__init__.py"
+        tar.addfile(info)
+
+
 def _code_names(bundle: Path) -> list[str]:
     with tarfile.open(bundle / CODE) as tar:
         return tar.getnames()
@@ -86,6 +95,13 @@ def test_bundle_from_head_holds_only_the_allow_list_and_passes_the_scan(tmp_path
     rebuilt = scan_bundle(bundle)
     assert rebuilt.dataset_path == DATASET  # the bundled job names the bundled export
     assert rebuilt.dataset_hash == job.dataset_hash
+    # The runner's code-pin check: a rebuild of the pinned commit is byte-identical.
+    assert git_archive(REPO, rebuilt.code_sha) == (bundle / CODE).read_bytes()
+
+
+def test_git_archive_of_an_unknown_commit_is_refused() -> None:
+    with pytest.raises(BundleRefused, match="git archive"):
+        git_archive(REPO, "f" * 40)
 
 
 def test_the_scanner_does_not_trip_on_its_own_source() -> None:
@@ -107,6 +123,42 @@ def test_an_env_file_inside_the_code_archive_is_refused(tmp_path: Path) -> None:
         scan_bundle(bundle)
 
 
+@pytest.mark.parametrize("name", ["backend/app/../../x.py", "/backend/app/x.py"])
+def test_an_unsafe_member_path_is_refused(tmp_path: Path, name: str) -> None:
+    bundle = build_bundle(_job(_dataset(tmp_path)), repo=REPO, out=tmp_path / "b").parent
+    _rewrite_code(bundle, {name: b"print(1)\n"})
+    with pytest.raises(BundleRefused, match="unsafe member path"):
+        scan_bundle(bundle)
+
+
+@pytest.mark.parametrize("kind", [tarfile.SYMTYPE, tarfile.LNKTYPE], ids=["symlink", "hardlink"])
+def test_a_link_member_in_the_code_archive_is_refused(tmp_path: Path, kind: bytes) -> None:
+    bundle = build_bundle(_job(_dataset(tmp_path)), repo=REPO, out=tmp_path / "b").parent
+    _add_link(bundle, "backend/app/link.py", kind)
+    with pytest.raises(BundleRefused, match=r"backend/app/link\.py: outside the code allow-list"):
+        scan_bundle(bundle)
+
+
+def test_a_bundle_entry_that_is_not_a_regular_file_is_refused(tmp_path: Path) -> None:
+    bundle = build_bundle(_job(_dataset(tmp_path)), repo=REPO, out=tmp_path / "b").parent
+    (bundle / CODE).unlink()
+    (bundle / CODE).mkdir()
+    with pytest.raises(BundleRefused, match="allowed exactly"):
+        scan_bundle(bundle)
+
+
+def test_a_symlinked_bundle_entry_is_refused(tmp_path: Path) -> None:
+    bundle = build_bundle(_job(_dataset(tmp_path)), repo=REPO, out=tmp_path / "b").parent
+    real = tmp_path / "elsewhere.tar"
+    (bundle / CODE).replace(real)
+    try:
+        (bundle / CODE).symlink_to(real)
+    except OSError:
+        pytest.skip("this platform cannot create a symlink without privileges")
+    with pytest.raises(BundleRefused, match="allowed exactly"):
+        scan_bundle(bundle)
+
+
 def test_code_outside_the_allow_list_is_refused(tmp_path: Path) -> None:
     bundle = build_bundle(_job(_dataset(tmp_path)), repo=REPO, out=tmp_path / "b").parent
     _rewrite_code(bundle, {"scripts/leak.py": b"print(1)\n"})
@@ -122,12 +174,13 @@ def test_a_key_like_string_in_the_code_is_refused(tmp_path: Path, secret: str) -
         scan_bundle(bundle)
 
 
-def test_a_key_like_string_in_the_dataset_is_refused_before_anything_is_written(
+def test_a_key_like_string_in_the_dataset_is_refused_and_the_bundle_removed(
     tmp_path: Path,
 ) -> None:
     job = _job(_dataset(tmp_path, f'{{"note":"{FAKE_AWS_KEY}"}}\n'))
     with pytest.raises(BundleRefused, match="key-like"):
         build_bundle(job, repo=REPO, out=tmp_path / "b")
+    assert not (tmp_path / "b").exists()  # a refused bundle is never left behind
 
 
 def test_a_sqlite_store_is_refused(tmp_path: Path) -> None:

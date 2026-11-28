@@ -8,6 +8,8 @@ byte leaves the machine. It refuses:
 - any file outside the allow-list, and any code member outside `CODE_PATHS`;
 - secret-shaped names (`.env`, keys, certificates, databases, credentials);
 - key-like strings, a SQLite store, and any local secret value.
+`git_archive` regenerates the code archive, so the runner can prove `code.tar` is the
+archive of `code_sha` (the commit the returned manifest is bound to).
 Generated or trainer code is untrusted (master plan §15.5 item 6): the VM gets no
 broker, LLM or GitHub credentials, because nothing secret is ever in the bundle.
 """
@@ -112,6 +114,9 @@ def _code_problems(code: Path, known: list[bytes]) -> list[str]:
     with tarfile.open(code) as tar:
         for m in tar.getmembers():
             name = m.name
+            if name.startswith("/") or ".." in name.split("/"):
+                problems.append(f"{CODE}:{name}: unsafe member path")
+                continue
             if _SECRET_NAME.search(name.rstrip("/")):
                 problems.append(f"{CODE}:{name}: secret-shaped name")
             if m.isdir():
@@ -155,6 +160,20 @@ def scan_bundle(bundle: Path, *, known_secrets: Iterable[str] = ()) -> JobSpec:
     return job
 
 
+def git_archive(repo: Path, code_sha: str) -> bytes:
+    """The `git archive` of `code_sha`, limited to `CODE_PATHS`. Deterministic for a given
+    commit and git version, so a rebuild can be compared byte for byte."""
+    git = shutil.which("git")
+    if git is None:
+        raise BundleRefused("git is not on PATH")
+    argv = [git, "-C", str(repo), "archive", "--format=tar", code_sha, "--", *CODE_PATHS]
+    done = subprocess.run(argv, capture_output=True)
+    if done.returncode != 0:
+        tail = done.stderr.decode(errors="replace").strip()[-500:]
+        raise BundleRefused(f"git archive of {code_sha} failed: {tail}")
+    return done.stdout
+
+
 def build_bundle(job: JobSpec, *, repo: Path, out: Path) -> Path:
     """Write the bundle into the empty directory `out`, scan it and return its job path.
     A refused bundle is removed."""
@@ -163,14 +182,7 @@ def build_bundle(job: JobSpec, *, repo: Path, out: Path) -> Path:
     data = Path(job.dataset_path).read_bytes()
     if sha256_ref(data) != job.dataset_hash:
         raise BundleRefused("the dataset export does not match the job's dataset_hash")
-    git = shutil.which("git")
-    if git is None:
-        raise BundleRefused("git is not on PATH")
-    code = subprocess.run(
-        [git, "-C", str(repo), "archive", "--format=tar", job.code_sha, "--", *CODE_PATHS],
-        capture_output=True,
-        check=True,
-    ).stdout
+    code = git_archive(repo, job.code_sha)
     out.mkdir(parents=True, exist_ok=True)
     try:
         (out / DATASET).write_bytes(data)

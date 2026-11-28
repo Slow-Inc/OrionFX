@@ -1,18 +1,22 @@
 """Colab runner for M04 training jobs (#134; PRD #120 slice 7).
 
     uv run python -m app.learning.colab_runner bundle <spec.json> <bundle_dir>
-    uv run python -m app.learning.colab_runner run <bundle_dir>/job.json [--db ...]
+    uv run python -m app.learning.colab_runner run <bundle_dir>/job.json [--repo . --db ...]
 
 `run` order, and what each guard protects:
-1. `scan_bundle` again (nothing unscanned leaves the machine), and refuse a model version
-   that is already registered or already on disk (no VM spend for an unregistrable run).
+1. `scan_bundle` again (nothing unscanned leaves the machine); refuse a `code.tar` that is
+   not byte-identical to a fresh `git archive` of `code_sha` (the manifest is bound to that
+   commit); refuse a model version that is already registered or already on disk (no VM
+   spend for an unregistrable run).
 2. Compute-unit guard: `colab usage` must parse and show at least `--min-cu` (default
    20). A refusal here is the stop condition to report to the owner.
 3. On a fresh CPU high-mem VM: upload the bundle as one tar, run `colab_vm` (pinned uv,
    locked deps, the job's entrypoint), download the run log and the output tar. One hard
    deadline (`JobSpec.timeout_s`) bounds every step.
 4. `colab stop` always: in a `finally`, which SIGINT/SIGTERM/SIGBREAK also reach
-   (the handler raises `RunInterrupted`). A failed stop raises `VmStopFailed`.
+   (the handler raises `RunInterrupted`). A failed stop raises `VmStopFailed` once `new`
+   has completed. If `new` itself failed, its error is kept and carries the stop failure
+   as a note (a VM may still have been assigned).
 5. Local verification, after the VM is gone: exactly the return files, every sha256
    matching the manifest, the manifest bound to this job, the card a valid `ModelCard`
    for this job naming the weights' hash, the weights plain JSON (never pickle).
@@ -50,8 +54,11 @@ from app.core.contracts import sha256_ref
 from app.learning import colab_vm as vm
 from app.learning.colab_job import (
     BUNDLE_FILES,
+    CODE,
+    BundleRefused,
     JobSpec,
     build_bundle,
+    git_archive,
     known_secret_values,
     scan_bundle,
 )
@@ -238,6 +245,7 @@ class ColabRunner:
         *,
         artifacts: Path,
         work: Path,
+        archive: Callable[[str], bytes],
         min_cu: Decimal = MIN_CU,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -245,6 +253,7 @@ class ColabRunner:
         self._registry = registry
         self._artifacts = artifacts
         self._work = work
+        self._archive = archive
         self._min_cu = min_cu
         self._clock = clock
 
@@ -252,6 +261,8 @@ class ColabRunner:
         start = self._clock()
         bundle = job_path.parent
         job = scan_bundle(bundle, known_secrets=known_secret_values())
+        if (bundle / CODE).read_bytes() != self._archive(job.code_sha):
+            raise BundleRefused(f"{CODE} is not the git archive of code_sha {job.code_sha}")
         target = self._artifacts / job.model_id / job.model_version
         registered = self._registry.get("model", job.model_id, job.model_version)
         if target.exists() or registered is not None:
@@ -287,9 +298,12 @@ class ColabRunner:
             return remaining
 
         stopping = False
+        started = False
+        primary: BaseException | None = None
         with _signals_raise(lambda: stopping):
             try:
                 self._port.new(session, timeout=left())
+                started = True
                 self._port.upload(session, run_dir / "bundle.tar", vm.REMOTE_BUNDLE,
                                   timeout=left())  # fmt: skip
                 try:
@@ -297,20 +311,27 @@ class ColabRunner:
                     (run_dir / "exec.log").write_text(log, encoding="utf-8")
                 finally:
                     if deadline > self._clock():  # best effort: evidence, never verified
-                        with suppress(ColabError):
+                        with suppress(ColabError, RunTimeout):
                             self._port.download(session, vm.REMOTE_LOG, run_dir / "run.log",
                                                 timeout=left())  # fmt: skip
                 self._port.download(session, vm.REMOTE_OUT, run_dir / "out.tar", timeout=left())
+            except BaseException as exc:
+                primary = exc
+                raise
             finally:
                 stopping = True
                 try:
                     self._port.stop(session, timeout=STOP_TIMEOUT_S)
-                except Exception as exc:
-                    raise VmStopFailed(
+                except Exception as stop_error:
+                    hint = (
                         f"colab stop failed for {session}; the VM may still be billing:"
                         f" check `colab sessions` and run"
                         f" `colab --config {self._work / STATE_FILE} stop -s {session}`"
-                    ) from exc
+                    )
+                    if started or primary is None:
+                        raise VmStopFailed(hint) from stop_error
+                    # `new` never completed: keep its error (the real cause), with the hint.
+                    primary.add_note(f"{hint} ({stop_error})")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -322,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--repo", type=Path, default=Path("."))
     r = sub.add_parser("run", help="run a bundled job on Colab and register its artifact")
     r.add_argument("job", type=Path)
+    r.add_argument("--repo", type=Path, default=Path("."))
     r.add_argument("--db", type=Path, default=Path("data/orionfx.db"))
     r.add_argument("--artifacts", type=Path, default=Path("models"))
     r.add_argument("--work", type=Path, default=Path("data/colab_runs"))
@@ -339,13 +361,14 @@ def main(argv: list[str] | None = None) -> int:
     migrate(conn)
     cli = ColabCli(state=args.work / STATE_FILE)
     runner = ColabRunner(cli, ArtifactRegistry(conn), artifacts=args.artifacts,
-                         work=args.work, min_cu=args.min_cu)  # fmt: skip
+                         work=args.work, archive=lambda sha: git_archive(args.repo, sha),
+                         min_cu=args.min_cu)  # fmt: skip
     try:
         result = runner.run(args.job)
     except CuFloorRefused as exc:
         print(f"REFUSED (stop and report to the owner): {exc}", file=sys.stderr)
         return 3
-    except (RunRefused, ReturnRefused) as exc:
+    except (RunRefused, ReturnRefused, BundleRefused) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2
     finally:

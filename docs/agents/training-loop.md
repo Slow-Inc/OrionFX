@@ -64,12 +64,12 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 
 ## 4a. Runbook: a training job on Colab [built #134]
 
-**Run it.** The job spec is a `JobSpec` JSON (`app/learning/colab_job.py`). It holds the protocol hash, the config, the local export path and its `content_hash`, the 40-hex code SHA, the seeds, the entrypoint, the model id and version, and `timeout_s`.
+**Run it.** The job spec is a `JobSpec` JSON (`app/learning/colab_job.py`). It holds the protocol hash, the config, the local export path and its `dataset_hash`, the 40-hex code SHA, the seeds, the entrypoint, the model id and version, and `timeout_s`.
 
 ```
 uv run python -m app.learning.colab_runner bundle spec.json data/bundles/<job>   # scanned bundle
 uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json \
-    [--db data/orionfx.db] [--artifacts models] [--work data/colab_runs] [--min-cu 20]
+    [--repo .] [--db data/orionfx.db] [--artifacts models] [--work data/colab_runs] [--min-cu 20]
 ```
 
 - `bundle` writes three files and nothing else:
@@ -78,17 +78,18 @@ uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json \
   - `code.tar`, a `git archive` of the code SHA limited to `backend/app`, `pyproject.toml` and `uv.lock`. The SHA must be committed.
 - `run` steps:
   1. Re-scans the bundle.
-  2. Refuses a model version that is already registered.
-  3. Refuses when `colab usage` cannot be read, or shows less than `--min-cu`. **Exit 3 is the CU-floor stop condition: report it to the owner, do not lower the floor on your own.**
-  4. Starts a CPU high-mem VM. The driver (`colab_vm.py`) installs the locked deps with a pinned uv and runs the entrypoint.
-  5. Downloads the output tar and the run log, then always runs `colab stop`. A `finally` runs it, and SIGINT, SIGTERM and SIGBREAK lead into that `finally`.
-  6. Verifies the return locally, then registers it.
+  2. Refuses a `code.tar` that is not byte-identical to a fresh `git archive` of the job's code SHA, taken from `--repo`. The returned manifest is bound to that SHA, so this check proves the attribution. A different git version could change the archive bytes; that case is a refusal, never a pass.
+  3. Refuses a model version that is already registered, or whose `models/<id>/<version>/` directory already exists.
+  4. Refuses when `colab usage` cannot be read, or shows less than `--min-cu`. **Exit 3 is the CU-floor stop condition: report it to the owner, do not lower the floor on your own.** Any other refusal (a bundle refused at steps 1–3, or a return refused at step 7) exits 2 with `REFUSED: ...`.
+  5. Starts a CPU high-mem VM. The driver (`colab_vm.py`) installs the locked deps with a pinned uv and runs the entrypoint.
+  6. Downloads the output tar and the run log, then always runs `colab stop`. A `finally` runs it, and SIGINT, SIGTERM and SIGBREAK lead into that `finally`. The stop is attempted even when `colab new` failed, because a late failure can still have assigned a VM. If that stop also fails, the `new` error is raised (the real cause), with the recovery command attached as a note.
+  7. Verifies the return locally, then registers it.
 - **Hard timeout:** `timeout_s` bounds the whole remote run.
-- **Verification:** the return must be exactly `manifest.json`, `card.json` and `weights.json`. Every sha256 must match the manifest. The manifest must echo the job's protocol hash, code SHA, dataset hash and seeds. The card must be a valid `ModelCard` for this job, naming the weights' hash. The weights stay JSON or native text, never pickle.
+- **Verification:** the return must be exactly `manifest.json`, `card.json` and `weights.json`. Every sha256 must match the manifest. The manifest must echo the job's protocol hash, code SHA, dataset hash and seeds. The card must be a valid `ModelCard` for this job, naming the weights' hash. The weights must be JSON (a native model file is not accepted yet), and are never unpickled.
 - **What happens on success:** the files are copied to `models/<id>/<version>/`. The card's manifest goes into `ArtifactRegistry` last. Any failure before that registers nothing. Registration grants no eligibility.
 - **Recovery after a hard kill** (which cannot be caught): run `colab sessions`, then `colab --config <work>/colab-state.json stop -s <session>`. The runner records its sessions in that state file, not in the default one. A `VmStopFailed` error means the VM may still be billing.
 - Point smoke runs at a scratch `--db`: the registry is append-only.
-- **Smoke evidence (2026-11-28, agent-run, stub trainer, scratch DB).** Commit `88d8e4d` ran with `timeout_s` 900. The VM showed 8 CPUs, `MemTotal` 53467180 kB and Python 3.13.18. Locked deps were installed with uv 0.11.16. The return was verified and registered. Wall time was 38.9 s inside the runner and 44 s end to end; an earlier run was 53 s. The balance read 136.64 CU before and after: `colab usage` shows two decimals, so the spend was below 0.01 CU. Afterwards, `colab sessions` reported "No active sessions found on server", with `Active assignments: 0`. `--min-cu 1000` was refused with exit 3, and no VM started. A real hard-timeout run (`24eea01`, `timeout_s` 25) killed `colab exec` at the deadline, exited non-zero after 32 s in total, registered nothing and left no session. This proves the plumbing only. It is not a model result.
+- **Smoke evidence (2026-11-28, agent-run, stub trainer, scratch DB).** Commit `88d8e4d` ran with `timeout_s` 900. The VM showed 8 CPUs, `MemTotal` 53467180 kB and Python 3.13.18. Locked deps were installed with uv 0.11.16. The return was verified and registered. Wall time was 38.9 s inside the runner and 44 s end to end; an earlier run was 53 s. The balance read 136.64 CU before and after: `colab usage` shows two decimals, so the spend was below 0.01 CU. Afterwards, `colab sessions` reported "No active sessions found on server", with `Active assignments: 0`. `--min-cu 1000` was refused with exit 3, and no VM started. A real hard-timeout run (`24eea01`, `timeout_s` 25) killed `colab exec` at the deadline, exited non-zero after 32 s in total, registered nothing and left no session. This proves the plumbing only. It is not a model result. The review fixes made after `0ce391c` are unit-tested only and have not run on Colab: the code-pin check, the `--repo` flag, exit 2 for a refused bundle, and the error kept when `new` fails.
 
 **What never goes onto the VM** (enforced by `scan_bundle`, which is tested on a bundle built from HEAD):
 - `.env` files;
@@ -97,7 +98,8 @@ uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json \
 - key-like strings (private keys, AWS, GitHub, OpenAI/Anthropic-style, Google, Slack and Telegram tokens);
 - the value of any secret-named local environment variable;
 - config keys that look like secrets;
-- tests, frontend, docs, data, `.claude`, and any path outside the code allow-list.
+- tests, frontend, docs, data, `.claude`, and any path outside the code allow-list;
+- links, special files, and member paths that are absolute or contain `..`.
 
 The VM gets no broker, LLM or GitHub credentials. `--env` is never used, so no local environment is forwarded.
 
