@@ -31,10 +31,12 @@ closures do not count toward it). A run of at most the source's limit is filled:
 minute becomes a flat bar at the previous close with volume 0 and no spread, marked
 `filled`, and a resampled bar made only of filled minutes carries `NO_TRADE`. So it is
 neither a GAP nor a missing bar for labels. A longer run is a real gap. A run with no bar
-after it in the range is not filled: nothing says trading resumed. To fill the start of
-the range exactly as a one-pass import would, the source is read from `MAX_CLOSED` plus
-the limit before it; those earlier rows only seed the fill. The report lists the length
-of every filled run, so the limit can be checked against the data. A source with no
+after it in the range is not filled: nothing says trading resumed. So extending a range
+that ended inside a run rebuilds a stored bar differently, and the store refuses it
+(`CandleConflict`): import the longer range as a new dataset version. To fill the start
+of the range exactly as a one-pass import would, the source is read from `MAX_CLOSED`
+plus the limit before it; those earlier rows only seed the fill. The report lists the
+length of every filled run (runs over the limit show up only as gaps). A source with no
 entry is never filled.
 
 Chunks: the source is read once, in order, and split into chunks aligned to H1 bars, one

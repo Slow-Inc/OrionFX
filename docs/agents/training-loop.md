@@ -48,7 +48,8 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
   - Ratio-adjusted history is rescaled at every new roll, so a later download is a **new dataset version**, never an append.
   - Volume is contracts traded, not tick volume: normalise or exclude it per data source (#129).
   - No holiday calendar: CME holidays and early closes are reported as real gaps.
-  - Before the first training run, check the import report: no bars in closed time, the unexpected gaps, and the filled-run lengths against the 15-minute limit.
+  - Before the first training run, check the import report (no bars in closed time, the unexpected gaps, the filled-run lengths) and the raw minute gaps against the 15-minute limit.
+  - Price-unit quantities (the raw outcome `move`, a fixed spread or slippage buffer) are scaled by the cumulative roll factor in older history: express them in ATR or percent terms (#129).
 - News features are only `news.assessment` rows recorded live. The LLM never re-interprets past news, because of look-ahead through its training cutoff.
 
 ## 3. Labels and features for training

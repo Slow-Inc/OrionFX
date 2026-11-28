@@ -14,12 +14,15 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.core.enums import QualityFlag, Timeframe
+from app.learning.bars import Horizon, Provenance
 from app.market_data.firstrate import FirstRateGcSource
 from app.market_data.history import ImportReport, import_history
 from app.market_data.rolls import Roll, RollConflict, RollLog, read_rolls
 from app.market_data.session import CME_GLOBEX_GC
 from app.market_data.sources import NO_TRADE_FILL, SourceRegistry, UnknownSource
-from app.market_data.store import CandleStore
+from app.market_data.store import CandleConflict, CandleStore
+from app.market_data.techniques.indicators import make_library, observe
+from app.runtime.market_recorder import MarketRecorder
 
 D = Decimal
 ET = ZoneInfo("America/New_York")
@@ -231,6 +234,52 @@ def test_a_run_with_no_trade_after_it_in_the_range_is_not_filled(
     report = _import(conn, _write(tmp_path / NAME, starts), end=WED.replace(hour=21))
     assert report.filled_runs == []
     assert max(b.open_time for b in _stored(conn, Timeframe.M5)) == _et("2026-01-07 15:45")
+
+
+def test_extending_a_range_that_ended_inside_a_no_trade_run_is_refused(
+    conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """The first import ends inside the 15:50-15:59 run, so its tail is a gap. A later,
+    longer range would fill it and rebuild a stored bar differently: the store refuses
+    (fail-closed). Import a new dataset version instead."""
+    quiet = (_et("2026-01-07 15:50"), _et("2026-01-07 16:00"))
+    path = _write(tmp_path / NAME, _minutes(WED.replace(hour=20), WED.replace(hour=22),
+                                            skip=[quiet]))  # fmt: skip
+    _import(conn, path, end=WED.replace(hour=21))
+    (h1,) = _stored(conn, Timeframe.H1)
+    assert h1.quality_flags == [QualityFlag.GAP.value]
+    with pytest.raises(CandleConflict):
+        _import(conn, path, end=WED.replace(hour=22))
+
+
+def test_filled_bars_are_labelled_and_keep_technique_windows_whole(
+    conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """The point of the rule: a horizon ending on a NO_TRADE bar is labelled (no
+    MISSING_BAR), and a window over it has no GAP_IN_WINDOW. A 16-minute hole is the
+    control: it stays a gap for both. The hole lies before the newest H1 bar (the label
+    frontier), and the ATR window (16 M5 bars) ends at 15:20 ET so that it spans it."""
+    for minutes, version in ((15, "short"), (16, "long")):
+        quiet = (_et("2026-01-07 14:28"), _et("2026-01-07 14:28") + minutes * M1)
+        path = _write(tmp_path / f"{version}_{NAME}", _minutes(
+            WED.replace(hour=19), WED.replace(hour=21), skip=[quiet]))  # fmt: skip
+        _import(conn, path, start=WED.replace(hour=19), end=WED.replace(hour=21),
+                dataset_version=version)  # fmt: skip
+        candles = CandleStore(conn, dataset_version=version)
+        MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=Timeframe.M5,
+                       context_timeframes=[], horizons=[Horizon(Timeframe.M5, 1)],
+                       provenance=Provenance.BACKFILL, clock=lambda: LATER).tick()  # fmt: skip
+        sql = "SELECT COUNT(*) FROM learning_unlabellable WHERE dataset_version = ?"
+        unlabellable = conn.execute(sql, (version,)).fetchone()[0]
+        bars = [b for b in candles.bars("XAUUSD", Timeframe.M5, as_of=LATER)
+                if b.open_time <= _et("2026-01-07 15:20")]  # fmt: skip
+        atr = make_library(atr_n=3)["atr_3"]
+        obs = observe(atr, bars, bars[-1].available_at, session=CME_GLOBEX_GC)
+        gap_in_window = QualityFlag.GAP_IN_WINDOW in obs.quality_flags
+        if version == "short":
+            assert unlabellable == 0 and not gap_in_window and "atr" in obs.values
+        else:
+            assert unlabellable > 0 and gap_in_window
 
 
 def test_rows_before_the_range_only_seed_the_fill(conn: sqlite3.Connection, tmp_path: Path) -> None:
