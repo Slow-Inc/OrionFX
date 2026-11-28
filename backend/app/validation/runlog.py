@@ -13,10 +13,17 @@ single-use holdout, and errata (#132; PRD #120; training-loop.md §6 rules 1, 4,
   - `aa` (seed-only rerun, for the noise floor) and `bugfix-rerun` (with a bug note and
     the fix's commit SHA) are logged but never counted, and only for a config hash that
     is already counted, so relabelling cannot sneak a new config past the budget.
+  - An `aa` run must use a seed set no earlier run of its config used
+    (`SeedsNotChanged`): a repeated draw has no seed variance and would shrink the A/A
+    floor. A `bugfix-rerun` may keep the seeds.
   - A `config_id` names one `config_hash` within a protocol, and the other way round.
 - **The holdout opens once** per protocol (`open_holdout`), for a counted config whose
   current result (its latest `ok` or `bugfix-rerun` run) carries no erratum. After that it
   is consumed: development data, and no new config counts.
+- **An opened window stays read across versions** (training-loop.md §6 rule 1): a new
+  protocol whose holdout or unread slice overlaps a holdout already opened under any
+  version is refused at `register`, and a holdout that overlaps one another version
+  opened cannot be opened. It may still serve a later version as debug data.
 - **Retention:** nothing is updated or deleted (database triggers). Errata mark a run
   with a state, a reason and a time. They never refund budget: N counts what was tried.
 """
@@ -33,7 +40,13 @@ from app.core.contracts import ContractModel
 from app.core.time import Clock, utc_now
 from app.storage.audit import audit
 from app.storage.db import transaction
-from app.validation.protocol import Protocol, canonical_json, load_protocol, protocol_hash
+from app.validation.protocol import (
+    Protocol,
+    ProtocolWindow,
+    canonical_json,
+    load_protocol,
+    protocol_hash,
+)
 
 SHA = r"^[0-9a-f]{7,40}$"
 
@@ -84,6 +97,10 @@ class HoldoutConsumed(ProtocolRefusal):
     """The holdout was opened: it cannot be opened again, and no new config counts."""
 
 
+class SeedsNotChanged(ProtocolRefusal):
+    """An A/A run repeats a seed set its config already ran with."""
+
+
 class RunRecord(ContractModel):
     protocol_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     config_id: StrictStr = Field(min_length=1)
@@ -93,6 +110,8 @@ class RunRecord(ContractModel):
     dataset_version: StrictStr = Field(min_length=1)
     seeds: list[int] = Field(min_length=1)
     metrics: dict[str, float]
+    """Research scalars for the claim statistics, float by design like `claimstats`.
+    Nothing on a money path reads them; amounts of record stay Decimal elsewhere."""
     status: RunStatus
     bug_note: StrictStr | None = Field(default=None, min_length=1)
     """Links the bug a `bugfix-rerun` fixes, e.g. an issue reference."""
@@ -148,6 +167,13 @@ class RunLog:
                 if row[0] != digest:
                     raise ValueError(f"protocol {protocol.version} is immutable: use a new version")
                 return digest
+            unread = [w for w in (protocol.holdout, protocol.unread_slice) if w]
+            for version, opened in self._opened_holdouts():
+                if any(w.overlaps(opened) for w in unread):
+                    raise HoldoutConsumed(
+                        f"{protocol.version} reuses the holdout {version} opened: it is"
+                        " development data now, so the claim needs fresh forward data"
+                    )
             self._conn.execute(
                 "INSERT INTO claim_protocols (protocol_hash, version, body, registered_at)"
                 " VALUES (?, ?, ?, ?)",
@@ -193,6 +219,8 @@ class RunLog:
                     raise BudgetExhausted(f"budget {protocol.budget} spent: stop and report")
             elif run.config_hash not in counted:
                 raise NotCounted(f"a {run.status} run needs a counted config {run.config_id}")
+            elif run.status is RunStatus.AA and set(run.seeds) in self._seed_sets(run):
+                raise SeedsNotChanged(f"an A/A run of {run.config_id} must change the seeds")
             cur = self._conn.execute(
                 "INSERT INTO claim_runs (protocol_hash, config_id, config_hash, status, body,"
                 " recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -218,6 +246,13 @@ class RunLog:
             raise ConfigIdConflict(
                 f"{run.config_id}/{run.config_hash} clashes with {clash[0]}/{clash[1]}"
             )
+
+    def _seed_sets(self, run: RunRecord) -> list[set[int]]:
+        rows = self._conn.execute(
+            "SELECT body FROM claim_runs WHERE protocol_hash = ? AND config_hash = ?",
+            (run.protocol_hash, run.config_hash),
+        ).fetchall()
+        return [set(RunRecord.model_validate_json(r[0]).seeds) for r in rows]
 
     def _counted_hashes(self, digest: str) -> set[str]:
         rows = self._conn.execute(
@@ -263,9 +298,12 @@ class RunLog:
         current result (its latest `ok` or `bugfix-rerun` run) carries no erratum. An
         erratum on a superseded run does not block: that is what a bug-fix rerun is for."""
         with transaction(self._conn):
-            self._require(digest)
+            holdout = self._require(digest).holdout
             if self.holdout_consumed(digest):
                 raise HoldoutConsumed(f"the holdout of {digest} was already opened")
+            for version, opened in self._opened_holdouts():
+                if holdout.overlaps(opened):
+                    raise HoldoutConsumed(f"this holdout overlaps the one {version} opened")
             latest = self._conn.execute(
                 "SELECT run_id, EXISTS (SELECT 1 FROM claim_run_errata e"
                 "   WHERE e.run_id = claim_runs.run_id) FROM claim_runs"
@@ -290,6 +328,15 @@ class RunLog:
                 detail=f"{digest} for {config_id}",
             )
         return HoldoutOpening(digest, config_id, datetime.fromisoformat(opened_at))
+
+    def _opened_holdouts(self) -> list[tuple[str, ProtocolWindow]]:
+        """(version, holdout) for every holdout opened under any protocol."""
+        rows = self._conn.execute(
+            "SELECT p.protocol_hash, p.body FROM claim_holdout_openings o"
+            " JOIN claim_protocols p USING (protocol_hash)"
+        ).fetchall()
+        opened = [load_protocol(body, digest) for digest, body in rows]
+        return [(p.version, p.holdout) for p in opened]
 
     def holdout_consumed(self, digest: str) -> bool:
         return (

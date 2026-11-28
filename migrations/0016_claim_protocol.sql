@@ -2,7 +2,8 @@
 -- (0016: 0014_candle_sources.sql and 0015_candle_rolls.sql are taken on the #128 branch.)
 -- Protocols are frozen by content hash. Every run is kept, including failures, A/A and
 -- bug-fix reruns; errata mark a run without removing it. The holdout opens once per
--- protocol (the primary key). Nothing here is ever updated or deleted.
+-- protocol (the primary key); RunLog also refuses a window another version opened.
+-- Nothing here is ever updated or deleted.
 CREATE TABLE claim_protocols (
     protocol_hash TEXT PRIMARY KEY,
     version       TEXT NOT NULL UNIQUE,

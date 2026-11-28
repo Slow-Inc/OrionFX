@@ -4,6 +4,7 @@ checked against a closed form or a textbook value, or by simulation with a fixed
 import math
 import random
 import statistics
+from collections.abc import Callable
 
 import pytest
 
@@ -37,7 +38,8 @@ from app.validation.claimstats import (
 
 
 def test_bootstrap_is_reproducible_with_a_seed() -> None:
-    xs = [random.Random(1).gauss(0, 1) for _ in range(50)]
+    rng = random.Random(1)
+    xs = [rng.gauss(0, 1) for _ in range(50)]
     a = mean_ci(xs, block=5, resamples=500, seed=7)
     b = mean_ci(xs, block=5, resamples=500, seed=7)
     assert a == b
@@ -70,7 +72,8 @@ def test_blocks_widen_the_interval_for_autocorrelated_days() -> None:
 
 
 def test_a_one_sided_bound_has_no_upper_limit() -> None:
-    xs = [random.Random(8).gauss(1, 1) for _ in range(100)]
+    rng = random.Random(8)
+    xs = [rng.gauss(1, 1) for _ in range(100)]
     two = mean_ci(xs, block=5, resamples=1000, seed=9, level=0.90)
     one = mean_ci(xs, block=5, resamples=1000, seed=9, level=0.95, one_sided=True)
     assert one.high == math.inf
@@ -354,3 +357,23 @@ def test_best_of_n_below_the_floor_is_unconfirmed_and_n_cannot_be_understated() 
     assert not result.confirmed
     with pytest.raises(ValueError):
         best_of_n({"A": 0.1, "B": 0.2}, baseline=0.0, n_trials=1, noise_floor=0.0)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: expected_max_sharpe(0, 1.0),
+        lambda: expected_max_sharpe(5, -0.1),
+        lambda: probabilistic_sharpe(0.1, 0.0, t=1, skew=0.0, kurt=3.0),
+        lambda: probabilistic_sharpe(1.0, 0.0, t=100, skew=5.0, kurt=3.0),  # SR variance <= 0
+        lambda: mean_lb_power(0.1, 1.0, 1, seed=1),
+        lambda: mean_lb_power(0.1, 0.0, 30, seed=1),
+        lambda: ece_noise_floor_consistency([[0.5, 0.5]] * 4, n_resamples=0, seed=1),
+        lambda: simulated_power(lambda rng: rng.random(), lambda x: x > 0.5, sims=0, seed=1),
+        lambda: pbo_cscv([[1.0, 2.0], [1.0]] * 4, splits=2),  # not rectangular
+        lambda: pbo_cscv([[1.0, 2.0]] * 8, splits=0),
+    ],
+)
+def test_guards_refuse_bad_parameters(call: Callable[[], object]) -> None:
+    with pytest.raises(ValueError):
+        call()

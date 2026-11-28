@@ -16,36 +16,58 @@ PRIOR = (0.5, 0.25, 0.25)  # Brier 0.25+0.0625+0.0625 = 0.375 and 0.25+0.0625+0.
 
 def test_recompute_by_hand() -> None:
     got = recompute(PREDS, prior=PRIOR)
-    assert got["brier"] == pytest.approx(0.46)
-    assert got["accuracy"] == pytest.approx(0.5)
+    assert got["brier_multiclass"] == pytest.approx(0.46)
+    assert got["top_label_accuracy"] == pytest.approx(0.5)
     assert got["log_loss"] == pytest.approx(-(math.log(0.7) + math.log(0.3)) / 2)
-    assert got["brier_skill"] == pytest.approx(1 - 0.92 / 1.25)
+    assert got["brier_skill_multiclass"] == pytest.approx(1 - 0.92 / 1.25)
 
 
 def test_without_a_prior_there_is_no_brier_skill() -> None:
-    assert "brier_skill" not in recompute(PREDS)
+    assert "brier_skill_multiclass" not in recompute(PREDS)
+
+
+def test_a_prior_that_scores_perfectly_leaves_brier_skill_undefined() -> None:
+    perfect = [Prediction((0.7, 0.2, 0.1), 0), Prediction((0.6, 0.3, 0.1), 0)]
+    assert "brier_skill_multiclass" not in recompute(perfect, prior=(1.0, 0.0, 0.0))
+
+
+def test_a_zero_true_class_probability_gives_infinite_log_loss() -> None:
+    wrong = [Prediction((1.0, 0.0, 0.0), 1)]
+    assert recompute(wrong)["log_loss"] == math.inf
+    assert recheck(wrong, {"log_loss": math.inf}).ok  # inf - inf is nan, not a mismatch
+    assert not recheck(wrong, {"log_loss": 2.0}).ok
 
 
 def test_matching_logged_metrics_pass() -> None:
-    result = recheck(PREDS, {"brier": 0.46, "accuracy": 0.5, "expectancy": 1.2}, prior=PRIOR)
+    logged = {"brier_multiclass": 0.46, "top_label_accuracy": 0.5, "trade_count": 12.0}
+    result = recheck(PREDS, logged, prior=PRIOR)
     assert result.ok
-    assert result.checked == ["accuracy", "brier"]
-    assert result.unchecked == ["expectancy"]
+    assert result.checked == ["brier_multiclass", "top_label_accuracy"]
+    assert result.unchecked == ["trade_count"]
+
+
+def test_other_scorers_metric_names_are_never_compared() -> None:
+    """`metrics.brier` (binary, the card's `brier`) and `metrics.direction_accuracy`
+    (skips NEUTRAL) are other definitions: they land in `unchecked`, never in a match."""
+    result = recheck(PREDS, {"brier": 0.1, "direction_accuracy": 1.0})
+    assert result.checked == []
+    assert result.unchecked == ["brier", "direction_accuracy"]
+    assert not result.ok
 
 
 def test_a_mismatch_is_flagged() -> None:
-    result = recheck(PREDS, {"brier": 0.40, "accuracy": 0.5})
+    result = recheck(PREDS, {"brier_multiclass": 0.40, "top_label_accuracy": 0.5})
     assert not result.ok
-    assert result.mismatches == {"brier": (0.40, pytest.approx(0.46))}
+    assert result.mismatches == {"brier_multiclass": (0.40, pytest.approx(0.46))}
 
 
 def test_the_tolerance_is_absolute() -> None:
-    assert recheck(PREDS, {"brier": 0.4601}, tolerance=1e-3).ok
-    assert not recheck(PREDS, {"brier": 0.4601}, tolerance=1e-5).ok
+    assert recheck(PREDS, {"brier_multiclass": 0.4601}, tolerance=1e-3).ok
+    assert not recheck(PREDS, {"brier_multiclass": 0.4601}, tolerance=1e-5).ok
 
 
 def test_nothing_checked_is_not_ok() -> None:
-    assert not recheck(PREDS, {"expectancy": 1.0}).ok
+    assert not recheck(PREDS, {"trade_count": 1.0}).ok
 
 
 def test_bad_outputs_are_refused() -> None:

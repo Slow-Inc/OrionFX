@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 from tests.unit.validation.test_protocol import make_protocol
 
-from app.validation.protocol import protocol_hash
+from app.validation.protocol import ProtocolWindow, protocol_hash
 from app.validation.runlog import (
     AlreadyCounted,
     BudgetExhausted,
@@ -21,6 +21,7 @@ from app.validation.runlog import (
     RunLog,
     RunRecord,
     RunStatus,
+    SeedsNotChanged,
     UnknownProtocol,
 )
 
@@ -136,6 +137,22 @@ def test_exempt_reruns_still_log_at_full_budget(log: RunLog, ph: str) -> None:
     assert log.counted_configs(ph) == 3
 
 
+def test_an_aa_run_must_change_the_seeds(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0", seeds=[1, 2, 3]))
+    with pytest.raises(SeedsNotChanged):
+        log.record(run(ph, "B0", RunStatus.AA, seeds=[3, 2, 1]))
+    log.record(run(ph, "B0", RunStatus.AA, seeds=[4]))
+    with pytest.raises(SeedsNotChanged):
+        log.record(run(ph, "B0", RunStatus.AA, seeds=[4]))  # a repeated A/A draw too
+    assert [r.record.status for r in log.runs(ph)] == [RunStatus.OK, RunStatus.AA]
+
+
+def test_a_bugfix_rerun_may_keep_the_seeds(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0", seeds=[1, 2, 3]))
+    log.record(bugfix(ph, "B0"))  # same seeds: the fix, not the seed, is what changed
+    assert len(log.runs(ph)) == 2
+
+
 def test_an_exempt_status_cannot_smuggle_in_a_new_config(log: RunLog, ph: str) -> None:
     with pytest.raises(NotCounted):
         log.record(run(ph, "B0", RunStatus.AA))
@@ -230,6 +247,48 @@ def test_the_holdout_needs_a_registered_protocol(log: RunLog) -> None:
         log.open_holdout("f" * 64, "B0")
 
 
+def _window(start: int, end: int) -> ProtocolWindow:
+    return ProtocolWindow(
+        start=datetime(start, 1, 1, tzinfo=UTC), end=datetime(end, 1, 1, tzinfo=UTC)
+    )
+
+
+def test_a_later_version_cannot_reuse_an_opened_holdout(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")  # the fixture holdout is [2005, 2006)
+    with pytest.raises(HoldoutConsumed):
+        log.register(make_protocol(version="v2", holdout=_window(2005, 2007)))
+    with pytest.raises(HoldoutConsumed):  # an opened window cannot be unread either
+        log.register(
+            make_protocol(
+                version="v3", unread_slice=_window(2005, 2006), holdout=_window(2007, 2008)
+            )
+        )
+
+
+def test_an_opened_holdout_may_become_a_later_debug_window(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")
+    later = make_protocol(
+        version="v2",
+        debug_window=_window(2000, 2006),
+        unread_slice=None,
+        holdout=_window(2007, 2008),
+    )
+    assert log.register(later) == protocol_hash(later)
+    assert log.register(make_protocol(budget=3)) == ph  # re-registering v1 stays idempotent
+
+
+def test_two_versions_registered_on_one_window_open_it_once(log: RunLog, ph: str) -> None:
+    other = log.register(make_protocol(version="v2"))  # same holdout, neither opened yet
+    log.record(run(ph, "B0"))
+    log.record(run(other, "B0"))
+    log.open_holdout(ph, "B0")
+    with pytest.raises(HoldoutConsumed):
+        log.open_holdout(other, "B0")
+    assert not log.holdout_consumed(other)
+
+
 def test_no_new_config_after_the_holdout_is_consumed(log: RunLog, ph: str) -> None:
     log.record(run(ph, "B0"))
     log.open_holdout(ph, "B0")
@@ -264,8 +323,11 @@ def test_an_erratum_needs_a_known_run_and_a_reason(log: RunLog, ph: str) -> None
         "DELETE FROM claim_runs",
         "UPDATE claim_runs SET status = 'aa'",
         "DELETE FROM claim_protocols",
+        "UPDATE claim_protocols SET body = '{}'",
         "DELETE FROM claim_holdout_openings",
+        "UPDATE claim_holdout_openings SET config_id = 'A1'",
         "DELETE FROM claim_run_errata",
+        "UPDATE claim_run_errata SET reason = 'rewritten'",
     ],
 )
 def test_nothing_is_ever_deleted_or_rewritten(
