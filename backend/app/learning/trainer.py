@@ -16,7 +16,8 @@ its card states.
   early-stopped booster is kept (no refit).
 - **Calibration**: one temperature, fitted by weighted log loss on the `validation` split,
   which the export already purged and which sits immediately before the test window,
-  through the adapter's own `calibrate`. Isotonic is not built: it needs an effective
+  through the adapter's own `calibrate`; a fit on the edge of its search range
+  is refused. Isotonic is not built: it needs an effective
   sample of about 10k in the calibration slice, which no slice has yet.
 - **Training cutoff**: the latest `available_at` of every label read (train and
   validation), so the engine refuses to score any snapshot at or before it.
@@ -217,16 +218,23 @@ def _inner_split(train: Examples, fraction: float) -> tuple[Examples, Examples]:
 def _fit_temperature(seed_probs: NDArray[np.float64], y: NDArray[np.int64],
                      w: NDArray[np.float64]) -> float:  # fmt: skip
     """The temperature minimising weighted log loss; the loss is convex in 1/T, so a
-    golden-section search over 1/T in [0.05, 20] finds it."""
+    golden-section search over 1/T in [0.05, 20] finds it. An optimum on either edge
+    means the model is anti-informative (or degenerate) on the calibration slice: no
+    calibration claim can be made, so training is refused."""
 
     def loss(beta: float) -> float:
         return log_loss(adapter.calibrate(seed_probs, 1 / beta), y, w)
 
-    lo, hi, g = 0.05, 20.0, (5**0.5 - 1) / 2
+    edges = lo, hi = 0.05, 20.0
+    g = (5**0.5 - 1) / 2
     for _ in range(50):
         a, b = hi - g * (hi - lo), lo + g * (hi - lo)
         lo, hi = (lo, b) if loss(a) < loss(b) else (a, hi)
-    return 2 / (lo + hi)
+    beta = (lo + hi) / 2
+    if min(abs(beta - e) for e in edges) < 1e-3:
+        raise ValueError(f"the temperature fit hit its search edge (T = {1 / beta:.3g}):"
+                         " the model does not calibrate on the validation split")  # fmt: skip
+    return 1 / beta
 
 
 def _dec(x: float) -> Decimal:

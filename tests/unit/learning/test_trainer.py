@@ -68,6 +68,14 @@ def test_the_temperature_is_fitted_and_is_not_one() -> None:
     assert float(_bundle(model)["temperature"]) == model.temperature
 
 
+def test_a_model_that_is_confidently_wrong_on_the_calibration_slice_is_refused() -> None:
+    """The temperature would run to its search edge: no calibrated claim is possible."""
+    wrong = np.tile([0.9, 0.05, 0.05], (1, 50, 1))
+    y = np.ones(50, dtype=np.int64)
+    with pytest.raises(ValueError, match="search edge"):
+        trainer._fit_temperature(wrong, y, np.ones(50))
+
+
 def test_the_training_cutoff_is_the_latest_label_read_in_train_or_validation() -> None:
     rows = training_rows.rows()
     known = [datetime.fromisoformat(r["barrier_labels"]["H1x1"]["available_at"]) for r in rows

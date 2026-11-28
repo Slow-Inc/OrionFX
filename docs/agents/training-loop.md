@@ -67,11 +67,11 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 ## 5. Evaluation tiers (always reported separately)
 
 1. **Model metrics per fold:**
-   - multiclass Brier skill;
-   - ECE;
+   - multiclass Brier skill against the train fold's class frequencies, log loss, per-class reliability and MDA feature importance [built #130, `app/learning/evaluation.py`];
+   - ECE: binned classwise [built #130]; the debiased estimator and where the gate applies [planned #132];
    - direction accuracy with a block-bootstrap 95% CI over trading days;
    - precision at high confidence, with coverage;
-   - per-regime buckets, each with `n`; thin buckets get no verdict. [planned #130/#132]
+   - per-regime buckets, each with `n`; thin buckets get no verdict. These last three: [planned #132]
 2. **System backtest.** `DecisionLoop`, M06 and `FakeBroker` run over stored bars on a fresh DB per run. The clock follows bar availability. The model's forecast reaches M05 through a **model-backed evidence provider** (`EvaluationEvidence`); the snapshot is passed in, not rebuilt ([built] #127). Reported:
    - expectancy after costs, PF, max DD and trade count;
    - open positions at fold end and refused trades, reported separately.
