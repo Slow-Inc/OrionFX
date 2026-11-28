@@ -289,7 +289,7 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 - It returns an **`EvaluationPredictor`**. This is a distinct type, so the `LoadedPredictor` gate is unchanged. Only `predict_for_evaluation` accepts it.
 - **Live paths refuse it:**
   - `predict` refuses it with its existing isinstance gate.
-  - `MarketRecorder` refuses any non-`LoadedPredictor` at construction, whatever the provenance. It used to drop such a model silently in `_predict`.
+  - `MarketRecorder` refuses any non-`LoadedPredictor` at construction, whatever the provenance. Before, such a model was refused per bar inside `_predict` (counted in `refused`), never at construction.
   - `DecisionLoop` refuses `EvaluationEvidence` at construction. Its evidence signature `(now)` also differs from replay's `(now, snapshot)`, so mypy rejects the mix.
 - **Limit:** a hand-written lambda that wraps an evaluation predictor defeats the runtime check. Only review catches that.
 

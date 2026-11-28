@@ -245,8 +245,7 @@ def test_the_card_is_trained_before_the_test_fold_and_calibrated_on_later_data(
 ) -> None:
     card = chain.card
     assert card.training_cutoff is not None
-    first_test_bar = TEST.start + timedelta(minutes=5)
-    assert VALIDATION.end - timedelta(hours=1) < card.training_cutoff < first_test_bar
+    assert VALIDATION.end - timedelta(hours=1) < card.training_cutoff < TEST.start
     assert card.calibrated and card.skill > 0
     assert {r["split"] for r in chain.rows} == {"development", "holdout"}
 

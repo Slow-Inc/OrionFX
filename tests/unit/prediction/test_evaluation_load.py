@@ -294,3 +294,18 @@ def test_an_adapter_that_builds_another_card_is_refused(
 def test_lookback_names_an_empty_library() -> None:
     with pytest.raises(ValueError, match="at least one technique"):
         lookback([])
+
+
+def test_predict_for_evaluation_takes_only_an_evaluation_predictor() -> None:
+    loaded = load_baseline(BASELINE, mode=Mode.SHADOW)
+    with pytest.raises(Refused, match="evaluation predictor"):
+        predict_for_evaluation(loaded, _snapshot(), now=NOW)  # type: ignore[arg-type]
+
+
+def test_pickled_weights_are_refused_even_when_pinned(conn: sqlite3.Connection) -> None:
+    pickled = b"\x80\x04\x95\x05\x00\x00\x00\x00\x00\x00\x00}\x94."  # pickle.dumps({})
+    card = _card(pickled, model_version="9")
+    reg = ArtifactRegistry(conn)
+    reg.register("model", card.manifest(), actor="m07")
+    with pytest.raises(Refused):
+        _evaluate(reg, card=card, weights=pickled)

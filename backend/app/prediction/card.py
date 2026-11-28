@@ -119,7 +119,9 @@ class ModelCard(ContractModel):
 
     @property
     def content_hash(self) -> str:
-        """sha256 of the card's canonical JSON."""
+        """sha256 of the card's canonical JSON, every field included: a field added to
+        `ModelCard` later changes the pin of every adapter card, so those cards must be
+        re-registered as new versions (a registered version is immutable)."""
         body = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
         return sha256_ref(body.encode())
 
