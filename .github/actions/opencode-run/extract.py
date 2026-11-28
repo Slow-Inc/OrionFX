@@ -44,7 +44,11 @@ def main(events_path: str, output_path: str) -> int:
     print(f"usage: input~{tokens_in} tokens, output~{tokens_out} tokens, cost ${cost:.4f}")
     for err in errors:
         print(f"::error::OpenCode error: {err}")
-    answer = "".join(messages[order[-1]]).strip() if order else ""
+    # The last message that has text: a run can end on a tool-only step.
+    texts = ["".join(messages[mid]).strip() for mid in order]
+    answer = next((t for t in reversed(texts) if t), "")
+    if answer and texts and not texts[-1]:
+        print("::warning::The last assistant message had no text; using the latest one that did.")
     if errors or not answer:
         if not answer:
             print("::error::OpenCode produced no final answer.")
