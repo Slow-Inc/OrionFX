@@ -539,6 +539,11 @@ class Autonomy:
     def _judge(self, policy: PromotionPolicy, s: Shadowing, mode: Mode,
                now: datetime) -> list[AutonomyRecord]:  # fmt: skip
         champion = self._life.champion(self._model_id)
+        if champion == s.version:  # crowned meanwhile (by the owner): its shadow is over
+            with transaction(self._conn):
+                a = s.admitted
+                return [self._record(Action.REJECT, s.version, a.protocol_hash, mode,
+                                     a.evidence_refs, ["ALREADY_CHAMPION"], {})]  # fmt: skip
         score = shadow_score(
             self._resolve(self._model_id, s.version, s.since, now),
             None if champion is None else self._resolve(self._model_id, champion, s.since, now),

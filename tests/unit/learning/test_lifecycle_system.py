@@ -186,6 +186,8 @@ def test_the_system_actor_never_replaces_an_owner_live_champion(
                  live_qualification_ref="x02:live-qualification:r7")  # fmt: skip
     with pytest.raises(LifecycleRefused, match="SHADOW and DEMO"):
         _promote(life, "2")
+    with pytest.raises(LifecycleRefused, match="SHADOW and DEMO"):
+        _promote(life, "1")  # re-promoting the Live champion itself would overwrite it
     assert life.champion("xgb-dir") == "1"
     rec = reg.eligibility("model", "xgb-dir@1")
     assert rec is not None and rec.approves(Mode.LIVE, now[0])

@@ -431,6 +431,23 @@ def test_a_candidate_that_does_not_beat_the_champion_is_rejected_for_good(w: Wor
     assert w.life.champion(MODEL) == "1"
 
 
+def test_a_candidate_the_owner_crowned_meanwhile_is_closed_untouched(w: World) -> None:
+    """The owner promoted the shadowing candidate to Live himself: the loop closes its
+    shadow without writing any approval, so the owner's Live record stays."""
+    w.candidate("2", supported_modes=[Mode.SHADOW, Mode.DEMO, Mode.LIVE])
+    assert w.loop.submit("2", protocol_hash=HASH, mode=Mode.DEMO) == []
+    w.life.promote(MODEL, "2", modes=[Mode.DEMO, Mode.LIVE], evidence_refs=["x02:run:o"],
+                   policy_ref="p", approved_by=OWNER_ACTOR, approval_ref="owner",
+                   live_qualification_ref=LIVE_REF)  # fmt: skip
+    w.predict("2", T0, 400, SHARP)
+    w.now = T0 + 90 * DAY
+    [closed] = w.loop.step(mode=Mode.DEMO)
+    assert closed.action is Action.REJECT and closed.reasons == ["ALREADY_CHAMPION"]
+    rec = w.registry.eligibility("model", f"{MODEL}@2")
+    assert rec is not None and rec.approves(Mode.LIVE, w.now)
+    assert w.loop.step(mode=Mode.DEMO) == []
+
+
 def test_a_window_without_enough_labels_expires(w: World) -> None:
     _admitted(w)
     w.predict("2", T0, 100, SHARP)

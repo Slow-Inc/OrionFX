@@ -307,11 +307,12 @@ class ModelLifecycle:
     def _crown(self, model_id: str, version: str, record: EligibilityRecord, *, action: str,
                actor: str, approval: str) -> None:  # fmt: skip
         previous = self.champion(model_id)
-        if previous is not None and previous != version:
+        if previous is not None:
             current = self.registry.eligibility("model", subject_ref(model_id, previous))
-            if current is not None:  # the system actor never replaces an owner's Live approval
-                _require_approver(actor, current.approved_modes)
-            self._disable(model_id, previous, actor=actor)
+            if current is not None:  # the system actor never replaces an owner's Live approval,
+                _require_approver(actor, current.approved_modes)  # re-promoted or not
+            if previous != version:
+                self._disable(model_id, previous, actor=actor)
         self.registry.set_eligibility(record, actor=actor)
         self._log(model_id, version, record, action=action, actor=actor, approval=approval)
 
