@@ -12,9 +12,10 @@
 # checked out by name because the default detached HEAD would hide `wip/*` and
 # `feat/<n>-...` names from the scripts.
 #
-# Slow-Inc is on the GitHub free plan, so no check can be made a required
-# status check on this private repo. `.claude/t4.json` "requireGreenCI": true is
-# the (weaker) fallback — it binds agent-run `gh pr merge` only, not a web merge.
+# The repo is public, and the ruleset `main-protection` (2026-11-28) makes
+# guards, lint, typecheck, test and frontend required status checks on main.
+# `.claude/t4.json` "requireGreenCI": true additionally makes agent-run
+# `gh pr merge` wait for every check, including the non-required ones.
 name: T4 verify
 
 # PR-only: every change reaches main through a PR, and the branch-scoped guards

@@ -124,7 +124,10 @@ my $JSON = JSON::PP->new->allow_nonref;
 my $T0 = time;
 my $BUDGET = 100;   # seconds for all gh calls; the hook's settings.json timeout is 150
 my $GH = $ENV{ORIONFX_GH} // '';
-my $HAS_TIMEOUT = grep { -x "$_/timeout" } split /:/, ($ENV{PATH} // '');
+# GNU coreutils `timeout` only: Windows timeout.exe and BSD timeout take other arguments,
+# and wrapping gh in one of those would make every call fail.
+my $HAS_TIMEOUT;
+sub has_timeout { $HAS_TIMEOUT //= do { my $v = `timeout --version 2>&1`; ($? == 0 && $v =~ /coreutils|GNU/) ? 1 : 0 } }
 # `gh api repos/{owner}/{repo}/...` resolves the repo from the cwd: pin it to the project.
 chdir $ENV{CLAUDE_PROJECT_DIR} if defined $ENV{CLAUDE_PROJECT_DIR} && -d $ENV{CLAUDE_PROJECT_DIR};
 
@@ -283,7 +286,7 @@ sub strip_bodies {
                 my $d = shift @pending;
                 my $rest = substr($s, $i);
                 last unless $rest =~ /^.*?^[ \t]*\Q$d\E[ \t]*\r?$(?:\n|\z)/ms;   # no end: keep it as code
-                $out .= "HEREDOC\n"; $i += length $&;
+                $out .= "\n"; $i += length $&;   # the body (and its end line) become an empty line
             }
             @pending = ();
             next;
@@ -292,17 +295,32 @@ sub strip_bodies {
     }
     return $out;
 }
-my $text = join_lines(strip_bodies($cmd), ' ');
+my $stripped_cmd = strip_bodies($cmd);
+my $text = join_lines($stripped_cmd, ' ');
 my @segs = segments($text);
-my @data_variants = ($text, join_lines(strip_bodies($cmd), ''));
+my @data_variants = ($text, join_lines($stripped_cmd, ''));
 
-# Is any word an interpreter (or a command that runs one)? Then heredoc and
-# here-string bodies are code: `bash <<X`, `cat <<X | sh`, `@'...'@ | iex`.
+# Heredoc and here-string bodies are DATA only when every command in the call is a
+# known data sink -- it stores or forwards text and never runs it -- and no word names
+# an interpreter. Otherwise they are code and are scanned: `bash <<X`, `$SHELL <<X`,
+# `/bin/ash <<X`, `make -f - <<X`, `cat <<X | sh`, `@'...'@ | iex`, and
+# `gh api --input - <<X` (stdin can carry a merge mutation).
 my $INTERP = qr/^(?:bash|sh|zsh|dash|ksh|mksh|fish|busybox|source|exec|eval|env|xargs|nohup|sudo|wsl|cmd|
     pwsh|powershell|iex|invoke-expression|invoke-command|icm|start-process|saps|start|
     python[0-9.]*|py|perl|node|ruby|php|osascript)$/xi;
-my $interp = grep { my $s = $_; ($s->[0] // '') eq '.' || grep { base($_) =~ $INTERP } @$s } @segs;
-my @variants = $interp ? (@data_variants, join_lines($cmd, ' '), join_lines($cmd, '')) : @data_variants;
+my %DATA_CMD = map { $_ => 1 } qw(cat tee git echo printf set-content add-content out-file write-output);
+sub data_sink {
+    my @w = @{ $_[0] };
+    my $b = base($w[0]);
+    return 1 if $DATA_CMD{$b};
+    return 1 if $b eq 'gh' && ($w[1] // '') ne 'api';
+    return 1 if !$ps && @w == 1 && $w[0] =~ /^[A-Za-z_][A-Za-z0-9_]*=/;          # VAR=value
+    return 1 if $ps && $w[0] =~ /^\$[A-Za-z_][\w:]*$/ && ($w[1] // '') eq '=';  # $v = @'...'@
+    return 0;
+}
+my $bodies_are_code = grep({ my $s = $_; ($s->[0] // '') eq '.' || grep { base($_) =~ $INTERP } @$s } @segs)
+    || grep { !data_sink($_) } @segs;
+my @variants = $bodies_are_code ? (@data_variants, join_lines($cmd, ' '), join_lines($cmd, '')) : @data_variants;
 
 # Count the merge keywords in each variant raw, with quotes / escapes stripped
 # (`m''erge`, `me\rge`, `$'merge'`), and as lexed words; the largest count wins.
@@ -342,6 +360,11 @@ block("this command mentions a merge ($n_kw place(s)) $UNCHECKABLE") unless @mer
 block("the merge must be the only command in this tool call (no `;`, `&&`, `||`, `|`, newline or other "
     . "statement before or after it): another statement can change which `gh` actually runs. Run `$FORM` by itself.")
     unless @segs == 1;
+# The review state is read with the gh this hook resolves on PATH; a merge naming another
+# gh binary by path could be a different program from the one that answered.
+block("run the merge with plain `gh` (no path, no call operator): the gate checks the review with the `gh` on PATH, "
+    . "and a merge through another binary may not be the one checked. `$FORM`.")
+    unless $merges[0][0] eq 'gh';
 
 # The shell must not be able to build arguments the lexer did not see: outside quotes
 # and comments, no expansion or expression characters ($ ` { } * ? [ ] ( ), PowerShell
@@ -421,7 +444,7 @@ sub glob_re {
 }
 my @risk_re = map { glob_re($_) } @$risk;
 
-# --- gh ($GH and $HAS_TIMEOUT are set at the top: resolve_cfg calls gh early) --------
+# --- gh ($GH and has_timeout are set at the top: resolve_cfg calls gh early) ---------
 sub gh {
     my (@args) = @_;
     block('gh (GitHub CLI) was not found, so the review state cannot be checked.') unless $GH ne '';
@@ -429,7 +452,7 @@ sub gh {
     my $left = $T0 + $BUDGET - time;
     block("time budget used up before `gh $label`. Blocking (fail closed); retry the merge.") if $left < 5;
     my ($efh) = tempfile(UNLINK => 1);
-    my @run = (($HAS_TIMEOUT ? ('timeout', ($left < 30 ? $left : 30)) : ()), $GH, @args);
+    my @run = ((has_timeout() ? ('timeout', ($left < 30 ? $left : 30)) : ()), $GH, @args);
     my $pid = open(my $out, '-|');
     block("could not start gh: $!") unless defined $pid;
     if (!$pid) { open STDERR, '>&', $efh; exec { $run[0] } @run; exit 127 }
@@ -567,11 +590,21 @@ my $HOW = "as the FIRST line of its own PR comment, with <sha> = the full head S
 if (!@head_reviews && !($fb_ok && $ind_ok)) {
     push @problems, "no review by $bot at the PR head. Either:\n"
         . "  (a) wait for the OpenCode `review` check on this head (gh pr checks $num --watch), then handle its findings; or\n"
-        . "  (b) if OpenCode is down (model 429, App token failure, timeout, check missing or failed for an infra reason), "
-        . "run the fallback self-review with subagents (code-review, scrutinize, simplify, + security-review when relevant), "
-        . "then post BOTH markers $HOW:\n"
+        . "  (b) if OpenCode is down (model 429, App token failure, timeout, or the check finished without a review for an "
+        . "infra reason), run the fallback self-review with subagents (code-review, scrutinize, simplify, + security-review "
+        . "when relevant), then post BOTH markers $HOW:\n"
         . "      $FB  (reason = the cause)  " . ($fb_ok ? "[present]" : "[missing]") . "\n"
         . "      $IND  then the findings and how each was handled  " . ($ind_ok ? "[present]" : "[missing]");
+}
+# The fallback is for "OpenCode is down", not "OpenCode has not finished yet": accept it
+# only once a `review` check run at this head has completed (any conclusion, including
+# skipped, as for Dependabot PRs).
+if (!@head_reviews && $fb_ok && $ind_ok) {
+    my $cr = gh_json('api', "$R/commits/$head/check-runs?check_name=review&per_page=100");
+    my $done = grep { (H($_)->{name} // '') eq 'review' && (H($_)->{status} // '') eq 'completed' } @{ A($cr->{check_runs}) };
+    push @problems, "the fallback markers are present, but no OpenCode `review` check has completed at $head yet, so "
+        . "OpenCode may still post a review. Wait for it (gh pr checks $num --watch); if it never starts, re-run the "
+        . "workflow so that it completes." unless $done;
 }
 if (@risk_hits && @head_reviews && !$ind_ok) {
     push @problems, "this PR touches risk paths (" . join(', ', @risk_hits[0 .. ($#risk_hits < 4 ? $#risk_hits : 4)])

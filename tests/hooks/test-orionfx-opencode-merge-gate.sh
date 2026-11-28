@@ -22,6 +22,7 @@ case "$1 $2" in
        */reviews*) k=reviews ;;
        */files*) k=files ;;
        */comments*) k=comments ;;
+       */check-runs*) k=checkruns ;;
        */contents/.claude/t4.json)  # the default branch's config: remote.json, else a mirror of the local one
          if [ -f "$FIX/fail.contents" ]; then cat "$FIX/fail.contents" >&2; exit 1; fi
          src="$FIX/remote.json"; [ -f "$src" ] || src="$CLAUDE_PROJECT_DIR/.claude/t4.json"
@@ -74,6 +75,12 @@ reset() {
   reviews "[$(rev 101 $HEAD)]"
   threads "$(thr true false 101 reply)"
   comments '[]'
+  checkruns completed
+}
+# checkruns <status>: the PR head's `review` check run (status "none" = no run at all).
+checkruns() {
+  if [ "$1" = none ]; then printf '{"total_count":0,"check_runs":[]}' > "$FIX/checkruns.json"
+  else printf '{"total_count":1,"check_runs":[{"name":"review","status":"%s"}]}' "$1" > "$FIX/checkruns.json"; fi
 }
 files() {
   printf '%s' "$1" > "$FIX/files.json"
@@ -270,11 +277,11 @@ reset; run block "missing --match-head-commit" "gh pr merge 7 --squash" "add .--
 reset; run block "--match-head-commit of another commit" "gh pr merge 7 --match-head-commit $OLD" "is not the PR head"
 reset; run allow "--match-head-commit=<sha> form" "gh pr merge 7 --squash --match-head-commit=$HEAD"
 reset; run allow "redirection after the merge" "gh pr merge 7 --squash $MHC 2>&1"
-reset; reviews '[]'; run block "quoted absolute gh path is gated" "\"/c/Program Files/GitHub CLI/gh.exe\" pr merge 7 $MHC" "no review by"
+reset; run block "a gh path other than plain gh is refused" "\"/c/Program Files/GitHub CLI/gh.exe\" pr merge 7 $MHC" "plain .gh."
 reset; run block "merge after cd && is refused: the merge must be its own command" "cd /x && gh pr merge 7 $MHC" "only command"
 reset; run block "two merges in one command" "gh pr merge 1 $MHC; gh pr merge 2 $MHC" "$UNPARSED"
 reset; run block "env-prefixed merge is refused" "GH_REPO=other/repo gh pr merge 7 $MHC" "$UNPARSED"
-reset; reviews '[]'; run block "PowerShell call operator is gated" "& 'C:\\Program Files\\GitHub CLI\\gh.exe' pr merge 7 $MHC" "no review by" PowerShell
+reset; run block "PowerShell call operator with a gh path is refused" "& 'C:\\Program Files\\GitHub CLI\\gh.exe' pr merge 7 $MHC" "plain .gh." PowerShell
 reset; reviews '[]'; run block "Monitor command is gated" "$M" "no review by" Monitor
 
 # --- probes from the independent review of PR #150 (review150/probe.sh) -------------
@@ -412,6 +419,18 @@ reset; run block "PowerShell expression argument" "gh pr merge 7 --squash $MHC (
 reset; run block "PowerShell splatting" "gh pr merge 7 --squash $MHC @a" "cannot check" PowerShell
 reset; run block "unknown flag" "gh pr merge 7 --squash $MHC --frobnicate" "unknown"
 reset; run block "--admin is refused" "gh pr merge 7 --squash $MHC --admin" "--admin"
+# OpenCode round 4 on PR #150: heredoc bodies are code unless EVERY command is a known
+# data sink; `gh api --input -` is not one; the fallback needs a finished review check.
+P "heredoc into \$SHELL"         $'$SHELL <<EOF\ngh pr merge 7\nEOF'
+P "heredoc into an unlisted shell" $'/bin/ash <<EOF\ngh pr merge 7\nEOF'
+P "heredoc into make -f -"       $'make -f - <<EOF\nall:\n\tgh pr merge 7\nEOF'
+P "gh api --input - with a merge mutation" $'gh api graphql --input - <<EOF\n{"query":"mutation{mergePullRequest(input:{pullRequestId:\\"x\\"}){clientMutationId}}"}\nEOF'
+reset; run allow "heredoc to git commit -F - stays data" $'git commit -F - <<EOF\nthen gh pr merge 7\nEOF'
+reset; run allow "heredoc to cat > file stays data" $'cat > notes.md <<\'EOF\'\nthen gh pr merge 7\nEOF'
+reset; reviews '[]'; comments "[$(comment "$FB"),$(comment "$IND")]"; checkruns in_progress
+run block "fallback while the review check is still running" "$M" "review. check"
+reset; reviews '[]'; comments "[$(comment "$FB"),$(comment "$IND")]"; checkruns none
+run block "fallback with no review check run at all" "$M" "review. check"
 # OpenCode round 3 on PR #150: another statement can change which gh runs; comments;
 # a marker after blank lines. On the passing baseline, so only these rules can deny.
 reset; run block "PATH changed before the merge" "export PATH=/tmp/evil:/usr/bin; gh pr merge 7 --squash $MHC" "only command"
