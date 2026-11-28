@@ -5,6 +5,8 @@ description = "Personal XAUUSD AI auto-trading bot on MT5 (Demo/Shadow only unti
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",
+    "lightgbm==4.7.0",
+    "numpy==2.5.5",
     "pydantic>=2.9",
     "tzdata>=2024.1",
     "uvicorn>=0.32",

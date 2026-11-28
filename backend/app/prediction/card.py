@@ -11,7 +11,6 @@ cutoff. The card then lives outside the hashed module, so its manifest pins the 
 hash: the registry entry fixes adapter, card and, through the card, the weights.
 """
 
-import json
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Protocol, Self
@@ -24,6 +23,7 @@ from app.core.contracts import (
     ParameterBound,
     Sha256Ref,
     StrategyManifest,
+    canonical_json,
     sha256_ref,
 )
 from app.core.enums import Direction, ForecastLineage, Mode, Timeframe
@@ -43,6 +43,20 @@ def unique_leader(scores: Mapping[Direction, Decimal]) -> tuple[Direction, Decim
     top = max(scores.values())
     leaders = [d for d, s in scores.items() if s == top]
     return (leaders[0], top) if len(leaders) == 1 else None
+
+
+class TrainingRecord(ContractModel):
+    """How a trained model was made (#130): enough to rebuild it from the same inputs."""
+
+    dataset_ref: str = Field(min_length=1)
+    """The exported dataset (`dataset_id@version`) it was trained and calibrated on."""
+    config_hash: Sha256Ref
+    """sha256 of the canonical JSON of the training config."""
+    seeds: list[int] = Field(min_length=1)
+    libraries: dict[str, str]
+    """Library versions the weights were produced with, e.g. {"lightgbm": "4.7.0"}."""
+    code_commit: str = Field(min_length=1)
+    """The commit the training code ran from (passed in: a `git archive` has no .git)."""
 
 
 class ModelCard(ContractModel):
@@ -73,6 +87,9 @@ class ModelCard(ContractModel):
     weights_hash: Sha256Ref | None = None
     """The weights file a shared adapter reads (`verified_weights`); None when the module
     holds the whole model."""
+    training: TrainingRecord | None = None
+    """Dataset, config hash, seeds, library versions and commit of a trained model (#130);
+    None for the baseline and hand-written models."""
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -120,8 +137,7 @@ class ModelCard(ContractModel):
     @property
     def content_hash(self) -> str:
         """sha256 of the card's canonical JSON."""
-        body = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-        return sha256_ref(body.encode())
+        return sha256_ref(canonical_json(self.model_dump(mode="json")))
 
 
 def verified_weights(card: ModelCard, weights: bytes) -> bytes:
