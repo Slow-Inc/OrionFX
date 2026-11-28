@@ -28,6 +28,7 @@ User-Agent with no personal data, and a local cache, so each file is requested o
 """
 
 import lzma
+import re
 import struct
 import time
 import urllib.error
@@ -47,6 +48,7 @@ __all__ = [
     "DukascopyFetcher",
     "DukascopyM1Source",
     "FetchFailed",
+    "check_day",
     "day_url",
     "decode_candles",
 ]
@@ -56,7 +58,15 @@ PRICE_DIVISOR = 1000
 """XAUUSD prices are stored as integers of 1/1000 [PROPOSED: verify on a known day]."""
 USER_AGENT = "Mozilla/5.0 (compatible; historical-data-client/1.0)"
 RECORD = struct.Struct(">5if")
+MAX_RECORDS = 24 * 60
+"""A day file holds at most one candle per minute."""
+MAX_RAW = 256 * 1024
+"""The largest compressed day file accepted (a full day is about 10-40 KB): remote bytes
+are capped before and after decompression, so a hostile or broken file cannot exhaust
+memory or disk."""
 SATURDAY = 5
+SYMBOL = re.compile(r"[A-Z0-9]{3,12}")
+SIDES = ("BID", "ASK")
 
 Transport = Callable[[str, str, float], tuple[int, bytes]]
 """(url, user_agent, timeout) -> (HTTP status, body)."""
@@ -77,6 +87,10 @@ class Candle:
 
 
 def day_url(symbol: str, side: str, day: date) -> str:
+    """The day file's URL; the symbol and side are checked, since they also name the
+    cache path."""
+    if not SYMBOL.fullmatch(symbol) or side not in SIDES:
+        raise ValueError(f"bad symbol or side: {symbol!r} {side!r}")
     return (
         f"{BASE}/{symbol}/{day.year:04d}/{day.month - 1:02d}/{day.day:02d}/{side}_candles_min_1.bi5"
     )
@@ -85,24 +99,65 @@ def day_url(symbol: str, side: str, day: date) -> str:
 def decode_candles(raw: bytes, day: date, divisor: int = PRICE_DIVISOR) -> list[Candle]:
     if not raw:
         return []
-    data = lzma.decompress(raw)
+    if len(raw) > MAX_RAW:
+        raise ValueError(f"{day}: {len(raw)} compressed bytes is over the {MAX_RAW} cap")
+    decoder = lzma.LZMADecompressor()
+    data = decoder.decompress(raw, max_length=MAX_RECORDS * RECORD.size + 1)
+    if len(data) > MAX_RECORDS * RECORD.size:
+        raise ValueError(f"{day}: more than {MAX_RECORDS} records")
+    if not decoder.eof:
+        raise ValueError(f"{day}: the compressed stream is truncated")
     if len(data) % RECORD.size:
         raise ValueError(f"{day}: {len(data)} bytes is not a whole number of 24-byte records")
     start = datetime(day.year, day.month, day.day, tzinfo=UTC)
     scale = Decimal(divisor)
-    out = []
+    out: list[Candle] = []
     for s, o, c, lo, h, v in RECORD.iter_unpack(data):
+        if (
+            not 0 <= s < 86400
+            or s % 60
+            or (out and start + timedelta(seconds=s) <= out[-1].open_time)
+        ):
+            raise ValueError(f"{day}: record time {s}s is off the minute grid or out of order")
         o_, c_, lo_, h_ = (Decimal(x) / scale for x in (o, c, lo, h))
         volume = Decimal(format(v, ".7g"))  # float32: keep its 7 significant digits
         out.append(Candle(start + timedelta(seconds=s), o_, c_, lo_, h_, volume))
     return out
 
 
+def check_day(bid: list[Candle], ask: list[Candle], low: Decimal, high: Decimal) -> list[str]:
+    """Problems on a reference day, before a long fetch trusts the format: every candle is
+    well formed (low <= open, close <= high) and inside [low, high], and ask >= bid at each
+    minute's close. An empty list means the day looks right."""
+    problems = []
+    for side, candles in (("bid", bid), ("ask", ask)):
+        if not candles:
+            problems.append(f"no {side} candles")
+        for c in candles:
+            if not (c.low <= min(c.open, c.close) and max(c.open, c.close) <= c.high):
+                problems.append(f"{side} {c.open_time:%H:%M} is not low <= open, close <= high")
+            if not (low <= c.low and c.high <= high):
+                problems.append(f"{side} {c.open_time:%H:%M} lies outside {low}..{high}")
+    asks = {c.open_time: c.close for c in ask}
+    for c in bid:
+        if c.open_time in asks and asks[c.open_time] < c.close:
+            problems.append(f"{c.open_time:%H:%M} ask close is below bid close")
+    return problems
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None  # a 3xx comes back as an HTTP error: only the fixed host is read
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _urllib(url: str, user_agent: str, timeout: float) -> tuple[int, bytes]:
     req = urllib.request.Request(url, headers={"User-Agent": user_agent})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read()
+        with _OPENER.open(req, timeout=timeout) as r:
+            return r.status, r.read(MAX_RAW + 1)
     except urllib.error.HTTPError as e:
         return e.code, b""
     except (urllib.error.URLError, TimeoutError, OSError):
@@ -134,6 +189,7 @@ class DukascopyFetcher:
         self.requests = 0
 
     def path(self, symbol: str, side: str, day: date) -> Path:
+        day_url(symbol, side, day)  # checks the symbol and side that name the path
         return self.cache_dir / symbol / f"{day.year:04d}" / f"{day.isoformat()}_{side}.bi5"
 
     def day_file(self, symbol: str, side: str, day: date) -> bytes:
@@ -158,6 +214,8 @@ class DukascopyFetcher:
             self.requests += 1
             status, body = self._transport(url, USER_AGENT, self._timeout)
             if status == 200:
+                if len(body) > MAX_RAW:
+                    raise FetchFailed(f"{url}: body over the {MAX_RAW}-byte cap")
                 return body
             if status == 404:
                 return b""  # no file for that day: cached as no data

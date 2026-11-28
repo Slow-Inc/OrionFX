@@ -58,7 +58,7 @@ from app.core.time import live
 from app.learning.bars import BarLog, BarOutcome, Horizon, Provenance, SnapshotRow
 from app.learning.lifecycle import DatasetManifest, DatasetStore, FoldWindow, Split
 from app.market_data.features import FEATURE_SCHEMA
-from app.market_data.sources import SEALED_FROM, SourceRegistry
+from app.market_data.sources import HoldoutToken, SourceRegistry, require_unsealed
 from app.storage.journal import Journal, payload_as
 from app.validation.splits import WalkForward, walk_forward
 
@@ -151,8 +151,10 @@ def export_dataset(
     out: Path,
     provenance: set[Provenance] | None = None,
     feature_schema: str = FEATURE_SCHEMA,
+    opening: HoldoutToken | None = None,
 ) -> DatasetManifest:
-    """Write the dataset to `out`, register its manifest, and return it."""
+    """Write the dataset to `out`, register its manifest, and return it. A real source's
+    window must end by its seal (`require_unsealed`) unless the holdout was opened."""
     hs = sorted(horizons, key=horizon_key)
     longest = max(h.length for h in hs)
     if embargo < longest:
@@ -162,10 +164,7 @@ def export_dataset(
     registry = SourceRegistry(conn)
     sources = {v: registry.require(v)[0] for v in sorted(dataset_versions)}
     for source in sorted(set(sources.values())):
-        sealed = SEALED_FROM.get(source)
-        if sealed is not None and window_end > sealed:
-            raise ValueError(f"{source} is sealed from {sealed.isoformat()} (protocol holdout"
-                             " and unread slice, #132): end the window by then")  # fmt: skip
+        require_unsealed(source, window_end, start=window_start, opening=opening)
     plan = walk_forward(window_start, window_end, train=train, test=test, embargo=embargo,
                         holdout=holdout)  # fmt: skip
     log = BarLog(conn)

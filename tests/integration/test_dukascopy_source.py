@@ -14,11 +14,13 @@ import pytest
 
 from app.core.enums import Timeframe
 from app.market_data.dukascopy import (
+    MAX_RAW,
     PRICE_DIVISOR,
     USER_AGENT,
     DukascopyFetcher,
     DukascopyM1Source,
     FetchFailed,
+    check_day,
     day_url,
     decode_candles,
 )
@@ -207,3 +209,56 @@ def test_the_audit_places_the_daily_break_on_both_sides_of_us_dst(
         assert all(report.unexpected_gaps(tf) == 0 for tf in Timeframe)
     else:
         assert report.in_closed(Timeframe.H1) == 1  # trading inside the NY break hour
+
+
+# --- hardening before the first real fetch (remote bytes are untrusted) -----------------
+
+
+def test_remote_bytes_are_capped_before_and_after_decompression() -> None:
+    day = date(2024, 1, 2)
+    with pytest.raises(ValueError, match="cap"):
+        decode_candles(b"\x00" * (MAX_RAW + 1), day)
+    bomb = lzma.compress(b"\x00" * (24 * 1441), format=lzma.FORMAT_ALONE)  # tiny when packed
+    assert len(bomb) < MAX_RAW
+    with pytest.raises(ValueError, match="more than 1440 records"):
+        decode_candles(bomb, day)
+    whole = _encode([(0, 1, 1, 1, 1, 1)])
+    with pytest.raises(ValueError, match="truncated"):
+        decode_candles(whole[:-6], day)
+
+
+@pytest.mark.parametrize("seconds", [[30], [86400], [-60], [120, 60], [60, 60]])
+def test_record_times_must_be_whole_minutes_of_the_day_in_order(seconds: list[int]) -> None:
+    raw = _encode([(s, 1, 1, 1, 1, 1) for s in seconds])
+    with pytest.raises(ValueError, match="minute grid or out of order"):
+        decode_candles(raw, date(2024, 1, 2))
+
+
+def test_symbol_and_side_are_checked_because_they_name_the_cache_path(tmp_path: Path) -> None:
+    fetcher = DukascopyFetcher(tmp_path, transport=FakeTransport({}), sleep=FakeSleep())
+    for symbol, side in (("../etc", "BID"), ("XAUUSD", "MID"), ("xauusd", "BID")):
+        with pytest.raises(ValueError, match="bad symbol or side"):
+            fetcher.day_file(symbol, side, date(2024, 1, 2))
+
+
+def test_an_oversized_body_is_refused_and_not_cached(tmp_path: Path) -> None:
+    url = day_url("XAUUSD", "BID", date(2024, 1, 2))
+    big = FakeTransport({url: b"x" * (MAX_RAW + 1)})
+    fetcher = DukascopyFetcher(tmp_path, transport=big, sleep=FakeSleep())
+    with pytest.raises(FetchFailed, match="cap"):
+        fetcher.day_file("XAUUSD", "BID", date(2024, 1, 2))
+    assert not fetcher.path("XAUUSD", "BID", date(2024, 1, 2)).exists()
+
+
+def test_the_reference_day_check_catches_a_wrong_field_order_scale_or_side() -> None:
+    day = date(2020, 8, 6)
+    good_bid = decode_candles(_encode([(0, 2050, 2051, 2049, 2052, 1)]), day)
+    good_ask = decode_candles(_encode([(0, 2050.3, 2051.3, 2049.3, 2052.3, 1)]), day)
+    lo, hi = D(1990), D(2100)
+    assert check_day(good_bid, good_ask, lo, hi) == []
+    swapped = decode_candles(_encode([(0, 2050, 2049, 2051, 2052, 1)]), day)  # close < low
+    assert any("low <= open" in p for p in check_day(swapped, good_ask, lo, hi))
+    tenfold = decode_candles(_encode([(0, 205, 205.1, 204.9, 205.2, 1)]), day)
+    assert any("outside" in p for p in check_day(tenfold, good_ask, lo, hi))
+    assert any("below bid" in p for p in check_day(good_ask, good_bid, lo, hi))
+    assert check_day([], [], lo, hi) == ["no bid candles", "no ask candles"]

@@ -6,6 +6,7 @@ series, CME Globex hours. Every fixture is a tiny hand-made CSV: no real data.""
 import gzip
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -30,6 +31,17 @@ M1 = timedelta(minutes=1)
 H1 = timedelta(hours=1)
 LATER = datetime(2030, 1, 1, tzinfo=UTC)
 NAME = "GC_full_1min_continuous_ratio_adjusted.txt"
+
+
+@dataclass(frozen=True)
+class _Opened:  # the shape of #132's HoldoutOpening
+    protocol_hash: str
+    config_id: str
+    opened_at: datetime
+
+
+OPENED = _Opened("sha256:" + "0" * 64, "c1", datetime(2026, 11, 28, tzinfo=UTC))
+"""The fixtures lie in protocol v1's sealed holdout, so recording them needs an opening."""
 # Wednesday 2026-01-07: New York is UTC-5 (EST), so the CME break is 22:00-23:00 UTC.
 WED = datetime(2026, 1, 7, tzinfo=UTC)
 
@@ -268,7 +280,8 @@ def test_filled_bars_are_labelled_and_keep_technique_windows_whole(
         candles = CandleStore(conn, dataset_version=version)
         MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=Timeframe.M5,
                        context_timeframes=[], horizons=[Horizon(Timeframe.M5, 1)],
-                       provenance=Provenance.BACKFILL, clock=lambda: LATER).tick()  # fmt: skip
+                       provenance=Provenance.BACKFILL, clock=lambda: WED + timedelta(days=1),
+                       opening=OPENED).tick()  # fmt: skip  # 2026 is in the sealed holdout
         sql = "SELECT COUNT(*) FROM learning_unlabellable WHERE dataset_version = ?"
         unlabellable = conn.execute(sql, (version,)).fetchone()[0]
         bars = [b for b in candles.bars("XAUUSD", Timeframe.M5, as_of=LATER)

@@ -45,7 +45,12 @@ from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.learning.bars import BarLog, Horizon, Provenance
 from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, build_feature_snapshot
 from app.market_data.session import SessionSchedule
-from app.market_data.sources import SourceRegistry, UnknownSource
+from app.market_data.sources import (
+    HoldoutToken,
+    SourceRegistry,
+    UnknownSource,
+    require_unsealed,
+)
 from app.market_data.store import CandleStore
 from app.prediction.engine import LoadedPredictor, Refused, predict
 from app.storage.config_store import ConfigStore
@@ -81,9 +86,13 @@ class MarketRecorder:
         account_id: str = "local-account",
         bot_id: str = "bot-1",
         session: SessionSchedule | None = None,
+        opening: HoldoutToken | None = None,
     ) -> None:
         self._conn, self._candles, self._symbol = conn, candles, symbol
         self._session = _schedule(conn, candles.dataset_version, session)
+        self._source = SourceRegistry(conn).source_of(candles.dataset_version)
+        self._opening = opening
+        require_unsealed(self._source, clock(), opening=opening)  # refused up front, too
         self._timeframes = [timeframe, *context_timeframes]
         self._horizons = list(horizons)
         step = TIMEFRAME_DURATION[timeframe]
@@ -118,6 +127,8 @@ class MarketRecorder:
             self._report(HealthStatus.OK, None)
 
     def _record(self, now: datetime) -> None:
+        # A real source's window ends at the clock: a backfill past its seal is refused.
+        require_unsealed(self._source, now, opening=self._opening)
         tf = self._timeframes[0]
         version = self._candles.dataset_version
         last = self._log.last_recorded(self._symbol, tf, FEATURE_SCHEMA, version)

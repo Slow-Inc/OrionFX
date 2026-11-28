@@ -302,14 +302,15 @@ def test_purge_uses_the_longest_horizon_and_rows_say_if_fully_labelled(
 def test_a_real_source_is_sealed_from_the_protocol_holdout_and_unread_slice(
     conn: sqlite3.Connection, candles: CandleStore, tmp_path: Path
 ) -> None:
-    """Protocol v1 (#132) fixed the holdout and the unread slice by calendar rule before
-    any statistic read the data: no export of a real-market source may reach them."""
-    from app.market_data.sources import HOLDOUT, SEALED_FROM, UNREAD_SLICE
+    """Protocol v1 (#132) fixed the windows by its length rule before any statistic read the
+    data: neither the recorder nor an export of a real-market source may reach them."""
+    from app.market_data.sources import HOLDOUT, SEALED_FROM, UNREAD_SLICE, Sealed
 
-    assert (_t("2025-11-28T00:00:00+00:00"), _t("2026-11-28T00:00:00+00:00")) == HOLDOUT
-    assert SEALED_FROM["dukascopy-xauusd"] == UNREAD_SLICE[0] == _t("2025-05-28T00:00:00+00:00")
+    assert (_t("2024-05-28T00:00:00+00:00"), _t("2026-11-28T00:00:00+00:00")) == HOLDOUT
+    assert SEALED_FROM["dukascopy-xauusd"] == UNREAD_SLICE[0] == _t("2023-11-28T00:00:00+00:00")
     SourceRegistry(conn).register("real", "dukascopy-xauusd")
-    _record(conn, "real")
-    with pytest.raises(ValueError, match="sealed"):
+    with pytest.raises(Sealed):  # the backfill's window ends at its clock, after the seal
+        _record(conn, "real")
+    with pytest.raises(Sealed):
         _export(conn, tmp_path / "x.jsonl", dataset_versions=["real"])
     assert not (tmp_path / "x.jsonl").exists()

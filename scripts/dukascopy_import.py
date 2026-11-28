@@ -27,7 +27,12 @@ from pathlib import Path
 
 from app.core.enums import Timeframe
 from app.learning.cost_log import era_costs
-from app.market_data.dukascopy import DukascopyFetcher, DukascopyM1Source, decode_candles
+from app.market_data.dukascopy import (
+    DukascopyFetcher,
+    DukascopyM1Source,
+    check_day,
+    decode_candles,
+)
 from app.market_data.history import import_history
 from app.market_data.sources import SEALED_FROM
 from app.market_data.store import CandleStore
@@ -56,14 +61,19 @@ def _utc(d: date) -> datetime:
 
 
 def check_reference(fetcher: DukascopyFetcher) -> None:
-    candles = decode_candles(fetcher.day_file("XAUUSD", "BID", REFERENCE_DAY), REFERENCE_DAY)
-    closes = [c.close for c in candles if c.volume > 0]
-    if not closes:
-        sys.exit(f"reference day {REFERENCE_DAY}: no candles; scale and month unverified")
-    lo, hi = min(closes), max(closes)
-    print(f"reference {REFERENCE_DAY}: bid close range {lo}..{hi}")
-    if not (REFERENCE_RANGE[0] <= lo and hi <= REFERENCE_RANGE[1]):
-        sys.exit(f"reference day outside {REFERENCE_RANGE}: check PRICE_DIVISOR and the month")
+    """Refuse the fetch unless the reference day decodes as expected: every bid and ask
+    candle well formed and inside REFERENCE_RANGE, and ask >= bid (`check_day`)."""
+    sides = [
+        [c for c in decode_candles(fetcher.day_file("XAUUSD", s, REFERENCE_DAY), REFERENCE_DAY)
+         if c.volume > 0]
+        for s in ("BID", "ASK")
+    ]  # fmt: skip
+    problems = check_day(*sides, *REFERENCE_RANGE)
+    if problems:
+        sys.exit(f"reference day {REFERENCE_DAY} fails ({len(problems)} problems, first:"
+                 f" {problems[0]}): check PRICE_DIVISOR, field order, month")  # fmt: skip
+    closes = [c.close for c in sides[0]]
+    print(f"reference {REFERENCE_DAY}: bid close {min(closes)}..{max(closes)}, checks pass")
 
 
 def fetch(args: argparse.Namespace) -> None:

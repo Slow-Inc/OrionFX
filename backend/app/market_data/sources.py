@@ -31,14 +31,16 @@ ratio-adjusted continuous GC 1-minute series: gold futures trades as a proxy for
 XAUUSD, kept for reference. Its prices are not tradable spot levels.
 
 `SEALED_FROM` keeps the holdout and the unread slice (protocol v1, #132) out of every
-export and statistic: fixed by calendar rule on 2026-11-28, before any statistic read the
-data. The import may store bars there; nothing reads them until a recorded step opens a
-window.
+recording, export and statistic (`require_unsealed`). Fixed on 2026-11-28 by the
+protocol's length rule (L = 30 months; certified by the agent under owner delegation),
+before any statistic read the data. The import may store bars there; nothing reads them
+until a recorded step opens the holdout.
 """
 
 import sqlite3
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 
 from app.core.time import Clock, utc_iso, utc_now
 from app.market_data.session import CME_GLOBEX_GC, XAUUSD_NY_1700, SessionSchedule
@@ -50,9 +52,12 @@ __all__ = [
     "SEALED_FROM",
     "SOURCE_SCHEDULES",
     "UNREAD_SLICE",
+    "HoldoutToken",
+    "Sealed",
     "SourceConflict",
     "SourceRegistry",
     "UnknownSource",
+    "require_unsealed",
 ]
 
 SOURCE_SCHEDULES: Mapping[str, SessionSchedule] = {
@@ -71,17 +76,62 @@ NO_TRADE_FILL: Mapping[str, timedelta] = {
 "no trade": a flat bar at the previous close, volume 0. Only a source that omits no-trade
 minutes has an entry. A longer run, or any hole in another source, is a real gap."""
 
-HOLDOUT = (datetime(2025, 11, 28, tzinfo=UTC), datetime(2026, 11, 28, tzinfo=UTC))
-"""Protocol v1 holdout, [start, end): the last 12 months up to 2026-11-28 (#132)."""
-UNREAD_SLICE = (datetime(2025, 5, 28, tzinfo=UTC), HOLDOUT[0])
+HOLDOUT = (datetime(2024, 5, 28, tzinfo=UTC), datetime(2026, 11, 28, tzinfo=UTC))
+"""Protocol v1 holdout, [start, end): 30 months up to 2026-11-28, by the length rule (#132)."""
+UNREAD_SLICE = (datetime(2023, 11, 28, tzinfo=UTC), HOLDOUT[0])
 """Protocol v1 unread slice, [start, end): the 6 months before the holdout (#132)."""
 SEALED_FROM: Mapping[str, datetime] = {
     "dukascopy-xauusd": UNREAD_SLICE[0],
     "firstrate-gc": UNREAD_SLICE[0],
 }
-"""Per real-market data source: nothing at or after this instant may be exported or
-read by a statistic until a recorded protocol step opens it. The generic `dukascopy` CSV
-key is not sealed (synthetic tests use it), so real data goes through `dukascopy-xauusd`."""
+"""Per real-market data source: nothing at or after this instant may be recorded, exported
+or read by a statistic until a recorded protocol step opens the holdout. The generic
+`dukascopy` CSV key is not sealed (synthetic tests use it), so real data goes through
+`dukascopy-xauusd` (and a HistData fallback needs its own sealed key)."""
+
+
+class HoldoutToken(Protocol):
+    """What #132's `RunLog.open_holdout` returns (`HoldoutOpening`)."""
+
+    @property
+    def protocol_hash(self) -> str: ...
+    @property
+    def config_id(self) -> str: ...
+    @property
+    def opened_at(self) -> datetime: ...
+
+
+class Sealed(ValueError):
+    pass
+
+
+def require_unsealed(
+    data_source: str | None,
+    end: datetime,
+    *,
+    start: datetime | None = None,
+    opening: HoldoutToken | None = None,
+) -> None:
+    """Refuse a window of a sealed data source that ends after its `SEALED_FROM`, unless
+    the holdout was opened (`opening`). Even then the window must end by the holdout's end
+    and, if it has a `start`, must not read the unread slice, which v1 never opens.
+
+    Callers: `export_dataset`, `MarketRecorder` (its window ends at its clock) and the
+    statistics (`era_costs` takes `sealed_from`). TODO(#131): `run_system_backtest` calls
+    this with its spec's start and end when #131 merges onto this branch. TODO(#132):
+    verify `opening` against `RunLog.holdout_consumed` once the run log lands; until then
+    any token with these fields is accepted, so only a real `open_holdout` may make one."""
+    sealed = SEALED_FROM.get(data_source) if data_source is not None else None
+    if sealed is None or end <= sealed:
+        return
+    if opening is None:
+        raise Sealed(f"{data_source} is sealed from {sealed.isoformat()} (protocol v1 holdout"
+                     " and unread slice, #132): end the window by then")  # fmt: skip
+    if end > HOLDOUT[1]:
+        raise Sealed(f"the window ends after the holdout ({HOLDOUT[1].isoformat()})")
+    if start is not None and start < UNREAD_SLICE[1]:
+        raise Sealed("an opened holdout still never reads the unread slice: start the window"
+                     f" at {HOLDOUT[0].isoformat()} or later")  # fmt: skip
 
 
 class UnknownSource(ValueError):
