@@ -15,6 +15,10 @@ provenance: a BACKFILL prediction may be in-sample for a model trained on those 
 (cards have no training cutoff yet to refuse such bars). These are learning rows: never
 journaled as `prediction.generated`, never trading evidence.
 
+Features are built on the market's session schedule. For a candle dataset version bound
+to a data source (#128), that is the source's schedule, so an imported history and the
+live feed are each read on their own schedule.
+
 A bar is tagged LIVE only when it is recorded within `LIVE_WITHIN` of becoming
 available (the bot saw it as it happened); bars caught up after downtime, and every bar
 of a back-fill, are BACKFILL and carry no account mode. Each pass reads only bars that
@@ -30,6 +34,7 @@ MT5 adapter (#17).
 
 import logging
 import sqlite3
+from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
@@ -41,8 +46,10 @@ from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.learning.bars import BarLog, Horizon, Provenance
 from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, build_feature_snapshot
 from app.market_data.session import SessionSchedule
+from app.market_data.sources import SourceRegistry
 from app.market_data.store import CandleStore
 from app.prediction.engine import LoadedPredictor, Refused, predict
+from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
 from app.storage.config_store import ConfigStore
 from app.storage.db import transaction
 from app.storage.journal import Journal
@@ -75,10 +82,13 @@ class MarketRecorder:
         clock: Clock = utc_now,
         account_id: str = "local-account",
         bot_id: str = "bot-1",
-        session: SessionSchedule | None = None,
+        session: SessionSchedule | None,
     ) -> None:
         self._conn, self._candles, self._symbol = conn, candles, symbol
-        self._session = session  # the market's trading schedule; None means 24/7
+        # The market's trading schedule; None means 24/7. No default (#129): a version
+        # bound to a data source uses that source's schedule, the one the export reads
+        # it on, and a different one given is refused (#128).
+        self._session = SourceRegistry(conn).resolve_schedule(candles.dataset_version, session)
         self._timeframes = [timeframe, *context_timeframes]
         self._horizons = list(horizons)
         step = TIMEFRAME_DURATION[timeframe]
@@ -93,6 +103,9 @@ class MarketRecorder:
         self._log = BarLog(conn, clock=clock)
         self._retry_at: datetime | None = None
         self._healthy: bool | None = None
+        self.refused: Counter[str] = Counter()
+        """Refused predictions per model ref since start: a model that never speaks is
+        visible, not silently dropped."""
 
     def tick(self) -> None:
         now = self._clock()
@@ -140,15 +153,24 @@ class MarketRecorder:
 
     def _predict(self, snapshot: FeatureSnapshot, provenance: Provenance, version: str) -> None:
         """Each model in its own savepoint: one failing model never stops the snapshot or
-        the other models from being recorded."""
+        the other models from being recorded. A model that reads the M04 transforms gets
+        them from `transform_from_store`, the function the dataset export uses (#129)."""
+        transformed: FeatureSnapshot | None = None
         for loaded in self._predictors:
             try:
                 with transaction(self._conn):
-                    p = predict(loaded, snapshot, now=snapshot.available_at)
-                    self._log.record_prediction(p, snapshot, provenance=provenance,
+                    inputs = snapshot
+                    if loaded.card.feature_schema == TRANSFORM_SCHEMA:
+                        if transformed is None:
+                            transformed = transform_from_store(self._candles, snapshot,
+                                                               session=self._session)  # fmt: skip
+                        inputs = transformed
+                    p = predict(loaded, inputs, now=snapshot.available_at)
+                    self._log.record_prediction(p, inputs, provenance=provenance,
                                                 dataset_version=version)  # fmt: skip
-            except Refused:
-                continue  # this model cannot speak to this bar: nothing to record
+            except Refused as exc:  # this model cannot speak to this bar: nothing to record
+                self.refused[loaded.card.ref] += 1
+                log.debug("M07 recorder: %s refused %s: %s", loaded.card.ref, snapshot.ref, exc)
             except Exception:
                 log.exception("M07 recorder: %s failed on %s", loaded.card.ref, snapshot.ref)
 

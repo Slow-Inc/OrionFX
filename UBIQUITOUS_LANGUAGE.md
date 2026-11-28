@@ -55,6 +55,7 @@ Source of meaning: `docs/plans/master_planV1.1.md` (section refs in brackets).
 | **Catalog Item** | One row of the mandatory capability catalog, identified by a stable `CAT-*` ID, with owner, phase, class R/C/D/X [§16.2–16.3]. | feature request |
 | **Coverage State** | `planned`, `blocked`, `implemented`, `tested`, `certified`, `suspended`, `excluded` — what has been built and evidenced [§16.4]. | done, supported (unqualified) |
 | **Operational Eligibility** | `disabled`, `shadow_only`, `demo_eligible`, `live_eligible` — where a version may run; separate from coverage [§16.4]. | enabled (unqualified) |
+| **Data Source** | The feed a market bar came from: a vendor's history (e.g. `dukascopy`) or the live broker feed (`mt5`). One candle dataset version holds exactly one data source, which fixes its session schedule. Separate from LIVE/BACKFILL provenance, which only says whether the bot saw the bar as it happened [#128]. | vendor (for the dimension), provenance, feed version |
 
 ## Relationships
 
@@ -126,6 +127,7 @@ Source of meaning: `docs/plans/master_planV1.1.md` (section refs in brackets).
 | **Catalog Item** | หนึ่งแถวของ catalog ความสามารถบังคับ ระบุด้วย ID `CAT-*` ที่คงที่ มี owner, phase และ class R/C/D/X [§16.2–16.3] | feature request |
 | **Coverage State** | `planned`, `blocked`, `implemented`, `tested`, `certified`, `suspended`, `excluded` — สิ่งที่สร้างและมีหลักฐานแล้ว [§16.4] | done, supported (แบบไม่ระบุ) |
 | **Operational Eligibility** | `disabled`, `shadow_only`, `demo_eligible`, `live_eligible` — เวอร์ชันนั้นรันได้ที่ไหน แยกจาก coverage [§16.4] | enabled (แบบไม่ระบุ) |
+| **Data Source** | แหล่งที่มาของแท่งราคา: ประวัติจาก vendor (เช่น `dukascopy`) หรือ feed สดจาก broker (`mt5`) candle dataset version หนึ่งมี data source เดียวเท่านั้น และ data source กำหนด session schedule ของมัน แยกจาก provenance LIVE/BACKFILL ซึ่งบอกแค่ว่าบอทเห็นแท่งนั้นตอนเกิดจริงหรือไม่ [#128] | vendor (เมื่อหมายถึงมิตินี้), provenance, feed version |
 
 ## ความสัมพันธ์
 

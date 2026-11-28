@@ -1,0 +1,451 @@
+"""The claim run log (#132; training-loop.md §6): append-only runs under a registered
+protocol hash, a budget counter of distinct configs, a single-use holdout, and errata."""
+
+import hashlib
+import sqlite3
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+from tests.unit.validation.test_protocol import make_protocol
+
+from app.validation.protocol import (
+    ProtocolHashMismatch,
+    ProtocolWindow,
+    canonical_json,
+    protocol_hash,
+)
+from app.validation.runlog import (
+    AlreadyCounted,
+    BudgetExhausted,
+    ConfigIdConflict,
+    ErrataState,
+    HoldoutConsumed,
+    ImmutableVersion,
+    NotCounted,
+    NothingToFix,
+    RunLog,
+    RunRecord,
+    RunStatus,
+    SeedsNotChanged,
+    UnknownProtocol,
+    WindowClash,
+)
+
+NOW = datetime(2030, 6, 1, tzinfo=UTC)
+SHA = "a" * 40
+
+
+@pytest.fixture
+def conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
+    from app.storage.db import connect, migrate
+
+    c = connect(tmp_path / "runlog.db")
+    migrate(c)
+    yield c
+    c.close()
+
+
+@pytest.fixture
+def log(conn: sqlite3.Connection) -> RunLog:
+    return RunLog(conn, clock=lambda: NOW)
+
+
+@pytest.fixture
+def ph(log: RunLog) -> str:
+    return log.register(make_protocol(budget=3))
+
+
+def run(ph: str, config: str, status: RunStatus = RunStatus.OK, **kw: object) -> RunRecord:
+    fields: dict[str, object] = {
+        "protocol_hash": ph,
+        "config_id": config,
+        "config_hash": f"hash-{config}",
+        "code_sha": SHA,
+        "dataset_version": "ds-1",
+        "seeds": [1, 2, 3],
+        "metrics": {"brier_skill": 0.01},
+        "status": status,
+    }
+    return RunRecord.model_validate(fields | kw)
+
+
+def bugfix(ph: str, config: str) -> RunRecord:
+    return run(
+        ph, config, RunStatus.BUGFIX_RERUN, bug_note="#999 label off by one", bug_fix_sha="b" * 40
+    )
+
+
+# --- protocol registration -------------------------------------------------------------
+
+
+def test_register_returns_the_protocol_hash_and_is_idempotent(log: RunLog) -> None:
+    p = make_protocol()
+    assert log.register(p) == protocol_hash(p)
+    assert log.register(p) == protocol_hash(p)
+    assert log.protocol(protocol_hash(p)) == p
+
+
+def test_a_version_cannot_be_reregistered_with_other_content(log: RunLog) -> None:
+    log.register(make_protocol())
+    with pytest.raises(ImmutableVersion, match="immutable"):
+        log.register(make_protocol(budget=9))
+
+
+def test_a_run_without_a_registered_protocol_hash_is_refused(log: RunLog) -> None:
+    with pytest.raises(UnknownProtocol):
+        log.record(run("f" * 64, "B0"))
+    assert log.runs("f" * 64) == []
+
+
+def test_a_malformed_protocol_hash_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        run("not-a-hash", "B0")
+
+
+# --- the config counter and the budget -------------------------------------------------
+
+
+def test_ok_and_failed_runs_count_as_distinct_configs(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    log.record(run(ph, "A1", RunStatus.FAILED))
+    assert log.counted_configs(ph) == 2
+
+
+def test_the_budget_allows_exactly_n_then_refuses(log: RunLog, ph: str) -> None:
+    for c in ("B0", "A1", "A2"):
+        log.record(run(ph, c))
+    with pytest.raises(BudgetExhausted):
+        log.record(run(ph, "A3"))
+    assert log.counted_configs(ph) == 3
+    assert len(log.runs(ph)) == 3
+
+
+def test_aa_runs_are_logged_but_not_counted(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    for seeds in ([4], [5], [6]):
+        log.record(run(ph, "B0", RunStatus.AA, seeds=seeds))
+    assert log.counted_configs(ph) == 1
+    assert [r.record.status for r in log.runs(ph)].count(RunStatus.AA) == 3
+
+
+def test_a_bugfix_rerun_is_logged_but_not_counted(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0", RunStatus.FAILED))
+    log.record(bugfix(ph, "B0"))
+    assert log.counted_configs(ph) == 1
+    assert len(log.runs(ph)) == 2
+
+
+def test_exempt_reruns_still_log_at_full_budget(log: RunLog, ph: str) -> None:
+    ids = {c: log.record(run(ph, c)) for c in ("B0", "A1", "A2")}
+    log.record(run(ph, "A2", RunStatus.AA, seeds=[9]))
+    log.add_erratum(ids["A1"], ErrataState.INVALID, "label off by one")
+    log.record(bugfix(ph, "A1"))
+    assert log.counted_configs(ph) == 3
+
+
+def test_an_aa_run_must_change_the_seeds(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0", seeds=[1, 2, 3]))
+    with pytest.raises(SeedsNotChanged):
+        log.record(run(ph, "B0", RunStatus.AA, seeds=[3, 2, 1]))
+    log.record(run(ph, "B0", RunStatus.AA, seeds=[4]))
+    with pytest.raises(SeedsNotChanged):
+        log.record(run(ph, "B0", RunStatus.AA, seeds=[4]))  # a repeated A/A draw too
+    assert [r.record.status for r in log.runs(ph)] == [RunStatus.OK, RunStatus.AA]
+
+
+def test_a_bugfix_rerun_may_keep_the_seeds(log: RunLog, ph: str) -> None:
+    first = log.record(run(ph, "B0", seeds=[1, 2, 3]))
+    log.add_erratum(first, ErrataState.INVALID, "label off by one")
+    log.record(bugfix(ph, "B0"))  # same seeds: the fix, not the seed, is what changed
+    assert len(log.runs(ph)) == 2
+
+
+def test_a_bugfix_rerun_needs_the_current_result_marked_first(log: RunLog, ph: str) -> None:
+    """A config has one current result: a rerun replaces it only once it is marked
+    INVALID or CORRECTED, so reruns cannot be shopped for the best one while N stays 1."""
+    first = log.record(run(ph, "B0"))
+    with pytest.raises(NothingToFix):
+        log.record(bugfix(ph, "B0"))
+    log.add_erratum(first, ErrataState.UNCONFIRMED, "below the A/A floor")
+    with pytest.raises(NothingToFix):  # a weak result is not a bug
+        log.record(bugfix(ph, "B0"))
+    log.add_erratum(first, ErrataState.INVALID, "label off by one")
+    rerun = log.record(bugfix(ph, "B0"))
+    with pytest.raises(NothingToFix):  # the rerun is now the current result
+        log.record(bugfix(ph, "B0"))
+    log.add_erratum(rerun, ErrataState.CORRECTED, "the fix missed the embargo")
+    log.record(bugfix(ph, "B0"))
+    assert log.counted_configs(ph) == 1
+
+
+def test_no_bugfix_rerun_after_the_holdout_is_consumed(log: RunLog, ph: str) -> None:
+    first = log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")
+    log.add_erratum(first, ErrataState.INVALID, "leak found after the opening")
+    with pytest.raises(HoldoutConsumed):
+        log.record(bugfix(ph, "B0"))
+
+
+def test_an_exempt_status_cannot_smuggle_in_a_new_config(log: RunLog, ph: str) -> None:
+    with pytest.raises(NotCounted):
+        log.record(run(ph, "B0", RunStatus.AA))
+    with pytest.raises(NotCounted):
+        log.record(bugfix(ph, "B0"))
+
+
+def test_a_plain_rerun_of_a_counted_config_is_refused(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    with pytest.raises(AlreadyCounted):
+        log.record(run(ph, "B0", seeds=[7]))
+
+
+def test_a_bugfix_rerun_needs_a_bug_note_and_a_fix_sha(ph: str) -> None:
+    with pytest.raises(ValidationError):
+        run(ph, "B0", RunStatus.BUGFIX_RERUN)
+    with pytest.raises(ValidationError):
+        run(ph, "B0", RunStatus.BUGFIX_RERUN, bug_note="x", bug_fix_sha="not-a-sha")
+    with pytest.raises(ValidationError):
+        run(ph, "B0", RunStatus.OK, bug_note="x", bug_fix_sha=SHA)
+    with pytest.raises(ValidationError):
+        run(ph, "B0", RunStatus.BUGFIX_RERUN, bug_note="  ", bug_fix_sha=SHA)  # blank note
+
+
+def test_a_config_id_names_one_config_hash(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    with pytest.raises(ConfigIdConflict):
+        log.record(run(ph, "B0", config_hash="hash-other"))
+    with pytest.raises(ConfigIdConflict):
+        log.record(run(ph, "B1", config_hash="hash-B0"))
+
+
+def test_counters_are_per_protocol(log: RunLog, ph: str) -> None:
+    other = log.register(make_protocol(version="test-protocol-2"))
+    log.record(run(ph, "B0"))
+    log.record(run(other, "B0"))
+    assert (log.counted_configs(ph), log.counted_configs(other)) == (1, 1)
+
+
+def test_the_log_records_its_fields(log: RunLog, ph: str) -> None:
+    run_id = log.record(run(ph, "B0"))
+    [logged] = log.runs(ph)
+    assert logged.run_id == run_id
+    assert logged.recorded_at == NOW
+    assert logged.record == run(ph, "B0")
+
+
+# --- the single-use holdout ------------------------------------------------------------
+
+
+def test_the_holdout_opens_once(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    assert not log.holdout_consumed(ph)
+    opening = log.open_holdout(ph, "B0")
+    assert (opening.config_id, opening.opened_at) == ("B0", NOW)
+    assert log.holdout_consumed(ph)
+    with pytest.raises(HoldoutConsumed):
+        log.open_holdout(ph, "B0")
+
+
+def test_the_holdout_opens_only_for_a_counted_clean_config(log: RunLog, ph: str) -> None:
+    with pytest.raises(NotCounted):
+        log.open_holdout(ph, "B0")
+    run_id = log.record(run(ph, "B0"))
+    log.add_erratum(run_id, ErrataState.INVALID, "scorer bug")
+    with pytest.raises(NotCounted):
+        log.open_holdout(ph, "B0")
+    assert not log.holdout_consumed(ph)
+
+
+def test_a_failed_config_without_a_rerun_has_no_result(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0", RunStatus.FAILED))
+    with pytest.raises(NotCounted):
+        log.open_holdout(ph, "B0")
+
+
+def test_a_bugfix_rerun_supersedes_a_marked_run_for_the_holdout(log: RunLog, ph: str) -> None:
+    first = log.record(run(ph, "B0"))
+    log.add_erratum(first, ErrataState.INVALID, "label bug")
+    log.record(bugfix(ph, "B0"))
+    assert log.open_holdout(ph, "B0").config_id == "B0"
+
+
+def test_an_erratum_on_the_current_result_blocks_the_holdout(log: RunLog, ph: str) -> None:
+    first = log.record(run(ph, "B0"))
+    log.add_erratum(first, ErrataState.INVALID, "label bug")
+    rerun = log.record(bugfix(ph, "B0"))
+    log.add_erratum(rerun, ErrataState.INVALID, "the fix was wrong too")
+    with pytest.raises(NotCounted):
+        log.open_holdout(ph, "B0")
+
+
+def test_the_holdout_needs_a_registered_protocol(log: RunLog) -> None:
+    with pytest.raises(UnknownProtocol):
+        log.open_holdout("f" * 64, "B0")
+
+
+def _window(start: int, end: int) -> ProtocolWindow:
+    return ProtocolWindow(
+        start=datetime(start, 1, 1, tzinfo=UTC), end=datetime(end, 1, 1, tzinfo=UTC)
+    )
+
+
+def test_a_later_version_cannot_reuse_an_opened_holdout(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")  # the fixture holdout is [2005, 2006)
+    with pytest.raises(WindowClash):
+        log.register(make_protocol(version="v2", holdout=_window(2005, 2007)))
+    with pytest.raises(WindowClash):  # an opened window cannot be unread either
+        log.register(
+            make_protocol(
+                version="v3", unread_slice=_window(2005, 2006), holdout=_window(2007, 2008)
+            )
+        )
+
+
+def test_an_opened_holdout_may_become_a_later_debug_window(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")
+    later = make_protocol(
+        version="v2",
+        debug_window=_window(2005, 2006),  # v1's opened holdout, and nothing v1 seals
+        unread_slice=None,
+        holdout=_window(2007, 2008),
+    )
+    assert log.register(later) == protocol_hash(later)
+    assert log.register(make_protocol(budget=3)) == ph  # re-registering v1 stays idempotent
+
+
+@pytest.mark.parametrize(
+    "debug",
+    [(2005, 2006), (2003, 2005)],
+    ids=["over v1's unopened holdout", "over v1's unread slice"],
+)
+def test_a_debug_window_cannot_read_what_another_version_seals(
+    log: RunLog, ph: str, debug: tuple[int, int]
+) -> None:
+    later = make_protocol(
+        version="v2", debug_window=_window(*debug), unread_slice=None, holdout=_window(2007, 2008)
+    )
+    with pytest.raises(WindowClash):
+        log.register(later)
+
+
+def test_a_holdout_cannot_sit_on_another_versions_debug_window(log: RunLog, ph: str) -> None:
+    """v1's debug window [2000, 2001) has been read freely: it cannot be anyone's holdout."""
+    later = make_protocol(
+        version="v2",
+        debug_window=_window(2007, 2008),
+        unread_slice=None,
+        holdout=_window(2000, 2001),
+    )
+    with pytest.raises(WindowClash):
+        log.register(later)
+
+
+def test_a_stored_row_that_does_not_hash_to_its_key_is_refused(
+    log: RunLog, conn: sqlite3.Connection
+) -> None:
+    body = canonical_json(make_protocol(version="forged")).decode()
+    conn.execute(
+        "INSERT INTO claim_protocols (protocol_hash, version, body, registered_at)"
+        " VALUES (?, 'forged', ?, '2030-01-01T00:00:00+00:00')",
+        ("0" * 64, body),
+    )
+    with pytest.raises(ProtocolHashMismatch):
+        log.protocol("0" * 64)
+    with pytest.raises(ProtocolHashMismatch):  # refused loudly, never skipped
+        log.register(make_protocol(version="v2"))
+
+
+def test_an_unread_slice_cannot_sit_on_another_versions_holdout(log: RunLog, ph: str) -> None:
+    """The fixture v1 holds the holdout [2005, 2006): a later version may not declare it
+    unread, since v1 can open it at any time; nor may a holdout cover v1's unread slice."""
+    with pytest.raises(WindowClash):
+        log.register(
+            make_protocol(
+                version="v2", unread_slice=_window(2005, 2006), holdout=_window(2007, 2008)
+            )
+        )
+    with pytest.raises(WindowClash):  # v1's unread slice is [2004-01, 2004-06)
+        log.register(make_protocol(version="v3", unread_slice=None, holdout=_window(2004, 2005)))
+
+
+def test_a_stored_protocol_is_verified_by_its_stored_bytes(
+    log: RunLog, ph: str, conn: sqlite3.Connection
+) -> None:
+    (body,) = conn.execute("SELECT body FROM claim_protocols").fetchone()
+    assert hashlib.sha256(body.encode()).hexdigest() == ph
+    assert log.protocol(ph) == make_protocol(budget=3)
+
+
+def test_two_versions_registered_on_one_window_open_it_once(log: RunLog, ph: str) -> None:
+    other = log.register(make_protocol(version="v2"))  # same holdout, neither opened yet
+    log.record(run(ph, "B0"))
+    log.record(run(other, "B0"))
+    log.open_holdout(ph, "B0")
+    with pytest.raises(HoldoutConsumed):
+        log.open_holdout(other, "B0")
+    assert not log.holdout_consumed(other)
+
+
+def test_no_new_config_after_the_holdout_is_consumed(log: RunLog, ph: str) -> None:
+    log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")
+    with pytest.raises(HoldoutConsumed):
+        log.record(run(ph, "A1"))
+
+
+# --- retention and errata --------------------------------------------------------------
+
+
+def test_errata_mark_a_run_without_removing_it_or_refunding_budget(log: RunLog, ph: str) -> None:
+    run_id = log.record(run(ph, "B0"))
+    log.add_erratum(run_id, ErrataState.INVALID, "leak found in fold 3")
+    [logged] = log.runs(ph)
+    assert [(e.state, e.reason, e.marked_at) for e in logged.errata] == [
+        (ErrataState.INVALID, "leak found in fold 3", NOW)
+    ]
+    assert log.counted_configs(ph) == 1
+
+
+def test_an_erratum_needs_a_known_run_and_a_reason(log: RunLog, ph: str) -> None:
+    with pytest.raises(KeyError):
+        log.add_erratum(12345, ErrataState.WITHDRAWN, "x")
+    run_id = log.record(run(ph, "B0"))
+    with pytest.raises(ValueError):
+        log.add_erratum(run_id, ErrataState.WITHDRAWN, " ")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM claim_runs",
+        "UPDATE claim_runs SET status = 'aa'",
+        "DELETE FROM claim_protocols",
+        "UPDATE claim_protocols SET body = '{}'",
+        "DELETE FROM claim_holdout_openings",
+        "UPDATE claim_holdout_openings SET config_id = 'A1'",
+        "DELETE FROM claim_run_errata",
+        "UPDATE claim_run_errata SET reason = 'rewritten'",
+    ],
+)
+def test_nothing_is_ever_deleted_or_rewritten(
+    log: RunLog, ph: str, conn: sqlite3.Connection, sql: str
+) -> None:
+    run_id = log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")
+    log.add_erratum(run_id, ErrataState.UNCONFIRMED, "below the A/A floor")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(sql)
+
+
+def test_registering_and_opening_the_holdout_are_audited(
+    log: RunLog, ph: str, conn: sqlite3.Connection
+) -> None:
+    log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")
+    actions = [r[0] for r in conn.execute("SELECT action FROM audit_log ORDER BY id")]
+    assert actions[-2:] == ["validation.protocol", "validation.holdout_opened"]

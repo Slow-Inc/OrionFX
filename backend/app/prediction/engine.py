@@ -19,6 +19,10 @@ predicts, and the semantics say so. News-enhanced inference is refused until
 news features exist (#48); passing news to a chart-only model is a wiring error
 and refused too. The forecast covers `horizon_bars` from the snapshot's bar and
 expires no later than the snapshot. It describes market risk only.
+
+A calibrated card that names its `label_version` and scores UP, DOWN and NEUTRAL (FLAT)
+gets those three scores on the forecast as class probabilities (#129), which M05 prices
+EV from; three scores that do not sum to 1 are refused, never renormalised.
 """
 
 import types
@@ -27,7 +31,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from app.core.contracts import Confidence, FeatureSnapshot, PredictionGenerated
+from pydantic import ValidationError
+
+from app.core.bet import LABEL_VERSION
+from app.core.contracts import (
+    ClassProbabilities,
+    Confidence,
+    FeatureSnapshot,
+    PredictionGenerated,
+)
 from app.core.enums import DataQuality, Direction, ForecastLineage, Mode
 from app.core.ids import new_id
 from app.core.time import TIMEFRAME_DURATION
@@ -78,6 +90,7 @@ def load_baseline(predictor: Predictor, *, mode: Mode) -> LoadedPredictor:
         raise Refused(f"{predictor.card.ref} has an artifact: load it with load_model")
     if mode is Mode.LIVE:
         raise Refused(f"{predictor.card.ref} is a baseline: never LIVE")
+    _check_label(predictor.card)
     return LoadedPredictor(predictor, mode, _GATE)
 
 
@@ -101,6 +114,7 @@ def load_model(
     manifest = registry.get("model", model_id, version)
     if manifest is None or (built.card.model_id, built.card.model_version) != (model_id, version):
         raise Refused(f"{module} built a card for another model")
+    _check_label(built.card)
     # A file cannot name its own hash: the verified hash comes from the registry.
     predictor = _Stamped(
         built, built.card.model_copy(update={"artifact_hash": manifest.artifact_hash})
@@ -136,6 +150,32 @@ def _leader(card: ModelCard, scores: Mapping[Direction, Decimal]) -> tuple[Direc
     return leader
 
 
+def _classes(card: ModelCard, scores: Mapping[Direction, Decimal]) -> ClassProbabilities | None:
+    """The class probabilities of a calibrated three-class model with a label version
+    (#129); None for any other model. One triple prices both sides."""
+    if not card.calibrated or card.label_version is None:
+        return None
+    if set(scores) != set(Direction):
+        raise Refused(f"{card.ref}: a labelled model must score UP, DOWN and NEUTRAL")
+    try:
+        return ClassProbabilities(
+            label_version=card.label_version,
+            up=scores[Direction.UP],
+            down=scores[Direction.DOWN],
+            flat=scores[Direction.NEUTRAL],
+        )
+    except ValidationError:
+        raise Refused(f"{card.ref}: its class probabilities do not sum to 1") from None
+
+
+def _check_label(card: ModelCard) -> None:
+    """A model calibrated on another label would never be priced: refuse it at load."""
+    if card.label_version is not None and card.label_version != LABEL_VERSION:
+        raise Refused(
+            f"{card.ref} is calibrated on another label ({card.label_version}), not {LABEL_VERSION}"
+        )
+
+
 def predict(
     loaded: LoadedPredictor,
     snapshot: FeatureSnapshot,
@@ -162,6 +202,7 @@ def predict(
     except Exception as exc:
         raise Refused(f"{card.ref} failed: {type(exc).__name__}") from None
     direction, score = _leader(card, scores)
+    classes = _classes(card, scores)
     horizon_end = snapshot.as_of + card.horizon_bars * TIMEFRAME_DURATION[card.horizon]
     if horizon_end <= now:
         raise Refused(f"{card.ref}: the forecast horizon ended at {horizon_end.isoformat()}")
@@ -184,4 +225,5 @@ def predict(
         input_refs=[snapshot.ref],
         generated_at=now,
         valid_until=min(snapshot.valid_until, horizon_end),
+        class_probabilities=classes,
     )

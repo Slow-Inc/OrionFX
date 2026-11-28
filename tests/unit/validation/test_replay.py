@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
+from app.core.bet import LABEL_VERSION
 from app.core.contracts import (
     CandleClosed,
+    ClassProbabilities,
     Confidence,
     EligibilityRecord,
     PredictionGenerated,
@@ -102,6 +104,8 @@ def _calibrated(now: datetime, horizon: Timeframe = M15) -> Evidence:
                                calibrated=True),
         data_quality=DataQuality.OK, input_refs=[], generated_at=now,
         valid_until=now + timedelta(minutes=15),
+        class_probabilities=ClassProbabilities(label_version=LABEL_VERSION, up=D("0.8"),
+                                               down=D("0.2"), flat=D(0)),
     ))  # fmt: skip
 
 

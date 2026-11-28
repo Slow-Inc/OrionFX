@@ -6,6 +6,7 @@ derives the expected set from the master plan table and compares.
 
 import hashlib
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -173,6 +174,28 @@ class LlmReasoning(ContractModel):
 # --- M04 prediction --------------------------------------------------------
 
 
+_CLASS_SUM_TOLERANCE = Decimal("1e-9")
+
+
+class ClassProbabilities(ContractModel):
+    """Calibrated probabilities of the triple-barrier label's three outcomes (#129):
+    the upper barrier first (UP), the lower first (DOWN), neither (FLAT). The label is
+    the same for both sides, so one triple prices a long (p_side = up) and a short
+    (p_side = down). They sum to 1. `label_version` names the label they were calibrated
+    on."""
+
+    label_version: str = Field(min_length=1)
+    up: Probability
+    down: Probability
+    flat: Probability
+
+    @model_validator(mode="after")
+    def _sums_to_one(self) -> Self:
+        if abs(self.up + self.down + self.flat - 1) > _CLASS_SUM_TOLERANCE:
+            raise ValueError("class probabilities must sum to 1")
+        return self
+
+
 class PredictionGenerated(ContractModel):
     prediction_id: str
     model_id: str
@@ -188,6 +211,9 @@ class PredictionGenerated(ContractModel):
     input_refs: list[str]
     generated_at: UtcDatetime
     valid_until: UtcDatetime
+    class_probabilities: ClassProbabilities | None = None
+    """Only from a calibrated three-class model (#129); M05 prices EV from them and
+    refuses EV without them."""
 
     @model_validator(mode="after")
     def _ordered_range(self) -> Self:

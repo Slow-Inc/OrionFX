@@ -16,10 +16,25 @@ Evidence votes once per independent source:
 - the chart: one vote when the live OPEN proposals agree on a direction.
 Stale or uncited evidence is ignored and not referenced.
 
-EV = move x (2p - 1) - (spread x size + 2 x commission per lot x lot), where
-size = lot x contract size and move = TARGET_ATR x M15 ATR x size. p is the
-forecast's calibrated probability, used only when the forecast agrees, has OK data
-and the trade's horizon. Thresholds are [PROPOSED].
+EV = size x (d x (p_side - p_opposite) - (spread + 2 x slippage)) - 2 x commission
+per lot x lot, i.e. size x d x (p_side - p_opposite - `cost_over_atr`), where size = lot x
+contract size, d = TARGET_ATR x ATR_M15, and p_side, p_opposite are the forecast's
+calibrated class probabilities of the chosen side's barrier and the other's (#129). The
+spread is the decision-time one. It is used only when the forecast agrees, has OK data
+and the trade's horizon, and carries class probabilities of LABEL_VERSION; otherwise EV
+is unknown (fail-safe). Thresholds are [PROPOSED].
+
+EV prices the triple-barrier label's event (`app.learning.labels`, `app.core.bet`): one
+cost-free bid-path event for both sides, UP (+d), DOWN (-d) or FLAT (its drift, taken
+as 0). A long is paid +d on UP and -d on DOWN, a short the mirror, so one triple prices
+both sides. Every cost (the spread, two slippages, the commission) is charged once, on
+every outcome, so EV at a certain outcome is what that outcome pays the side
+(`test_ev_label_alignment`). An even bet on P(side) alone, (2p - 1), would overstate EV
+whenever FLAT has mass.
+
+A PROXY: the bot places no per-position SL/TP (RSK-05); its exits are the Emergency
+SL, the cycle Profit Target and basket trailing. Only the system backtest (#131) judges
+whether a model priced this way is usable.
 
 Ids are `stable_id`s of the action, reasons and inputs, so republishing a decision
 is ignored by the journal. Repeats across ticks, where floating values such as
@@ -31,6 +46,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from app.core.bet import LABEL_VERSION, SLIPPAGE, TARGET_ATR, UnitCost, cost_over_atr
 from app.core.contracts import (
     Confidence,
     DecisionCreated,
@@ -55,13 +71,12 @@ from app.core.events import EventEnvelope, make_event
 from app.core.ids import stable_id
 from app.core.time import live
 from app.decision.context import DecisionContext
-from app.decision.strategies import ATR_M15, drop_outvoted
+from app.decision.strategies import drop_outvoted
 from app.execution.broker import SymbolSpec
-from app.market_data.features import USABLE_QUALITY
+from app.market_data.features import ATR_M15, USABLE_QUALITY
 
 D = Decimal
 CENT = D("0.01")
-TARGET_ATR = D(1)
 NEWS_VETO_IMPACT = D("0.6")
 """Net opposing news impact at or above which an entry or ADD is refused (#115, #121)
 [PROPOSED]."""
@@ -286,14 +301,21 @@ def expected_value(
         or f.data_quality is not DataQuality.OK
         or f.horizon is not chosen.horizon
         or costs is None
+        or costs.contract_size <= 0
+        or costs.commission_per_lot < 0
         or ctx.spread is None
         or atr is None
+        or atr <= 0
+        or (cp := f.class_probabilities) is None
+        or cp.label_version != LABEL_VERSION
     ):
         return None, None
-    p = f.probability.value
+    side, opposite = (cp.up, cp.down) if chosen.direction is Direction.UP else (cp.down, cp.up)
+    cost = UnitCost(spread=ctx.spread, slippage=SLIPPAGE,
+                    commission=2 * costs.commission_per_lot / costs.contract_size)  # fmt: skip
     size = ctx.initial_lot * costs.contract_size
-    cost = ctx.spread * size + 2 * costs.commission_per_lot * ctx.initial_lot
-    return (TARGET_ATR * atr * size * (2 * p - 1) - cost).quantize(CENT), f.probability
+    edge = side - opposite - cost_over_atr(cost, atr)
+    return (size * TARGET_ATR * atr * edge).quantize(CENT), f.probability
 
 
 @dataclass(frozen=True)

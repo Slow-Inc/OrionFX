@@ -68,7 +68,8 @@ class _Open:
     partial: bool
 
 
-def _floor(t: datetime, size: timedelta) -> datetime:
+def floor_time(t: datetime, size: timedelta) -> datetime:
+    """The start of the `size` interval holding `t`, on UTC-epoch boundaries."""
     return EPOCH + ((t - EPOCH) // size) * size
 
 
@@ -117,8 +118,8 @@ class CandleEngine:
         last = self._last
         # The first M5 interval the market was open for, with no tick, between the last
         # tick and this one.
-        this_slot = _floor(tick.time, M5)
-        missed = None if last is None else self._first_missed(_floor(last.time, M5), this_slot)
+        this_slot = floor_time(tick.time, M5)
+        missed = None if last is None else self._first_missed(floor_time(last.time, M5), this_slot)
         hole = missed is not None
         if hole:
             self.issues[Issue.GAP] += 1
@@ -132,7 +133,7 @@ class CandleEngine:
                 closed.append(self._close(tick.time, tf, size, cur))
                 cur = None
             if cur is None:
-                opened = _floor(tick.time, size)
+                opened = floor_time(tick.time, size)
                 # The M5 bar right after a hole carries the flag; a higher bar only if
                 # the hole reaches into it.
                 gap = missed is not None and (
