@@ -58,7 +58,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 |---|---|---|
 | Triple-barrier label | `app/learning/labels.py`, `m07.labels.tb.v2`. One label per bar, the same for both sides. Barriers at the entry bid close ±d on the bid path, d = `TARGET_ATR`·ATR_M15 (the recorded snapshot's ATR at `as_of`). UP: a bar's high reaches the upper barrier first; DOWN: a bar's low reaches the lower one first; FLAT: neither within N expected slots of the session schedule, N = the forecast horizon's span (a scheduled closure is not a gap). No spread, slippage or commission inside the label, so it depends on bid prices only and a source without spreads labels as live bid candles do. A bar that opens beyond a barrier (a gap) crossed it first and is labelled by that barrier. Any other bar touching both barriers is AMBIGUOUS: no class label, left out of the export. The export manifest's `label_stats` records `dual_touch_count`, `dual_touch_rate` and `flat_share` per era (each split, and "all"). Read on the finest stored timeframe that measures it (M5 first) so dual touches stay rare. A missing bar before it resolves gives no label. `K` = `TARGET_ATR` is [PROPOSED]; the constants EV shares live in `app/core/bet.py`. tb.v1 (side-dependent, spread inside) was replaced before anything trained on it. | [done #129] |
 | Stationary transforms | `app/prediction/transforms.py`, `m04.transforms.v1`. One `transform` (via `transform_from_store`) called by the dataset export and by the recorder for a model whose card reads that schema. Per timeframe: `(close−sma)/atr`, Bollinger position, `macd/atr`, MACD histogram/atr, `atr/close`, the log return, `spread/atr`, RSI/ADX/±DI scaled to 0..1; `sin`/`cos` of the UTC hour. Session and liquidity features from the gold bars, point in time and session-aware: distance to the previous session's high and low in ATR_M15, the previous session's London/NY volatility ratio (local 08:00–17:00 each), spread over its rolling median. `tick_volume` is excluded. Invariant to a rescaled price; all but `atr/close` and the log return also to a shifted one. | [done #129] |
-| Offline/online parity | The recorder and the export share `transform_from_store` and read a version on one `SessionSchedule`: `SourceRegistry.resolve_schedule` gives a version bound to a data source its source's schedule (a different one given is refused). `MarketRecorder`, `export_dataset`, `prediction_labels` and `label_at` take `session` with no default, and the manifest records each schedule as `session:<schedule_id>` (XAUUSD: `XAUUSD_NY_1700`). Each exported barrier label carries `ends_at`, and a row joins a fold window only if every barrier label ends by the window's end, not just `as_of + horizon`. `prediction_labels` scores recorded predictions on the label version the export carries (`barrier_labels`). The raw `move` stays as raw data. | [done #129 for the recorder and the export; the trading-path adapter is #157 item 2] |
+| Offline/online parity | The recorder and the export share `transform_from_store` and read a version on one `SessionSchedule`: `SourceRegistry.resolve_schedule` gives a version bound to a data source its source's schedule (a different one given is refused). `MarketRecorder`, `export_dataset`, `prediction_labels` and `label_at` take `session` with no default, and the manifest records each schedule as `session:<schedule_id>` (XAUUSD: `XAUUSD_NY_1700`). Each exported barrier label carries `ends_at`, and a row joins a fold window only if every barrier label ends by the window's end, not just `as_of + horizon`. `prediction_labels` scores recorded predictions on the label version the export carries (`barrier_labels`). The raw `move` stays as raw data. | [done #129 for the recorder and the export; the evaluation path (`EvaluationEvidence`) [built #127]; the trading-path adapter is #157 item 2] |
 
 **Certified by agent under owner delegation, 2026-11-28 (#129).**
 - **Dual touches stay excluded.** AMBIGUOUS rows are left out. Labels resolve on the finest stored timeframe (`FINEST_FIRST`, M5 first), so dual touches should be rare, and the manifest measures the rate.
@@ -75,9 +75,9 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Calibration | Isotonic or Platt, on a slice separated in time from the fold's training data. | [planned #130] |
 | Metric baseline | Multiclass Brier against class priors from **that training fold only**. | [planned #130] |
 | Artifact | Native model file (never pickle). The manifest records the commit SHA, dataset version, label and transform versions, seeds and library versions. | [planned #130] |
-| Card | `ModelCard` gains a training cutoff, dataset ref, label version and transform version. `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. | [planned #130] |
-| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | **[decision]** in the tracer PR #127: decide whether `build` receives the card and the verified weight bytes. Generating a module per version would break "allowlisted packages hold reviewed code only". |
-| Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and is marked so that no live path accepts it. | **[decision]** #127 |
+| Card | `ModelCard.training_cutoff` and `weights_hash` (#127), `label_version` (#129): `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. Dataset ref and transform version are still to come. | cutoff and weights pin [built] #127; label version [built] #129; the other fields [planned #130] |
+| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | evaluation path [built] #127, see §10; the live `load_model` still calls `build()` with no arguments [planned #133] |
+| Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and no live path accepts it. | [built] #127, see §10 |
 | Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit. The bundle is scanned for the secret shapes and known local secret values listed in §4a. The artifact, the manifest and the run log come back. Only the artifact and the manifest are hash-checked, verified and kept, and nothing is registered yet. Every VM is stopped after use. Runbook: §4a. | [built] #134: runner, bundle scan, verified import of the files. The trainer is a stub until #130. **Not built:** registration, which comes through the #130 adapter path; resumable stages; local recompute of validation metrics (#130, #132). |
 
 ## 4a. Runbook: a training job on Colab [built #134]
@@ -166,7 +166,7 @@ The VM is given no broker, LLM or GitHub credentials. `--env` is never used, so 
    - direction accuracy with a block-bootstrap 95% CI over trading days;
    - precision at high confidence, with coverage;
    - per-regime buckets, each with `n`; thin buckets get no verdict. [planned #130/#132]
-2. **System backtest.** `DecisionLoop`, M06 and `FakeBroker` run over stored bars on a fresh DB per run. The clock follows bar availability. The model's forecast reaches M05 through a **model-backed evidence provider**; the snapshot is passed in, not rebuilt (**[decision]** #127). Reported:
+2. **System backtest.** `DecisionLoop`, M06 and `FakeBroker` run over stored bars on a fresh DB per run. The clock follows bar availability. The model's forecast reaches M05 through a **model-backed evidence provider** (`EvaluationEvidence`); the snapshot is passed in, not rebuilt ([built] #127). Reported:
    - expectancy after costs, PF, max DD and trade count;
    - open positions at fold end and refused trades, reported separately.
 
@@ -276,9 +276,48 @@ Source: `docs/research/2026-11-28-m04-quant-upgrade-proposals.md`.
 | Real-money Live | ✅ only | never |
 | External resources: MT5, Demo account, news licence | ✅ | — |
 
-## 10. Open design decisions (resolve in #127)
+## 10. Design decisions from the tracer (#127)
 
-- **Evaluation load path** for historical scoring: no eligibility needed, and never accepted by a live path.
-- **Adapter and weights:** how `build` gets the card and the verified weight bytes, with one reviewed adapter for many versions.
-- **Evidence provider input:** it receives the snapshot instead of rebuilding it.
-- **Tracer fixture:** a daily break, a weekend, M5 recording and M15/H1 horizons. It asserts usable features, label coverage and at least one ENTER in the test fold. A negative control with `session=None` must fail. Readiness must be NOT_READY under the default policy.
+All four were open before #127; each is now **[built]** in #127 (branch `feat/127-training-tracer`).
+
+**1. Evaluation load path [built #127].**
+- `load_for_evaluation(loader, registry, card=, weights=, module=)` in `prediction/engine.py`. It reads no eligibility. It refuses:
+  - a card with no training cutoff;
+  - a card that is not the registered one;
+  - adapter bytes that fail the hash check (`ArtifactLoader.load_for_research`);
+  - weights the adapter rejects.
+- It returns an **`EvaluationPredictor`**. This is a distinct type, so the `LoadedPredictor` gate is unchanged. Only `predict_for_evaluation` accepts it.
+- **Live paths refuse it:**
+  - `predict` refuses it with its existing isinstance gate.
+  - `MarketRecorder` refuses any non-`LoadedPredictor` at construction, whatever the provenance. Before, such a model was refused per bar inside `_predict` (counted in `refused`), never at construction.
+  - `DecisionLoop` refuses `EvaluationEvidence` at construction. Its evidence signature `(now)` also differs from replay's `(now, snapshot)`, so mypy rejects the mix.
+- **Limit:** a hand-written lambda that wraps an evaluation predictor defeats the runtime check. Only review catches that.
+
+**2. Adapter and weights [built #127].**
+- One reviewed adapter module per model family lives in the allowlisted package `app.prediction.adapters`. Today that is `barrier_softmax` (one three-class softmax head scoring the triple-barrier label); LightGBM comes in #130.
+- It defines `build(card, weights: bytes) -> Predictor`. `load_for_evaluation` checks the weights with `verified_weights` (in `prediction/card.py`) before calling `build`, and the adapter checks again before it parses anything. It never uses pickle, and JSON numbers parse as Decimals.
+- **Three pins per version, all immutable:**
+  - the adapter source is the registered `artifact_hash`, the same for many versions;
+  - the card's `weights_hash` pins the weights file;
+  - the card itself is pinned through its manifest: `ModelCard.manifest()` adds `CARD_PIN` + `<sha256 of the canonical card JSON>` to `StrategyManifest.dependencies` whenever `weights_hash` is set. A card is no longer inside the hashed module, so an edited cutoff or `calibrated` claim is refused as "not the registered card".
+- No contract schema changed: `ModelCard` is not in `docs/contracts`, and `gen_schemas.py` produced no diff.
+
+**3. Evidence provider input [built #127].**
+- Replay's `EvidenceProvider` is `(now, snapshot) -> Evidence`. The step passes the snapshot it already built, with the session and techniques it used. `EvaluationEvidence(model)` is the model-backed provider; a refused prediction gives no forecast, so M05 waits.
+- `DecisionLoop` keeps `(now)` for now: `journal_evidence` has about 20 call sites. Switch it when a live model provider is wired (#131/#133).
+
+**4. Tracer fixture [built #127]** (`tests/integration/test_training_tracer.py`, `tests/support/tracer.py`).
+- **Fixture:** seeded synthetic M5 bars on `XAUUSD_NY_1700` with trend legs of 18-36 h. M15/H1 are resampled from them. The import link is stubbed until #128.
+- **Chain:** record (BACKFILL, `session=`) → label → export → bind the version to its source (`SourceRegistry.register`) → export M04 transforms and `m07.labels.tb.v2` with one walk-forward fold and a sealed holdout → train a three-class softmax on two transforms (`H1/M15.close_sma_atr`) on the fold's train window → temperature-scale on its test window → card (`label_version`) + JSON weights → `propose_candidate` → `load_for_evaluation` → `replay(session=)` on the sealed holdout with real `trend_following` → `EvidenceStore`.
+- **Asserts:**
+  - H1/M15 features set on the test fold and after both reopens;
+  - every row labelled or marked unlabellable exactly at a closure;
+  - at least one calibrated ENTER;
+  - `NOT_READY` with `POLICY_UNCERTIFIED`.
+- **Negative control:** with `session=None`, H1 ADX and M15 structure never come back, so the feature assertion fails.
+- **CI-time deviations from "7+ days of M5":**
+  - The library is the default one cut to the techniques the chain reads (`tracer.TECHNIQUES`): same ids and values.
+  - M5 is stored only from the train split on, while M15/H1 history starts a week earlier.
+  - Measured locally (Windows): recording 2,760 M5 bars (about 10 trading days) with the full library took 42 s for the recorder alone; the tracer takes about 16 s (about 7 s of it is `transform_from_store`, which reads 600 M5 bars per row and per replay step) and the suite grows from about 49 s to about 69 s. CI runs only on pull requests, so no CI time exists yet.
+- **After #129 (merged at `3b10ae3`, `m07.labels.tb.v2`):** EV is priced only from a forecast's class probabilities of the current `LABEL_VERSION`. The evaluation path applies the same rules as the live one (a card on another label is refused at load; a labelled model's forecast carries its class triple), and `EvaluationEvidence` feeds a transform model `transform_from_store`, as the recorder and the export do (train/serve parity). The tracer's ENTER fires under that EV with no threshold or fixture change, and every ENTER has a positive EV.
+- **What the fixture does not exercise:** H1 MACD (not in the cut library), M5 history beyond about 2.5 trading days, and on the negative control only about 4 hours of M5 around the daily break (run both with and without the session on that window).

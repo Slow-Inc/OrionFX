@@ -4,8 +4,14 @@ A card is what a predictor promises: which features it reads (and the ranges it
 was validated on), its horizon, what its score means and whether it is
 calibrated (only with evidence), its validation numbers, and the artifact hash
 the registry must hold. The built-in baseline has no artifact (hash None).
+
+A trained model (#127) is one reviewed adapter module serving many versions: the card
+names the adapter as its artifact, pins its weights file by sha256 and states its training
+cutoff. The card then lives outside the hashed module, so its manifest pins the card's own
+hash: the registry entry fixes adapter, card and, through the card, the weights.
 """
 
+import json
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Protocol, Self
@@ -18,12 +24,16 @@ from app.core.contracts import (
     ParameterBound,
     Sha256Ref,
     StrategyManifest,
+    sha256_ref,
 )
 from app.core.enums import Direction, ForecastLineage, Mode, Timeframe
+from app.core.types import UtcDatetime
 from app.storage.registry import subject_ref
 
 BRIER = "brier"
 BASELINE_BRIER = "baseline_brier"
+CARD_PIN = "card:"
+"""Prefix of the card's own hash in its manifest's `dependencies` (adapter models only)."""
 
 
 def unique_leader(scores: Mapping[Direction, Decimal]) -> tuple[Direction, Decimal] | None:
@@ -56,6 +66,13 @@ class ModelCard(ContractModel):
     is the same for both sides, and the forecast carries them as class probabilities."""
     supported_modes: list[Mode] = Field(default_factory=lambda: [Mode.SHADOW, Mode.DEMO])
     catalog_ids: list[CatalogId] = Field(default_factory=lambda: ["CAT-A01-05"])
+    training_cutoff: UtcDatetime | None = None
+    """When the latest label it was trained or calibrated on became known (that label's
+    `available_at`). `predict` refuses a snapshot with `as_of` at or before it, so it is
+    never scored in-sample. None only for the baseline and models from before #127."""
+    weights_hash: Sha256Ref | None = None
+    """The weights file a shared adapter reads (`verified_weights`); None when the module
+    holds the whole model."""
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -83,6 +100,8 @@ class ModelCard(ContractModel):
         uses when it publishes an approved model (#48)."""
         if self.artifact_hash is None:
             raise ValueError("the baseline has no artifact to register")
+        # An adapter's card is not inside the hashed module: pin the card itself.
+        pins = [] if self.weights_hash is None else [CARD_PIN + self.content_hash]
         return StrategyManifest(
             strategy_id=self.model_id,
             version=self.model_version,
@@ -95,7 +114,24 @@ class ModelCard(ContractModel):
             parameters={},
             risk_tags=[],
             supported_modes=self.supported_modes,
+            dependencies=pins,
         )
+
+    @property
+    def content_hash(self) -> str:
+        """sha256 of the card's canonical JSON, every field included: a field added to
+        `ModelCard` later changes the pin of every adapter card, so those cards must be
+        re-registered as new versions (a registered version is immutable)."""
+        body = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return sha256_ref(body.encode())
+
+
+def verified_weights(card: ModelCard, weights: bytes) -> bytes:
+    """The weights, only if they are the file the card pins: an adapter calls this before
+    parsing anything."""
+    if card.weights_hash is None or sha256_ref(weights) != card.weights_hash:
+        raise ValueError(f"{card.ref}: the weights are not the ones its card pins")
+    return weights
 
 
 class Predictor(Protocol):

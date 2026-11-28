@@ -12,8 +12,10 @@ history for the model's features) is skipped. A model added later predicts only 
 bars recorded after it was added. A model that fails is logged and skipped for that bar;
 the snapshot and the other models are still recorded. Each prediction carries the bar's
 provenance: a BACKFILL prediction may be in-sample for a model trained on those candles
-(cards have no training cutoff yet to refuse such bars). These are learning rows: never
-journaled as `prediction.generated`, never trading evidence.
+(a card's training cutoff, since #127, refuses those bars). These are learning rows: never
+journaled as `prediction.generated`, never trading evidence. Only approved
+(`LoadedPredictor`) models are accepted: an evaluation-loaded model is refused at
+construction, whatever the provenance.
 
 Features are built on the market's session schedule. For a candle dataset version bound
 to a data source (#128), that is the source's schedule, so an imported history and the
@@ -44,10 +46,16 @@ from app.core.events import make_event
 from app.core.ids import stable_id
 from app.core.time import TIMEFRAME_DURATION, Clock, utc_now
 from app.learning.bars import BarLog, Horizon, Provenance
-from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, build_feature_snapshot
+from app.market_data.features import (
+    DEFAULT_TECHNIQUES,
+    FEATURE_SCHEMA,
+    build_feature_snapshot,
+    lookback,
+)
 from app.market_data.session import SessionSchedule
 from app.market_data.sources import SourceRegistry
 from app.market_data.store import CandleStore
+from app.market_data.techniques.indicators import Technique
 from app.prediction.engine import LoadedPredictor, Refused, predict
 from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
 from app.storage.config_store import ConfigStore
@@ -58,7 +66,8 @@ __all__ = ["MarketRecorder"]
 
 COMPONENT = "M07"
 SOURCE = "m07"
-LOOKBACK = max(t.lookback for t in DEFAULT_TECHNIQUES)
+LOOKBACK = lookback(DEFAULT_TECHNIQUES)
+"""Bars read per timeframe with the default technique library."""
 RETRY_AFTER = timedelta(minutes=2)
 """A failed pass is retried after this, never on every tick [PROPOSED]."""
 LIVE_WITHIN = 2
@@ -83,8 +92,13 @@ class MarketRecorder:
         account_id: str = "local-account",
         bot_id: str = "bot-1",
         session: SessionSchedule | None,
+        techniques: Sequence[Technique] = DEFAULT_TECHNIQUES,
     ) -> None:
+        if not all(isinstance(p, LoadedPredictor) for p in predictors):
+            raise Refused("the recorder takes approved models only: never an evaluation load")
         self._conn, self._candles, self._symbol = conn, candles, symbol
+        self._techniques = list(techniques)
+        self._lookback = lookback(self._techniques)
         # The market's trading schedule; None means 24/7. No default (#129): a version
         # bound to a data source uses that source's schedule, the one the export reads
         # it on, and a different one given is refused (#128).
@@ -136,11 +150,12 @@ class MarketRecorder:
             if last is not None and bar.close_time <= last[0]:
                 continue  # a late bar: its slot is already past
             known = {
-                t: self._candles.bars(self._symbol, t, as_of=bar.available_at, limit=LOOKBACK)
+                t: self._candles.bars(self._symbol, t, as_of=bar.available_at,
+                                      limit=self._lookback)
                 for t in self._timeframes
-            }
+            }  # fmt: skip
             snapshot = build_feature_snapshot(self._symbol, known, bar.available_at,
-                                              session=self._session)  # fmt: skip
+                                              self._techniques, session=self._session)  # fmt: skip
             live = self._provenance is Provenance.LIVE and bar.available_at >= live_after
             recorded = self._log.record(
                 snapshot, timeframe=tf,

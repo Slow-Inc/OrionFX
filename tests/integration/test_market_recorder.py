@@ -185,8 +185,9 @@ def test_each_snapshot_equals_one_built_from_only_the_bars_known_at_that_close(
 ) -> None:
     """Long history (more bars than any technique looks back): an early bar's snapshot
     must still see its own past, not the newest window."""
-    from app.market_data.features import build_feature_snapshot
-    from app.runtime.market_recorder import LOOKBACK
+    from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot, lookback
+
+    LOOKBACK = lookback(DEFAULT_TECHNIQUES)
 
     n = LOOKBACK + 30
     _bars(candles, _closes(n))
