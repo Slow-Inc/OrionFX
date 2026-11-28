@@ -108,10 +108,11 @@ def pkg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 def _publish(
-    conn: sqlite3.Connection, pkg: Path, *, version: str = "1.0.0", body: str = RULE, **elig: object
-) -> tuple[ArtifactRegistry, ArtifactLoader, str]:
+    conn: sqlite3.Connection, pkg: Path, *, version: str = "1.0.0", body: str = RULE,
+    label_version: str | None = None, **elig: object,
+) -> tuple[ArtifactRegistry, ArtifactLoader, str]:  # fmt: skip
     """Write the model file, register its exact bytes, approve it."""
-    card = _card(model_version=version)
+    card = _card(model_version=version, label_version=label_version)
     path = pkg / f"toy_{version.replace('.', '_')}.py"
     path.write_text(
         SOURCE.format(card=card.model_dump_json(), body=body), encoding="utf-8", newline="\n"
@@ -192,6 +193,14 @@ def test_a_module_building_another_models_card_is_refused(
     reg.set_eligibility(_elig(other.artifact_hash or "", "3.0.0"), actor="owner")
     with pytest.raises(Refused, match="another model"):
         _load(reg, loader, module, version="3.0.0")
+
+
+def test_a_model_calibrated_on_another_label_is_refused_at_load(
+    conn: sqlite3.Connection, pkg: Path
+) -> None:
+    reg, loader, module = _publish(conn, pkg, label_version="m07.labels.tb.v0")
+    with pytest.raises(Refused, match="another label"):
+        _load(reg, loader, module)
 
 
 def test_revoked_approval_is_refused(conn: sqlite3.Connection, pkg: Path) -> None:

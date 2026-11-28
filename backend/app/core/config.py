@@ -60,7 +60,9 @@ class ProtectedPolicy(ContractModel):
     0.4: EV prices the triple-barrier label's three outcomes from the forecast's class
     probabilities of LABEL_VERSION and is unknown without them (#129). 0.5: the label
     is m07.labels.tb.v2 (one cost-free bid-path label for both sides) and EV charges the
-    spread, two slippages and the commission on every outcome (#129)."""
+    spread, two slippages and the commission on every outcome (#129). Since 0.5 the
+    decision loop stamps this version on every decision and experience; before, they
+    carried the risk policy's, which M06's verdicts keep."""
     live_allowed: bool = False
 
 

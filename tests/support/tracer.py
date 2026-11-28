@@ -169,11 +169,12 @@ def _brier(ps: Matrix, ys: list[int]) -> Decimal:
 
 
 def train(rows: list[dict[str, Any]], label: str) -> tuple[bytes, dict[str, Any]]:
-    """Fit on the `train` rows, then fit the temperature on the later `validation` rows.
+    """Fit on fold 0's train rows, then the temperature on its later test rows.
     Returns the weights file and what the card states: the validation Brier against the
     train class priors, and the training cutoff (when the latest label read became
     known)."""
-    by_split = {s: [r for r in rows if r["split"] == s] for s in ("train", "validation")}
+    by_split = {"train": [r for r in rows if 0 in r["folds"]["train"]],
+                "validation": [r for r in rows if 0 in r["folds"]["test"]]}  # fmt: skip
     xs, ys = _xy(by_split["train"], label)
     b, w = _fit(xs, ys)
     b_s, w_s = [_round(v) for v in b], [[_round(v) for v in r] for r in w]

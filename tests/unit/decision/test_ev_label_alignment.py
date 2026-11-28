@@ -5,19 +5,28 @@ size x (d x (p_s - p_opposite) - (spread + 2 x slippage)) - commission: every co
 on every outcome. So EV at each certain outcome equals what that outcome pays the side,
 after the same costs, and it breaks even where the edge meets `cost_over_atr`."""
 
+from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from tests.support.decision import COSTS, CYCLE, T0, D, _ctx, _forecast, _proposal
 
-from app.core.bet import LABEL_VERSION, SLIPPAGE, STRESSED_COST, UnitCost, cost_over_atr
+from app.core.bet import (
+    LABEL_VERSION,
+    SLIPPAGE,
+    STRESSED_COST,
+    TARGET_ATR,
+    UnitCost,
+    cost_over_atr,
+)
 from app.core.contracts import CandleClosed, ClassProbabilities
 from app.core.enums import Direction, Timeframe
-from app.decision.fusion import CENT, TARGET_ATR, Evidence, expected_value, gather
+from app.decision.fusion import CENT, Evidence, expected_value, gather
 from app.learning.bars import Horizon
 from app.learning.labels import Outcome, TripleBarrierLabel, triple_barrier
 from app.market_data.features import ATR_M15
+from app.risk.policy import DEFAULT_POLICY
 
 M5 = timedelta(minutes=5)
 CTX = _ctx()  # bid 2000, spread 0.20, ATR_M15 4, 0.01 lot of 100 oz
@@ -89,6 +98,48 @@ def test_each_certain_outcome_is_priced_at_what_the_label_pays_the_side(
     assert _ev(direction, "0.5", "0.2", "0.3") == expected.quantize(CENT)
 
 
+@pytest.mark.parametrize("direction", SIDES)
+def test_a_flat_is_priced_at_zero_drift_whatever_drift_the_label_records(
+    direction: Direction,
+) -> None:
+    """A stated assumption, not an equality: EV has no E[drift | FLAT] input, so a FLAT
+    is priced as if it closed at entry. The label keeps its drift as data; the gap from
+    what a drifting FLAT pays is size x drift, signed by side."""
+    flat0 = _label(FLAT_PATH)
+    drifted = replace(flat0, move=D(3))
+    assert flat0.move == 0 and drifted.move == 3
+    assert _ev(direction, "0", "0", "1") == _paid(direction, flat0)
+    sign = 1 if direction is Direction.UP else -1
+    size = CTX.initial_lot * COSTS.contract_size
+    assert _paid(direction, drifted) - _ev(direction, "0", "0", "1") == sign * size * 3  # type: ignore[operator]
+
+
+@pytest.mark.parametrize("atr", [D(0), D(-1)])
+def test_a_non_positive_atr_makes_ev_unknown(atr: Decimal) -> None:
+    snap = CTX.snapshot.model_copy(update={"values": {ATR_M15: atr}})
+    ctx = _ctx(snapshot=snap)
+    f = _forecast().model_copy(update={"class_probabilities": ClassProbabilities(
+        label_version=LABEL_VERSION, up=D("0.6"), down=D("0.1"), flat=D("0.3"))})  # fmt: skip
+    inp = gather(ctx, [_proposal()], Evidence(forecast=f), cycle=CYCLE, costs=COSTS,
+                 symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert expected_value(ctx, inp, COSTS) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"contract_size": D(0)}, {"contract_size": D(-100)}, {"commission_per_lot": D("-0.01")}],
+)
+def test_a_cost_input_that_would_lower_the_hurdle_makes_ev_unknown(
+    change: dict[str, Decimal],
+) -> None:  # fmt: skip
+    costs = replace(COSTS, **change)
+    f = _forecast().model_copy(update={"class_probabilities": ClassProbabilities(
+        label_version=LABEL_VERSION, up=D("0.6"), down=D("0.1"), flat=D("0.3"))})  # fmt: skip
+    inp = gather(CTX, [_proposal()], Evidence(forecast=f), cycle=CYCLE, costs=costs,
+                 symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert expected_value(CTX, inp, costs) == (None, None)
+
+
 def test_one_triple_prices_both_sides_as_mirror_images() -> None:
     long, short = _ev(Direction.UP, "0.6", "0.1", "0.3"), _ev(Direction.DOWN, "0.1", "0.6", "0.3")
     assert long == short == (D(4) * D("0.5") - D("0.30") - D("0.07")).quantize(CENT)
@@ -118,3 +169,4 @@ def test_the_stressed_cost_is_pre_declared_and_dearer_than_the_live_one() -> Non
     assert (STRESSED_COST.spread, STRESSED_COST.slippage, STRESSED_COST.commission) == (
         D("0.80"), D("0.10"), D("0.07"))  # fmt: skip
     assert cost_over_atr(STRESSED_COST, ATR) > cost_over_atr(COST, ATR)
+    assert STRESSED_COST.spread == DEFAULT_POLICY.max_spread  # the widest spread M06 accepts

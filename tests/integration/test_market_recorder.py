@@ -51,7 +51,7 @@ def _closes(n: int) -> list[str]:
 
 def _recorder(conn: sqlite3.Connection, candles: CandleStore, clock: Clock,
               provenance: Provenance = Provenance.LIVE) -> MarketRecorder:  # fmt: skip
-    return MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=M15,
+    return MarketRecorder(conn, session=None, candles=candles, symbol="XAUUSD", timeframe=M15,
                           context_timeframes=[], horizons=[H4], provenance=provenance,
                           clock=clock)  # fmt: skip
 
@@ -250,7 +250,7 @@ def test_a_horizon_that_does_not_line_up_with_the_recorded_bars_is_refused(
     conn: sqlite3.Connection, candles: CandleStore
 ) -> None:
     with pytest.raises(ValueError, match="horizon"):
-        MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=Timeframe.H1,
+        MarketRecorder(conn, session=None, candles=candles, symbol="XAUUSD", timeframe=Timeframe.H1,
                        context_timeframes=[], horizons=[Horizon(M15, 4)],
                        clock=Clock(T0))  # fmt: skip
 
@@ -259,3 +259,12 @@ def test_bars_after_a_cursor_skip_the_history_already_seen(candles: CandleStore)
     _bars(candles, _closes(6))
     later = candles.bars("XAUUSD", M15, as_of=_bar_close(5) + LAG, after=_bar_close(2) + LAG)
     assert [b.close_time for b in later] == [_bar_close(3), _bar_close(4), _bar_close(5)]
+
+
+def test_the_recorder_has_no_default_session_schedule() -> None:
+    """Train/serve parity (#129): whoever wires the recorder chooses the schedule, as the
+    export and label scoring must; a forgotten one is an error, not a silent 24/7."""
+    import inspect
+
+    param = inspect.signature(MarketRecorder).parameters["session"]
+    assert param.default is inspect.Parameter.empty

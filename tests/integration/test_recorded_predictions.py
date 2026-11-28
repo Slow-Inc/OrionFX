@@ -61,7 +61,7 @@ def model() -> LoadedPredictor:
 
 def _recorder(conn: sqlite3.Connection, candles: CandleStore, clock: Clock,
               model: LoadedPredictor) -> MarketRecorder:  # fmt: skip
-    return MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=M15,
+    return MarketRecorder(conn, session=None, candles=candles, symbol="XAUUSD", timeframe=M15,
                           context_timeframes=[], horizons=[H4], provenance=Provenance.BACKFILL,
                           predictors=[model], clock=clock)  # fmt: skip
 
@@ -115,7 +115,9 @@ def test_a_refused_prediction_is_skipped_not_fatal(
 ) -> None:
     _bars(candles, _closes(3))  # far too little history for the feature the model needs
     clock = Clock(_bar_close(2) + LAG)
-    _recorder(conn, candles, clock, model).tick()
+    rec = _recorder(conn, candles, clock, model)
+    rec.tick()
+    assert rec.refused == {model.card.ref: 3}  # counted, not silently dropped
     assert len(BarLog(conn).snapshots("XAUUSD", M15, start=T0, end=clock.t)) == 3
     assert BarLog(conn).predictions("XAUUSD", "trend-m15", start=T0, end=clock.t) == []
     assert Journal(conn).recent(["health.updated"])[0].envelope.payload.status.value == "OK"  # type: ignore[union-attr]
@@ -141,7 +143,7 @@ def test_the_outcome_matches_the_models_own_horizon_among_several(
     _bars(candles, _closes(n))
     clock = Clock(_bar_close(n - 1) + LAG)
     MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
-                   horizons=[Horizon(M15, 2), H4], provenance=Provenance.BACKFILL,
+                   session=None, horizons=[Horizon(M15, 2), H4], provenance=Provenance.BACKFILL,
                    predictors=[model], clock=clock).tick()  # fmt: skip
     pairs = BarLog(conn).prediction_outcomes("XAUUSD", "trend-m15", start=T0, end=clock.t)
     outcomes = [o for _, o in pairs if o is not None]
@@ -165,7 +167,7 @@ def test_a_failing_model_never_stops_the_snapshots_or_other_models(
     clock = Clock(_bar_close(n - 1) + LAG)
     MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
                    horizons=[H4], provenance=Provenance.BACKFILL, predictors=[model, other],
-                   clock=clock).tick()  # fmt: skip
+                   clock=clock, session=None).tick()  # fmt: skip
     assert len(BarLog(conn).snapshots("XAUUSD", M15, start=T0, end=clock.t)) == n
     assert BarLog(conn).predictions("XAUUSD", "other-m15", start=T0, end=clock.t)
     assert BarLog(conn).predictions("XAUUSD", "trend-m15", start=T0, end=clock.t) == []

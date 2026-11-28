@@ -29,7 +29,10 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 |---|---|---|
 | Live bars | `CandleEngine` builds M5/M15/H1 from bid ticks and flags real gaps. With a `SessionSchedule`, scheduled breaks and weekends are not gaps. | [built] #29, #124 |
 | Session schedule | `SessionSchedule` uses the New York zone and is DST-aware. `XAUUSD_NY_1700` is [PROPOSED]. `audit(schedule, bars)` checks it against the data. Each data source has its own schedule. | [built] #124. Per-source wiring: [planned #128] |
-| Historical bars | Import M1 bars (Dukascopy first) and resample to M5/M15/H1, with spread and a **data-source** tag separate from LIVE/BACKFILL. Validation matches live bars, and chunks are resumable. | [planned #128] |
+| Historical bars | Import M1 bars and resample to M5/M15/H1, with spread (if the vendor has it) and a **data-source** tag separate from LIVE/BACKFILL. Validation matches live bars, and chunks are resumable. Sources: `CsvM1Source` (generic format) and `FirstRateGcSource`. | [planned #128] |
+| Training source | **FirstRate GC 1m** (gold futures, a proxy for spot XAUUSD), data source `firstrate-gc`, schedule `cme-globex-gc-et`. Chosen for its licence; see `docs/research/2026-11-28-xauusd-data-sources.md`. Dukascopy was rejected on its terms. | [planned] until the owner buys the data and places it in `data/historical/` (ledger) |
+| No-trade minutes | FirstRate omits minutes with no trade. A run of ≤ 15 open-session minutes between two trades is filled flat at the previous close, volume 0; a bar made only of such minutes is flagged `NO_TRADE`, not `GAP`, and is labelled normally. A run never spans a scheduled closure. A longer run is a real gap, and so is a run that holds a row validation dropped. The import report lists every filled run's length. | [planned #128]; limit [PROPOSED] |
+| Rolls | Only the **ratio-adjusted** continuous series is read (multiplicative back-adjustment: scale-free features are unchanged). Roll-crossing rows are kept. Roll dates are recorded per dataset version in `candle_rolls` from FirstRate's contract listing. | [planned #128] |
 | Features | `build_feature_snapshot`, schema `m02.features.v2`, point-in-time, session-aware. | [built] #31, #124 |
 | Per-bar dataset | `MarketRecorder` records one snapshot per closed bar (LIVE or BACKFILL) into `learning_snapshots`, in one transaction per pass. | [built] #108 |
 | Outcomes | `BarLog.label_due` measures the move on the finest timeframe with bars closing at both ends. A row that cannot be labelled is marked once, point-in-time (`learning_unlabellable`). | [built] #108, #125 |
@@ -39,15 +42,28 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 **Rules for the data layer:**
 - Data is point-in-time everywhere: a row uses only what was available at its `as_of`.
 - Raw vendor data is never committed.
+- FirstRate GC rules (planned until the data arrives; pre-declared in `docs/research/2026-11-28-xauusd-data-sources.md` §5):
+  - Prices are futures **trades**, not bid, and have no spread: labels use the locked spread buffer (#129).
+  - Adjusted prices are not tradable levels. Never compare them with the broker's spot prices; use scale-free features only.
+  - Ratio-adjusted history is rescaled at every new roll, so a later download is a **new dataset version**, never an append.
+  - Volume is contracts traded, not tick volume: normalise or exclude it per data source (#129).
+  - No holiday calendar: CME holidays and early closes are reported as real gaps.
+  - Before the first training run, check the import report (no bars in closed time, the unexpected gaps, the filled-run lengths) and the raw minute gaps against the 15-minute limit.
+  - Price-unit quantities (the raw outcome `move`, a fixed spread or slippage buffer) are scaled by the cumulative roll factor in older history: express them in ATR or percent terms (#129).
 - News features are only `news.assessment` rows recorded live. The LLM never re-interprets past news, because of look-ahead through its training cutoff.
 
 ## 3. Labels and features for training
 
 | Item | Definition | Status |
 |---|---|---|
-| Triple-barrier label | `app/learning/labels.py`, `m07.labels.tb.v2`. One label per bar, the same for both sides. Barriers at the entry bid close ±d on the bid path, d = `TARGET_ATR`·ATR_M15 (the recorded snapshot's ATR at `as_of`). UP: a bar's high reaches the upper barrier first; DOWN: a bar's low reaches the lower one first; FLAT: neither within N expected slots of the session schedule, N = the forecast horizon's span (a scheduled closure is not a gap). No spread, slippage or commission inside the label, so it depends on bid prices only and a source without spreads labels as live bid candles do. A bar touching both barriers is AMBIGUOUS: no class label, left out of the export, its rate reported by `LabelStats` (with the FLAT share) per era. Read on the finest stored timeframe that measures it (M5 first) so dual touches stay rare. A missing bar before it resolves gives no label. `K` = `TARGET_ATR` is [PROPOSED]; the constants EV shares live in `app/core/bet.py`. tb.v1 (side-dependent, spread inside) was replaced before anything trained on it. | [done #129] |
+| Triple-barrier label | `app/learning/labels.py`, `m07.labels.tb.v2`. One label per bar, the same for both sides. Barriers at the entry bid close ±d on the bid path, d = `TARGET_ATR`·ATR_M15 (the recorded snapshot's ATR at `as_of`). UP: a bar's high reaches the upper barrier first; DOWN: a bar's low reaches the lower one first; FLAT: neither within N expected slots of the session schedule, N = the forecast horizon's span (a scheduled closure is not a gap). No spread, slippage or commission inside the label, so it depends on bid prices only and a source without spreads labels as live bid candles do. A bar that opens beyond a barrier (a gap) crossed it first and is labelled by that barrier. Any other bar touching both barriers is AMBIGUOUS: no class label, left out of the export. The export manifest's `label_stats` records `dual_touch_count`, `dual_touch_rate` and `flat_share` per era (each split, and "all"). Read on the finest stored timeframe that measures it (M5 first) so dual touches stay rare. A missing bar before it resolves gives no label. `K` = `TARGET_ATR` is [PROPOSED]; the constants EV shares live in `app/core/bet.py`. tb.v1 (side-dependent, spread inside) was replaced before anything trained on it. | [done #129] |
 | Stationary transforms | `app/prediction/transforms.py`, `m04.transforms.v1`. One `transform` (via `transform_from_store`) called by the dataset export and by the recorder for a model whose card reads that schema. Per timeframe: `(close−sma)/atr`, Bollinger position, `macd/atr`, MACD histogram/atr, `atr/close`, the log return, `spread/atr`, RSI/ADX/±DI scaled to 0..1; `sin`/`cos` of the UTC hour. Session and liquidity features from the gold bars, point in time and session-aware: distance to the previous session's high and low in ATR_M15, the previous session's London/NY volatility ratio (local 08:00–17:00 each), spread over its rolling median. `tick_volume` is excluded. Invariant to a rescaled price; all but `atr/close` and the log return also to a shifted one. | [done #129] |
-| Offline/online parity | The recorder and the export share `transform_from_store`; `prediction_labels` scores recorded predictions on the label version the export carries (`barrier_labels`). The raw `move` stays as raw data. | [done #129] |
+| Offline/online parity | The recorder and the export share `transform_from_store` and read a version on one `SessionSchedule`: `SourceRegistry.resolve_schedule` gives a version bound to a data source its source's schedule (a different one given is refused). `MarketRecorder`, `export_dataset`, `prediction_labels` and `label_at` take `session` with no default, and the manifest records each schedule as `session:<schedule_id>` (XAUUSD: `XAUUSD_NY_1700`). Each exported barrier label carries `ends_at`, and a row joins a fold window only if every barrier label ends by the window's end, not just `as_of + horizon`. `prediction_labels` scores recorded predictions on the label version the export carries (`barrier_labels`). The raw `move` stays as raw data. | [done #129 for the recorder and the export; the evaluation path (`EvaluationEvidence`) [built #127]; the trading-path adapter is #157 item 2] |
+
+**Certified by agent under owner delegation, 2026-11-28 (#129).**
+- **Dual touches stay excluded.** AMBIGUOUS rows are left out. Labels resolve on the finest stored timeframe (`FINEST_FIRST`, M5 first), so dual touches should be rare, and the manifest measures the rate.
+- **Pre-declared switch.** If the measured `dual_touch_rate` exceeds 1% in any era, the next label version adds AMBIGUOUS as a fourth class. That class is priced worst case for both sides: `EV = size·(d·(p_s − p_o − p_amb) − fills) − commission`. The switch is declared now and not built in tb.v2.
+- **FLAT drift = 0 is a certified assumption.** EV prices a FLAT at zero drift, and a FLAT still pays the fills. The label keeps the real drift as data. Estimating E[move | FLAT] is backlog item 9.
 
 **EV prices the label, and both are proxies (#129).** M05's EV for side s uses the forecast's calibrated class probabilities of `LABEL_VERSION` (p_s = up for a long, down for a short): `EV = size·(d·(p_s − p_opposite) − (spread + 2·slippage)) − commission`, d = `TARGET_ATR`·ATR_M15, the spread the decision-time one (the stressed cost in backtests). That is `size·d·(p_s − p_opposite − cost_over_atr)`: every cost once, on every outcome, a FLAT's drift taken as 0. One triple prices both sides. EV at each certain outcome equals what that outcome pays the side after the same costs (`tests/unit/decision/test_ev_label_alignment.py`). `cost_over_atr` is the per-era break-even and `STRESSED_COST` the pre-declared stressed cost. **The system has no per-position SL/TP (RSK-05):** real exits are the Emergency SL, the USD cycle Profit Target and basket trailing. The ±1·ATR label and EV are a proxy for that trade; only the system backtest (#131), which replays the real exits, can judge whether a model is usable.
 
@@ -59,10 +75,88 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Calibration | Isotonic or Platt, on a slice separated in time from the fold's training data. | [planned #130] |
 | Metric baseline | Multiclass Brier against class priors from **that training fold only**. | [planned #130] |
 | Artifact | Native model file (never pickle). The manifest records the commit SHA, dataset version, label and transform versions, seeds and library versions. | [planned #130] |
-| Card | `ModelCard.training_cutoff` and `weights_hash`: `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. Dataset ref, label version and transform version are still to come. | cutoff and weights pin [built] #127; the other fields [planned #130] |
+| Card | `ModelCard.training_cutoff` and `weights_hash` (#127), `label_version` (#129): `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. Dataset ref and transform version are still to come. | cutoff and weights pin [built] #127; label version [built] #129; the other fields [planned #130] |
 | Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | evaluation path [built] #127, see §10; the live `load_model` still calls `build()` with no arguments [planned #133] |
 | Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and no live path accepts it. | [built] #127, see §10 |
-| Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit, the VM holds no secrets, and only the artifact and manifest come back. Locally they are registered only after a hash check. Every VM is stopped after use. | [planned #134] |
+| Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit. The bundle is scanned for the secret shapes and known local secret values listed in §4a. The artifact, the manifest and the run log come back. Only the artifact and the manifest are hash-checked, verified and kept, and nothing is registered yet. Every VM is stopped after use. Runbook: §4a. | [built] #134: runner, bundle scan, verified import of the files. The trainer is a stub until #130. **Not built:** registration, which comes through the #130 adapter path; resumable stages; local recompute of validation metrics (#130, #132). |
+
+## 4a. Runbook: a training job on Colab [built #134]
+
+**Run it.** The job spec is a `JobSpec` JSON (`app/learning/colab_job.py`). It holds:
+- the protocol hash and the config;
+- the local export path and its `dataset_hash`;
+- the 40-hex code SHA;
+- the seeds and the entrypoint;
+- the model id and version;
+- `timeout_s`.
+
+`bundle` adds `code_hash`, the sha256 of the bundled `code.tar`.
+
+```
+uv run python -m app.learning.colab_runner bundle spec.json data/bundles/<job> \
+    [--repo .] [--exports data/exports]                                # scanned bundle
+uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json --db <scratch.db> \
+    [--repo .] [--artifacts models] [--work data/colab_runs] [--min-cu 20]
+```
+
+- `bundle` writes three files and nothing else:
+  - the export (`dataset.jsonl`). It must resolve inside `--exports` (a relative `dataset_path` is relative to `--exports`) and must not have a secret-shaped name. It must be UTF-8 JSONL, with one JSON object on every line;
+  - `job.json`;
+  - `code.tar`, a `git archive` of the code SHA limited to `backend/app`, `pyproject.toml` and `uv.lock`. The SHA must be committed.
+- **Known local secrets.** Both commands load the secret-named environment variables, plus **every value** in `<repo>/.env`. Account data such as a login or a server name is not secret-named, so all `.env` values count. `.env` is parsed the way python-dotenv parses it: inline comments are stripped, and its escapes are decoded inside quotes. When the decoded value differs from the raw text inside the quotes, both are searched; the raw one is named `KEY (raw)`. Any value of 4 or more characters, raw or JSON-escaped, found anywhere in the bundle is a refusal. The refusal names the variable, never the value.
+  - Expect false refusals when a `.env` holds a short or common value (for example `true`, a port or a host) that also occurs in the code or the data. Lengthen or rename the value; do not weaken the scan.
+- `run` steps:
+  1. Re-scans the bundle with the known local secrets, then uploads exactly the scanned bytes.
+  2. Checks `code_hash`, and refuses a `code.tar` that is not byte-identical to a fresh `git archive` of the job's code SHA, taken from `--repo`. This proves that the **uploaded** archive is the pinned commit. It does not prove that the VM ran it: the returned manifest is written by the untrusted VM, so the artifact's provenance is **asserted by the VM, not attested**. A different git version could change the archive bytes; that case is a refusal, never a pass.
+  3. Refuses a model version that is already registered, or whose `models/<id>/<version>/` directory already exists.
+  4. Refuses when `colab usage` cannot be read, or shows less than `--min-cu`. `--min-cu` cannot be set below 20 or to a non-finite value. **Exit 3 is the CU-floor stop condition: report it to the owner, do not lower the floor on your own.** Any other refusal (a bundle refused at steps 1–3, or a return refused at step 7) exits 2 with `REFUSED: ...`.
+  5. Starts a CPU high-mem VM. The driver (`colab_vm.py`) installs the locked deps with a pinned uv and runs the entrypoint.
+     - The driver is uploaded from the **local checkout** that runs the runner. It is trusted, reviewed local code, not the pinned `code_sha`. Only `code.tar`, which holds the trainer and its deps, is pinned. Whatever the VM returns, including the manifest, is still verified as untrusted.
+  6. Downloads the output tar and the run log, then always runs `colab stop`:
+     - A `finally` runs it, and SIGINT, SIGTERM and SIGBREAK lead into that `finally`.
+     - The stop runs in its own process group, so a second Ctrl-C does not kill it. It is retried once.
+     - A signal that arrives during the stop is held until the stop is done. It is then raised as `RunInterrupted`, so nothing is kept.
+     - The stop is attempted even when `colab new` failed, because a late failure can still have assigned a VM. If that stop also fails, the `new` error is raised (the real cause), with the recovery command attached as a note.
+     - The `colab` CLI never receives a secret-named environment variable. A `colab usage` call through this filtered environment authenticated on 2026-11-28.
+  7. Verifies the return locally, then keeps it (see below).
+- **Hard timeout:** `timeout_s` bounds the whole remote run.
+- **Verification.** The checks, in order:
+  - **The tar.** `out.tar` must be at most 256 MiB, checked after the download. It must be a plain, uncompressed tar holding exactly `manifest.json`, `card.json` and `weights.json`, all regular files.
+  - **The hashes.** Every sha256 must match the manifest.
+  - **The binding.** The manifest must echo these job fields: job id, protocol hash, code SHA, `code_hash`, dataset hash, seeds, config, entrypoint, and model id and version.
+    - A bundle without `code_hash` is refused by the scan, before any VM starts. Re-bundle older jobs.
+    - A job whose `code_sha` pins a commit from before this binding was extended is refused only after the VM has run. The VM-side binding comes from the pinned commit's `colab_vm.py`, so the mismatch shows up only in the returned manifest. Pin a commit that has this change.
+  - **The card.** It must be a valid `ModelCard` for this job and must name the weights' hash. It may not claim anything the VM cannot prove: `supported_modes` must be exactly SHADOW (DEMO and LIVE are refused, and so is an omitted field, because the default is SHADOW+DEMO); `calibrated` must be false; there must be no `evidence_refs` and no `validation` metrics. Validation is recomputed locally, by trusted code (#159, with #130 and #132).
+  - **The weights.** They must be JSON (a native model file is not accepted yet), and are never unpickled.
+- **What happens on success:**
+  - The verified files are copied to `models/<id>/<version>/`.
+  - A local `run.json` record is written beside them. It holds the job, the file hashes, the session, the forced `supported_modes`, `registered: false`, and the time.
+  - **Nothing is registered.** The registry's `artifact_hash` must be what the trusted adapter loads (#130), so registration belongs to #130's `lightgbm_native` card and weights path. `RunResult` and `run.json` are its inputs (tracked in #159). The copied `card.json` is the VM's bytes, hash-pinned by the manifest, and passed the checks above (SHADOW only, no claims).
+  - Any failure during the copy removes the directory.
+  - `--db` is required. It is read only to refuse a version that is already registered; point smoke runs at a scratch DB.
+- **Recovery after a hard kill** (which cannot be caught): run `colab sessions`, then `colab --config <work>/colab-state.json stop -s <session>`. The runner records its sessions in that state file, not in the default one. A `VmStopFailed` error means the VM may still be billing.
+- **Smoke evidence (2026-11-28, run by the agent, stub trainer, scratch DB).**
+  - **Normal run.** Commit `88d8e4d` ran with `timeout_s` 900.
+    - The VM showed 8 CPUs, `MemTotal` 53467180 kB and Python 3.13.18. Locked deps were installed with uv 0.11.16.
+    - The return was verified and registered. That is the behaviour before this change.
+    - Wall time was 38.9 s inside the runner and 44 s end to end. An earlier run took 53 s.
+    - The balance read 136.64 CU before and after. `colab usage` shows two decimals, so the spend was below 0.01 CU.
+    - Afterwards, `colab sessions` reported "No active sessions found on server", with `Active assignments: 0`.
+  - **CU floor.** `--min-cu 1000` was refused with exit 3, and no VM started.
+  - **Hard timeout.** A real run at `24eea01`, with `timeout_s` 25, killed `colab exec` at the deadline. It exited non-zero after 32 s in total, registered nothing and left no session.
+  - **What this proves.** The plumbing only; it is not a model result. Every change after `0ce391c` is unit-tested only and has not run a VM on Colab: the review fixes, the hardened scan, verification without registration, and the stop handling.
+
+**What the scan refuses** (`scan_files`, tested on a bundle built from HEAD). It proves only what this list covers. It cannot find a secret whose shape and value it does not know.
+- `.env` files, and a dataset export with a secret-shaped name;
+- keys and certificates (`*.pem`, `*.key`, `id_*`), and anything named like a credential;
+- SQLite stores (by name and by magic bytes), and a dataset that is not UTF-8 JSONL objects, which covers compressed files;
+- key-like strings (private keys, AWS, GitHub, OpenAI/Anthropic-style, Google, Slack and Telegram tokens);
+- the value of any secret-named local environment variable and of every `<repo>/.env` entry, raw or JSON-escaped;
+- config keys that look like secrets;
+- tests, frontend, docs, data, `.claude`, and any path outside the code allow-list;
+- links and special files, and member paths that are absolute, contain `..` or `\`, or are not normalised.
+
+The VM is given no broker, LLM or GitHub credentials. `--env` is never used, so no local environment is forwarded to the VM.
 
 ## 5. Evaluation tiers (always reported separately)
 
@@ -83,7 +177,7 @@ The synthetic scenarios (`validation/scenarios.py`) are behaviour tests. They ne
 
 ## 6. The claim protocol (anti-overfitting)
 
-A **protocol version** is a hashed record saved before the first run of a claim [planned #132]. It holds:
+A **protocol version** is a hashed record saved before the first run of a claim [built #132 machinery: `validation/protocol.py`, a full sha256 of canonical JSON; the certified values themselves live in the protocol document, not in code]. It holds:
 - the targets [PROPOSED; certified by the owner];
 - the configuration space and the iteration budget (20);
 - the regime rule;
@@ -103,6 +197,28 @@ Rules, adopted from mip-research (PRD #120):
 8. **Keep errata.** Evidence can be marked withdrawn, corrected, unconfirmed or superseded.
 9. **Say who verified.** Every report states what was verified and by whom.
 10. **Stop rule.** If the budget runs out before the targets are met, stop and report. Never lower the targets.
+
+**What the #132 machinery builds** (built #132 machinery, not yet wired into a trainer or the system backtest):
+
+| Rule | Mechanism | Status |
+|---|---|---|
+| Protocol record | `protocol.Protocol`, `protocol_hash`, `load_protocol(text, expected_hash)` refuses a document whose content does not hash to the expected value. | [built #132] |
+| 1, 10 | `runlog.RunLog` (migration `0016_claim_protocol`). A run counts only under a registered protocol hash. N is the number of distinct config hashes with an `ok` or `failed` run. A new counted config past the budget is refused. `aa` and `bugfix-rerun` (with a bug note and fix SHA) are logged but never counted, and only for a config already counted. A config has one current result: a `bugfix-rerun` replaces it only when that result failed or is marked INVALID or CORRECTED, and never after the holdout is consumed, so reruns cannot be shopped for the best one. `open_holdout` records the single opening, for a counted config whose current result (its latest `ok` or `bugfix-rerun` run) carries no erratum; after it, no new config counts. Windows stay honest across versions: `register` refuses a new version whose holdout or unread slice overlaps a window another version has read (its debug window, or its holdout once opened), whose debug window overlaps a window another version seals (its unread slice, or its holdout while unopened), or whose unread slice and holdout cross another version's holdout and unread slice; `open_holdout` refuses a holdout another version already opened. An `aa` run must use a seed set its config has not run. | [built #132] |
+| 2 | `claimstats.mean_ci`, `brier_skill_ci`: stationary or circular block bootstrap over days, one- or two-sided. | [built #132] |
+| 3 | `claimstats.simulated_power`, `mean_lb_power`, `min_track_record_length`; `ece_sweep` with `ece_noise_floor_consistency` for the ECE gate (`ece_noise_floor`, `expected_binned_ece` for the binned estimator). | [built #132] |
+| 4 | `claimstats.best_of_n` (the caller passes N as `RunLog.counted_configs`; the function checks only that N is not below the configs shown, and the wiring that passes it is planned), `deflated_sharpe`, `pbo_cscv`, `sign_test`, `holm`. | [built #132] |
+| 5 | `claimstats.aa_noise_floor`, `compare_to_floor`. The caller states each metric's direction (`higher_is_better`), for `best_of_n` too, because the gates mix Brier skill with ECE and log loss. | [built #132] |
+| 6 | `recompute.recheck`: a second implementation recomputes `brier_multiclass`, `top_label_accuracy`, `log_loss` and `brier_skill_multiclass` from per-prediction outputs and flags each mismatch. A metric logged under another name (the card's binary `brier`, `direction_accuracy`) is reported as unchecked, never compared. The train/serve skew check is not built. | recompute [built #132]; skew [planned] |
+| 7 | The retention benchmark against the previous version is not built. Runs are never deleted (database triggers). | [planned] |
+| 8 | `RunLog.add_erratum`: INVALID, WITHDRAWN, CORRECTED, UNCONFIRMED or SUPERSEDED, with a reason and a time. The run stays, and its budget is never refunded. | [built #132] |
+
+The ECE estimators are stated in `claimstats`:
+- `ece_sweep` is class-wise ECE_sweep (Roelofs et al. 2022), **L1**: one-vs-rest per class on equal-mass bins, using the largest bin count that keeps the observed frequency monotone, averaged over the classes.
+- `ece_noise_floor_consistency` gives its noise floor by consistency resampling: labels are redrawn from the model's own probabilities, and the result is a set of quantiles (for example q50).
+- `ece_binned` is the plug-in L1 at a fixed bin count.
+- `ece_debiased` is Kumar, Liang & Ma 2019, the debiased **L2** calibration error. It is a secondary diagnostic only, because L2 is not on the L1 scale.
+
+Which estimator a gate uses, and on which sample, is a protocol value.
 
 **Readiness** is judged per subject: `EvidenceStore` qualifies only subjects common to every run [built #126]. `DEFAULT_POLICY` is uncertified, so the verdict is NOT_READY until the owner certifies thresholds.
 
@@ -146,6 +262,7 @@ Source: `docs/research/2026-11-28-m04-quant-upgrade-proposals.md`.
 | 6 | **Cross-market data-only symbols** (XAGUSD and a USD proxy). Schema bump, never tradable, one session schedule per symbol. Admitted only with a live source. Measure the skew between the training feed and the serving feed. | #141 | [planned] |
 | 7 | Yields, VIX and the pre-event countdown. Need point-in-time sources. | after #41 / OD-14 | [blocked] |
 | 8 | Chart+News fusion and regime-specific ensembles, from Shadow data. | after #17, #41 | [blocked] |
+| 9 | **Estimate E[move \| FLAT].** EV prices a FLAT at zero drift (certified assumption, #129). Measure the FLAT drift per era from the exported `barrier_labels` and, if it is material, propose a label/EV version that prices it. | after #130 | [planned] |
 | — | **Model input to M06 trailing, TP or SL.** An owner decision, never a backlog item ("risk is independent of AI"). | owner | [not planned] |
 | — | Deep learning or transformers on raw OHLCV. Deferred. | — | [not planned] |
 
@@ -191,7 +308,7 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 
 **4. Tracer fixture [built #127]** (`tests/integration/test_training_tracer.py`, `tests/support/tracer.py`).
 - **Fixture:** seeded synthetic M5 bars on `XAUUSD_NY_1700` with trend legs of 18-36 h. M15/H1 are resampled from them. The import link is stubbed until #128.
-- **Chain:** record (BACKFILL, `session=`) → label → export → export M04 transforms and `m07.labels.tb.v2` → train a three-class softmax on two transforms (`H1/M15.close_sma_atr`) on train → temperature-scale on validation → card (`label_version`) + JSON weights → `propose_candidate` → `load_for_evaluation` → `replay(session=)` on the holdout with real `trend_following` → `EvidenceStore`.
+- **Chain:** record (BACKFILL, `session=`) → label → export → bind the version to its source (`SourceRegistry.register`) → export M04 transforms and `m07.labels.tb.v2` with one walk-forward fold and a sealed holdout → train a three-class softmax on two transforms (`H1/M15.close_sma_atr`) on the fold's train window → temperature-scale on its test window → card (`label_version`) + JSON weights → `propose_candidate` → `load_for_evaluation` → `replay(session=)` on the sealed holdout with real `trend_following` → `EvidenceStore`.
 - **Asserts:**
   - H1/M15 features set on the test fold and after both reopens;
   - every row labelled or marked unlabellable exactly at a closure;

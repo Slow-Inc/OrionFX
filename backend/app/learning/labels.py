@@ -11,8 +11,22 @@ prices both sides from one (UP, DOWN, FLAT) distribution.
 - No spread, slippage or commission is inside the label: it depends on bid prices only,
   so a historical source without spreads labels exactly as live bid candles do. M05's
   EV charges every cost once, outside it (`fusion.expected_value`).
-- A bar touching both barriers is AMBIGUOUS (the order inside a bar is unknown): no
-  class label. The export leaves such rows out and `LabelStats` reports the rate.
+- A bar that opens beyond a barrier (a gap) crossed it first: UP or DOWN by that
+  barrier, whatever the rest of the bar touched.
+- A bar touching both barriers otherwise is AMBIGUOUS (the order inside a bar is
+  unknown): no class label. The export leaves such rows out and records the rate per
+  era in the manifest (`LabelEraStats`).
+- A FLAT is priced by EV at zero drift; it still pays the fills. Its `move` keeps the
+  real drift as data.
+
+Certified by agent under owner delegation, 2026-11-28 (#129, owner grant in CLAUDE.md):
+- AMBIGUOUS rows stay excluded. Labels resolve on the finest stored timeframe
+  (FINEST_FIRST, M5 first), so dual touches should be rare; the manifest measures it.
+- Pre-declared switch: if the measured dual-touch rate exceeds 1% in any era, the next
+  label version adds AMBIGUOUS as a fourth class, priced worst case for both sides:
+  EV = size x (d x (p_s - p_o - p_amb) - fills) - commission. Not built in tb.v2.
+- FLAT drift = 0 is a certified assumption (a FLAT still pays the fills); estimating
+  E[move | FLAT] is a research backlog item.
 - Labels are read on the finest stored timeframe that can measure them (M5 first), so
   a dual touch is rare. A missing bar before the label resolves gives no label on that
   timeframe, never a stretched one.
@@ -41,6 +55,7 @@ from app.learning.bars import BarLog, Horizon, RecordedPrediction
 from app.learning.moves import FINEST_FIRST
 from app.market_data.features import ATR_M15, FEATURE_SCHEMA
 from app.market_data.session import SessionSchedule, next_slot
+from app.market_data.sources import SourceRegistry
 from app.market_data.store import CandleStore
 
 __all__ = [
@@ -119,6 +134,10 @@ def triple_barrier(
         bar = by_open.get(slot)
         if bar is None:
             return None  # a hole before it resolved: no label
+        if bar.open >= upper:  # a gap over a barrier: the open crossed it first
+            return label(Outcome.UP, d, bar)
+        if bar.open <= lower:
+            return label(Outcome.DOWN, -d, bar)
         up, down = bar.high >= upper, bar.low <= lower
         if up and down:
             return label(Outcome.AMBIGUOUS, None, bar)
@@ -138,11 +157,12 @@ def label_at(
     horizon: Horizon,
     *,
     now: datetime,
-    session: SessionSchedule | None = None,
+    session: SessionSchedule | None,
 ) -> TripleBarrierLabel | None:
     """The label of the bar closing at `as_of`, from bars known at `now`, on the finest
     stored timeframe whose bars measure it (M5 first); None when the ATR is missing or
-    no timeframe has the entry bar and every bar until it resolves (or not yet)."""
+    no timeframe has the entry bar and every bar until it resolves (or not yet).
+    `session` has no default: the export, the recorder and scoring must share it."""
     if atr is None or atr <= 0:
         return None
     for tf in FINEST_FIRST:
@@ -212,19 +232,24 @@ def prediction_labels(
     start: datetime,
     end: datetime,
     now: datetime,
-    session: SessionSchedule | None = None,
+    session: SessionSchedule | None,
     model_version: str | None = None,
 ) -> list[tuple[RecordedPrediction, TripleBarrierLabel | None]]:
     """Each recorded prediction of `model_id` with `start <= as_of < end`, scored on the
     label the training export carries (LABEL_VERSION, the model's own horizon, the ATR
-    of the bar's recorded M02 snapshot on `timeframe`), from bars known at `now`."""
+    of the bar's recorded M02 snapshot on `timeframe`), from bars known at `now`. Only
+    predictions recorded on `candles`' dataset version are scored.
+    `session` has no default; a version bound to a data source is read on its source's
+    schedule, as the export and recorder read it (a different one given is refused)."""
     log = BarLog(conn)
+    session = SourceRegistry(conn).resolve_schedule(candles.dataset_version, session)
     atr = {r.snapshot.as_of: r.snapshot.values.get(ATR_M15)
            for r in log.snapshots(symbol, timeframe, start=start, end=end)
            if r.dataset_version == candles.dataset_version
            and r.snapshot.feature_schema == FEATURE_SCHEMA}  # fmt: skip
     out = []
-    for r in log.predictions(symbol, model_id, start=start, end=end, model_version=model_version):
+    for r in log.predictions(symbol, model_id, start=start, end=end, model_version=model_version,
+                             dataset_version=candles.dataset_version):  # fmt: skip
         h = Horizon(r.prediction.horizon, r.prediction.horizon_bars)
         lab = label_at(candles, symbol, r.as_of, atr.get(r.as_of), h, now=now, session=session)
         out.append((r, lab))

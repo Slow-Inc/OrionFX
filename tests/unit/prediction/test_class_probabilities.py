@@ -77,6 +77,10 @@ def test_without_a_calibrated_label_version_there_are_none(card: dict[str, objec
 def test_a_labelled_model_without_three_scores_is_refused() -> None:
     with pytest.raises(Refused, match="UP, DOWN and NEUTRAL"):
         _predict(ThreeClass({Direction.UP: "0.6", Direction.DOWN: "0.4"}))
+    extra = ThreeClass(SCORES)
+    extra._scores["SIDEWAYS"] = D(0)  # type: ignore[index]
+    with pytest.raises(Refused, match="UP, DOWN and NEUTRAL"):
+        _predict(extra)
 
 
 def test_a_model_calibrated_on_another_label_is_refused_at_load() -> None:

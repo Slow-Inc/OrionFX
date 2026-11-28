@@ -13,6 +13,12 @@ mean the schedule is wrong for that source, and missing open slots are real gaps
 `XAUUSD_NY_1700` is the common MT5 gold schedule: closed daily 17:00-18:00 New York time,
 and from Friday 17:00 to Sunday 18:00. It is [PROPOSED]: confirm it against the broker's
 symbol specification and the data (`audit`) before relying on it.
+
+`CME_GLOBEX_GC` is CME Globex gold futures (GC), the FirstRate training source (#128):
+Sunday to Friday 18:00-17:00 New York time, with a 60-minute break from 17:00. The hours
+are the same as `XAUUSD_NY_1700`, but it is a separate specification from a different
+authority, so it has its own id. It is [PROPOSED] too: no holiday calendar, so CME
+holidays and early closes show up as gaps (fail-closed).
 """
 
 from collections.abc import Sequence
@@ -23,7 +29,7 @@ from zoneinfo import ZoneInfo
 
 from app.core.contracts import CandleClosed
 
-__all__ = ["XAUUSD_NY_1700", "ScheduleAudit", "SessionSchedule", "audit"]
+__all__ = ["CME_GLOBEX_GC", "XAUUSD_NY_1700", "ScheduleAudit", "SessionSchedule", "audit"]
 
 STEP = timedelta(minutes=5)
 """Closures start and end on 5-minute boundaries, the finest bar this system builds."""
@@ -93,6 +99,14 @@ XAUUSD_NY_1700 = SessionSchedule(
     daily_reopen=time(18, 0),
 )
 """[PROPOSED] See the module docstring."""
+
+CME_GLOBEX_GC = SessionSchedule(
+    schedule_id="cme-globex-gc-et",
+    tz="America/New_York",
+    daily_close=time(17, 0),
+    daily_reopen=time(18, 0),
+)
+"""[PROPOSED] CME Globex gold futures hours. See the module docstring."""
 
 
 def next_slot(schedule: SessionSchedule | None, open_time: datetime, size: timedelta) -> datetime:

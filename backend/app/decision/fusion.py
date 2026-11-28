@@ -301,6 +301,8 @@ def expected_value(
         or f.data_quality is not DataQuality.OK
         or f.horizon is not chosen.horizon
         or costs is None
+        or costs.contract_size <= 0
+        or costs.commission_per_lot < 0
         or ctx.spread is None
         or atr is None
         or atr <= 0

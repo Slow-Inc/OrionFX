@@ -120,7 +120,7 @@ def test_no_live_path_accepts_an_evaluation_predictor(
         with pytest.raises(Refused, match="evaluation"):
             MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=Timeframe.M5,
                            context_timeframes=[], horizons=[Horizon(Timeframe.M5, 1)],
-                           provenance=provenance, predictors=[ev])  # type: ignore[list-item]  # fmt: skip
+                           provenance=provenance, predictors=[ev], session=None)  # type: ignore[list-item]  # fmt: skip
     with pytest.raises(Refused, match="evaluation"):
         DecisionLoop(conn, candles=candles, symbol="XAUUSD", timeframe=Timeframe.M5,
                      context_timeframes=[], strategies=[], registry=registry,

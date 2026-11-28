@@ -1,0 +1,157 @@
+# Run OpenCode once, read-only, and write its final answer to a file.
+#
+# Shared by every OpenCode workflow. It signs in through an OpenCode Console
+# OIDC service account, so no repo secret is needed. Then it runs the pinned
+# OpenCode CLI with a deny-by-default tool policy: read/glob/grep/list inside
+# the checkout and the skill tool only. There is no bash, no edit, no web, and
+# no reads outside the checkout. The model gets no GitHub token; the calling
+# workflow posts the answer in a trusted step.
+name: OpenCode run (read-only)
+description: Sign in via OIDC, run OpenCode read-only, write the final answer to a file.
+inputs:
+  client-id:
+    description: >-
+      OpenCode Console service-account credential ID. NOT a secret: it only
+      works with an OIDC token from this repo, on the event the account allows.
+      Callers pass it from a repo variable (vars.OPENCODE_PR_CLIENT_ID or
+      vars.OPENCODE_AUTOMATION_CLIENT_ID), never as a literal, because secret
+      scanners misread its prefix as a payment key.
+    required: true
+  prompt-file:
+    description: Path to the prompt text.
+    required: true
+  output-file:
+    description: Path where the final answer is written.
+    required: true
+  model:
+    description: The one place the OpenCode Go model is set for every workflow.
+    default: opencode-go/deepseek-v4.1-flash
+  idle-minutes:
+    description: >-
+      Liveness budget: stop OpenCode only after it wrote nothing (no event on
+      stdout, no byte on stderr) for this long. A model turn emits nothing
+      until it finishes, so this must exceed the longest healthy turn.
+    default: '4'
+  hard-minutes:
+    description: >-
+      Hard cap for the whole OpenCode run (all attempts, the retry included),
+      however chatty it is. Install, sign-in and posting come on top, so the
+      caller's job timeout must exceed it plus setup. Empty means
+      timeout-minutes, then 20.
+    default: ''
+  timeout-minutes:
+    description: Deprecated alias of hard-minutes, for workflow files that predate it.
+    default: ''
+  retries:
+    description: >-
+      Extra attempts when the model ends cleanly with no answer text (0 or 1),
+      inside the same hard cap. Never after a stall, the hard cap or a breach.
+    default: '0'
+runs:
+  using: composite
+  steps:
+    # Install first, with no OpenCode key anywhere in the job yet. npm lifecycle
+    # scripts also run without the OIDC request credentials or the runtime token,
+    # so they cannot mint an OIDC token (and so an App token) or touch the cache.
+    - name: Install OpenCode
+      shell: bash
+      run: |
+        set -euo pipefail
+        scrub=(env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RESULTS_URL -u ACTIONS_CACHE_URL)
+        "${scrub[@]}" npm install -g --no-fund --no-audit opencode-ai@1.19.6 || {
+          echo "unavailable: installing opencode-ai@1.19.6 from npm failed" > "$RUNNER_TEMP/opencode-cause"
+          exit 1
+        }
+        "${scrub[@]}" opencode --version
+    # Sign in and run in ONE step: the 1-hour key lives only in this step's
+    # process env (never GITHUB_ENV), so no later step ever sees it.
+    - name: Sign in to OpenCode and run
+      shell: bash
+      env:
+        AUDIENCE: https://opencode.ai/console
+        CLIENT_ID: ${{ inputs.client-id }}
+        MODEL: ${{ inputs.model }}
+        PROMPT_FILE: ${{ inputs.prompt-file }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+        IDLE_MINUTES: ${{ inputs.idle-minutes }}
+        HARD_MINUTES: ${{ inputs.hard-minutes || inputs.timeout-minutes || '20' }}
+        HARD_INPUT: ${{ inputs.hard-minutes }}
+        TIMEOUT_ALIAS: ${{ inputs.timeout-minutes }}
+        RETRIES: ${{ inputs.retries }}
+        OPENCODE_CONFIG_CONTENT: >-
+          {"permission": {"*": "deny", "read": "allow", "glob": "allow",
+          "grep": "allow", "list": "allow", "skill": "allow",
+          "external_directory": "deny", "bash": "deny", "edit": "deny",
+          "webfetch": "deny", "websearch": "deny", "codesearch": "deny",
+          "task": "deny"}}
+      run: |
+        set -euo pipefail
+        # The cause file tells the caller whether a failure is a config or
+        # security error (fail red) or OpenCode being unavailable (degrade).
+        export OPENCODE_CAUSE_FILE="$RUNNER_TEMP/opencode-cause"
+        cause() { echo "$1" > "$OPENCODE_CAUSE_FILE"; echo "::error::$1"; exit 1; }
+        [ -n "$CLIENT_ID" ] || cause "config: the OpenCode client-id (repo variable) is empty"
+        [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || cause "config: no OIDC token; the job needs id-token: write"
+        oidc=$(curl -sSf --oauth2-bearer "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" | jq -r .value) \
+          || cause "unavailable: the GitHub OIDC token request failed"
+        echo "::add-mask::$oidc"
+        token=$(curl -sSf https://opencode.ai/console/auth/oauth/token \
+          -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+          -d subject_token_type=urn:ietf:params:oauth:token-type:jwt \
+          -d client_id="$CLIENT_ID" \
+          -d subject_token="$oidc" | jq -r .access_token) \
+          || cause "unavailable: OpenCode Console sign-in failed"
+        unset oidc
+        if [ -z "$token" ] || [ "$token" = "null" ]; then
+          cause "unavailable: OpenCode Console returned no access token"
+        fi
+        echo "::add-mask::$token"
+        export OPENCODE_API_KEY="$token"
+        unset token
+        # OpenCode (and any project plugin it loads from the checkout) runs with no
+        # OIDC request credentials or runtime tokens: the exchange above is done.
+        scrub=(env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RESULTS_URL -u ACTIONS_CACHE_URL)
+        "${scrub[@]}" bash -c '[ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}${ACTIONS_ID_TOKEN_REQUEST_URL:-}${ACTIONS_RUNTIME_TOKEN:-}" ]' \
+          || cause "security: OIDC or runtime tokens would reach OpenCode"
+        events="$RUNNER_TEMP/opencode-events.jsonl"
+        # Up to RETRIES extra attempts, only when the model ended cleanly without
+        # any answer text (seen on e5d1606). Never after a breach, a stall or the cap.
+        stats="$RUNNER_TEMP/opencode-watchdog.json"
+        [[ "$RETRIES" =~ ^[01]$ ]] || cause "config: retries must be 0 or 1"
+        [[ "$IDLE_MINUTES" =~ ^[1-9][0-9]?$ ]] || cause "config: idle-minutes must be 1-99"
+        [[ "$HARD_MINUTES" =~ ^[1-9][0-9]?$ ]] || cause "config: hard-minutes must be 1-99"
+        if [ -z "${HARD_INPUT:-}" ] && [ -n "${TIMEOUT_ALIAS:-}" ]; then
+          echo "::warning::timeout-minutes is deprecated: use hard-minutes. It now caps all attempts together, not each one."
+        fi
+        echo "OpenCode budgets: idle ${IDLE_MINUTES} min, hard cap ${HARD_MINUTES} min for all attempts."
+        # No fixed per-attempt timeout. watchdog.py (tested) stops OpenCode only when
+        # it writes nothing for IDLE_MINUTES or the run's HARD_MINUTES run out, and
+        # logs a heartbeat every minute. It runs inside the scrubbed env as well.
+        deadline=$((SECONDS + HARD_MINUTES * 60))
+        for attempt in $(seq 0 "$RETRIES"); do
+          remaining=$((deadline - SECONDS))
+          if [ "$attempt" -gt 0 ] && [ "$remaining" -lt 60 ]; then
+            echo "::warning::No time left in the hard cap for a retry."
+            break
+          fi
+          status=0
+          rm -f "$stats"  # extract.py must never read a previous attempt's stats
+          "${scrub[@]}" python3 -I "$GITHUB_ACTION_PATH/watchdog.py" \
+            --events "$events" --stats "$stats" \
+            --idle-seconds "$((IDLE_MINUTES * 60))" --hard-seconds "$remaining" -- \
+            "${scrub[@]}" opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
+            || status=$?
+          # extract.py owns the outcome (tested): 0 = answer written, 75 = no
+          # answer after a clean exit (retry once), else a cause was recorded with
+          # the precedence breach > stall > hard cap > model error > no answer > status.
+          extract=0
+          env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" \
+            "$events" "$OUTPUT_FILE" "$status" "$stats" || extract=$?
+          if [ "$extract" -eq 75 ] && [ "$attempt" -lt "$RETRIES" ]; then
+            echo "::warning::OpenCode gave no final answer; retrying once."
+            continue
+          fi
+          break
+        done
+        [ "$extract" -eq 0 ] || exit 1

@@ -17,6 +17,7 @@ from app.market_data.features import FEATURE_SCHEMA, build_feature_snapshot, fea
 from app.market_data.session import XAUUSD_NY_1700
 from app.prediction.transforms import (
     LEVEL_RELATIVE,
+    SESSION_LOOKBACK,
     SPREAD_WINDOW,
     TRANSFORM_SCHEMA,
     transform,
@@ -156,8 +157,14 @@ def test_the_previous_session_is_the_last_completed_trading_day() -> None:
 
 
 def test_without_a_schedule_the_session_is_the_utc_day() -> None:
-    v = transform(_snap(MON), {M5: _gold_week(_spikes)}).values
+    t, bars = datetime(2026, 1, 10, 12, tzinfo=UTC), []  # every 24/7 slot, Sat noon on
+    while t < MON:
+        bars.append(_bar(t, **_spikes(t)))  # type: ignore[arg-type]
+        t += STEP[M5]
+    v = transform(_snap(MON), {M5: bars}).values
     assert v["session.prev_high_atr"] == D("-15")  # Sunday 11 Jan UTC holds the 2030 spike
+    # gold's bars read as 24/7 have the weekend as a hole: the session is not known
+    assert transform(_snap(MON), {M5: _gold_week(_spikes)}).values["session.prev_high_atr"] is None
 
 
 def test_a_window_too_short_for_the_previous_session_gives_none() -> None:
@@ -223,3 +230,31 @@ def test_only_an_m02_snapshot_is_transformed() -> None:
     snap = _snap(MON).model_copy(update={"feature_schema": TRANSFORM_SCHEMA})
     with pytest.raises(ValueError, match="m02"):
         transform(snap, {M5: _gold_week()})
+
+
+def test_the_lookback_reaches_the_previous_session_across_a_weekend() -> None:
+    """SESSION_LOOKBACK counts bars, not hours, and a weekend has none: at Monday's last
+    bar (16:55 New York) the previous session, Thu 18:00 to Fri 17:00, is 552 bars back."""
+    t, end, bars = datetime(2026, 1, 8, 12, tzinfo=UTC), datetime(2026, 1, 12, 22, tzinfo=UTC), []
+    while t < end:
+        if XAUUSD_NY_1700.expects(t, STEP[M5]):
+            bars.append(_bar(t, **_spikes(t)))  # type: ignore[arg-type]
+        t += STEP[M5]
+    v = transform(_snap(end), {M5: bars[-SESSION_LOOKBACK:]}, session=XAUUSD_NY_1700).values
+    assert v["session.prev_high_atr"] == D("-5")  # Friday's 2010 spike, as with every bar
+
+
+def test_no_bars_give_unknown_features_not_a_failure() -> None:
+    v = transform(_snap(MON), {M5: []}, session=XAUUSD_NY_1700).values
+    assert [k for k, x in v.items() if x is not None] == ["time.hour_sin", "time.hour_cos"]
+    # no per-timeframe bars at all: only the hour and the (unknown) session features
+    v = transform(_snap(MON), {}, session=XAUUSD_NY_1700).values
+    assert [k for k, x in v.items() if x is not None] == ["time.hour_sin", "time.hour_cos"]
+
+
+def test_a_hole_in_the_previous_session_gives_unknown_session_features() -> None:
+    hole = datetime(2026, 1, 9, 16, tzinfo=UTC)  # Friday 11:00 New York, inside it
+    bars = [b for b in _gold_week(_spikes) if b.open_time != hole]
+    v = transform(_snap(MON), {M5: bars}, session=XAUUSD_NY_1700).values
+    assert v["session.prev_high_atr"] is None and v["session.london_ny_vol"] is None
+    assert v["session.spread_anomaly"] is not None  # its own window is unaffected

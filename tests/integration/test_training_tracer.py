@@ -2,9 +2,10 @@
 fixture with a daily break and a weekend.
 
 bars -> CandleStore -> MarketRecorder BACKFILL (session=) -> BarLog labels -> export_dataset
--> train (train split) and calibrate (validation split) -> native artifact + card with a
-training cutoff -> register -> evaluation load -> model-backed evidence -> replay(session=)
-on the test split (the holdout) -> EvidenceStore.record_run and evaluate.
+(one walk-forward fold plus a sealed holdout) -> train on the fold's train window and
+calibrate on its test window -> native artifact + card with a training cutoff -> register
+-> evaluation load -> model-backed evidence -> replay(session=) on the holdout ->
+EvidenceStore.record_run and evaluate.
 
 Stubs and shortcuts, each deliberate:
 - The import link is stubbed until #128: bars are written to the CandleStore directly.
@@ -39,6 +40,7 @@ from app.learning.bars import BarLog, Horizon, Provenance
 from app.learning.export import export_dataset, horizon_key
 from app.learning.lifecycle import DatasetStore, ModelLifecycle, Split
 from app.market_data.session import XAUUSD_NY_1700, SessionSchedule
+from app.market_data.sources import SourceRegistry
 from app.market_data.store import CandleStore
 from app.prediction.card import ModelCard
 from app.prediction.engine import load_for_evaluation
@@ -53,11 +55,17 @@ from app.validation.replay import CostModel, EvaluationEvidence, ReplayResult, r
 D = Decimal
 U = UTC
 HISTORY_FROM = datetime(2026, 1, 4, 23, tzinfo=U)  # Sunday 18:00 New York: the week opens
+EMBARGO = timedelta(hours=1)
+"""At least the longest horizon (export rule (a))."""
 TRAIN = Split(name="train", start=datetime(2026, 1, 9, 8, tzinfo=U),
-              end=datetime(2026, 1, 12, 6, tzinfo=U))  # spans the weekend  # fmt: skip
-VALIDATION = Split(name="validation", start=TRAIN.end, end=datetime(2026, 1, 12, 21, tzinfo=U))
-TEST = Split(name="holdout", start=VALIDATION.end, end=datetime(2026, 1, 13, 14, tzinfo=U))
-"""The test fold: it spans the daily break of Monday 17:00-18:00 New York."""
+              end=datetime(2026, 1, 12, 5, tzinfo=U))  # spans the weekend  # fmt: skip
+VALIDATION = Split(name="validation", start=TRAIN.end + EMBARGO,
+                   end=datetime(2026, 1, 12, 20, tzinfo=U))  # fmt: skip
+"""The one fold's test window: the calibration slice."""
+TEST = Split(name="holdout", start=VALIDATION.end + EMBARGO,
+             end=datetime(2026, 1, 13, 14, tzinfo=U))  # fmt: skip
+"""The sealed holdout, replayed as the test fold: it spans the daily break of Monday
+17:00-18:00 New York."""
 END = TEST.end
 WEEKEND_REOPEN = datetime(2026, 1, 11, 23, tzinfo=U)
 BREAK_REOPEN = datetime(2026, 1, 12, 23, tzinfo=U)
@@ -113,11 +121,19 @@ def _assert_features_usable(log: BarLog) -> None:
 
 def _export(conn: sqlite3.Connection, out: Path, session: SessionSchedule | None
             ) -> list[dict[str, Any]]:  # fmt: skip
+    # A version recorded outside `import_history` is bound to its source before export.
+    SourceRegistry(conn).register("tracer-v1", "dukascopy")
     manifest = export_dataset(conn, symbol="XAUUSD", timeframe=M5, horizons=HORIZONS,
-                              dataset_version="tracer-v1", window_start=TRAIN.start,
-                              window_end=END, splits=[TRAIN, VALIDATION, TEST],
-                              dataset_id="tracer", version="1", out=out, transforms=True,
+                              dataset_versions=["tracer-v1"], window_start=TRAIN.start,
+                              window_end=END, train=TRAIN.end - TRAIN.start,
+                              test=VALIDATION.end - VALIDATION.start, embargo=EMBARGO,
+                              holdout=TEST.end - TEST.start, dataset_id="tracer",
+                              version="1", out=out, transforms=True,
                               session=session)  # fmt: skip
+    assert [(f.train_start, f.train_end, f.test_start, f.test_end) for f in manifest.folds] == [
+        (TRAIN.start, TRAIN.end, VALIDATION.start, VALIDATION.end)
+    ]
+    assert (manifest.splits[-1].start, manifest.splits[-1].end) == (TEST.start, TEST.end)
     data = out.read_bytes()
     assert manifest.content_hash == sha256_ref(data)
     return [json.loads(line) for line in data.decode("utf-8").splitlines()]
@@ -232,7 +248,7 @@ def test_the_card_is_trained_before_the_test_fold_and_calibrated_on_later_data(
     first_test_bar = TEST.start + timedelta(minutes=5)
     assert VALIDATION.end - timedelta(hours=1) < card.training_cutoff < first_test_bar
     assert card.calibrated and card.skill > 0
-    assert {r["split"] for r in chain.rows} == {"train", "validation", "holdout"}
+    assert {r["split"] for r in chain.rows} == {"development", "holdout"}
 
 
 def test_the_session_aware_replay_lets_the_strategy_propose(chain: Chain) -> None:

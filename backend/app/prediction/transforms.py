@@ -141,6 +141,19 @@ def _mean_range(bars: Sequence[CandleClosed], hours: tuple[str, time, time]) -> 
     return sum(ranges, D(0)) / len(ranges) if ranges else None
 
 
+def _has_hole(day: Sequence[CandleClosed], start: datetime, end: datetime,
+              session: SessionSchedule | None) -> bool:  # fmt: skip
+    """Whether an expected bar of [start, end) is missing from `day` (one timeframe)."""
+    step = day[0].close_time - day[0].open_time
+    have = {b.open_time for b in day}
+    t = start
+    while t < end:
+        if t not in have and (session is None or session.expects(t, step)):
+            return True
+        t += step
+    return False
+
+
 def _session(bars: Sequence[CandleClosed], atr_m15: Decimal | None,
              session: SessionSchedule | None) -> Values:  # fmt: skip
     out: Values = dict.fromkeys(_SHARED[2:])
@@ -154,8 +167,8 @@ def _session(bars: Sequence[CandleClosed], atr_m15: Decimal | None,
     current = _session_start(last.open_time, session)
     previous = _session_start(current - timedelta(minutes=1), session)
     day = [b for b in bars if previous <= b.open_time < current]
-    if bars[0].open_time > previous or not day:
-        return out  # the window does not reach back over the whole previous session
+    if bars[0].open_time > previous or not day or _has_hole(day, previous, current, session):
+        return out  # the previous session is not wholly known: no session features
     out["session.prev_high_atr"] = _div(last.close - max(b.high for b in day), atr_m15)
     out["session.prev_low_atr"] = _div(last.close - min(b.low for b in day), atr_m15)
     out["session.london_ny_vol"] = _div(_mean_range(day, LONDON), _mean_range(day, NEW_YORK))

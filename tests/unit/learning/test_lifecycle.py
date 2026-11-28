@@ -16,6 +16,7 @@ from app.learning.lifecycle import (
     RETRAIN_PSI,
     DatasetManifest,
     DatasetStore,
+    FoldWindow,
     LifecycleRefused,
     ModelLifecycle,
     Split,
@@ -95,6 +96,46 @@ def test_splits_must_be_ordered_non_overlapping_and_inside_the_window() -> None:
                         Split(name="train", start=T0 + 15 * DAY, end=T0 + 75 * DAY)]  # fmt: skip
     with pytest.raises(ValidationError, match="order"):
         _dataset(splits=validation_first)
+
+
+def _fold(train: tuple[int, int], test: tuple[int, int]) -> FoldWindow:
+    return FoldWindow(train_start=T0 + train[0] * DAY, train_end=T0 + train[1] * DAY,
+                      test_start=T0 + test[0] * DAY, test_end=T0 + test[1] * DAY)  # fmt: skip
+
+
+def test_a_fold_plan_trains_then_embargoes_then_tests_before_the_holdout() -> None:
+    """#128 review constraints (c) and (d): no fold trains on or after its test, and the
+    embargo separates each test from its training data and the last test from the
+    holdout."""
+    splits = [Split(name="development", start=T0, end=T0 + 70 * DAY),
+              Split(name="holdout", start=T0 + 70 * DAY, end=T0 + 90 * DAY)]  # fmt: skip
+
+    def plan(*folds: FoldWindow, **over: object) -> DatasetManifest:
+        return _dataset(**{"splits": splits, "folds": list(folds), "embargo": 2 * DAY, **over})
+
+    ok = plan(_fold((0, 30), (32, 42)), _fold((10, 40), (42, 52)))
+    assert DatasetManifest.model_validate_json(ok.model_dump_json()) == ok
+    bad = {
+        "train after test": _fold((32, 42), (0, 30)),
+        "no embargo": _fold((0, 30), (31, 41)),
+        "test into the holdout embargo": _fold((0, 30), (32, 69)),
+    }
+    for fold in bad.values():
+        with pytest.raises(ValidationError, match="embargo, then test"):
+            plan(fold)
+    with pytest.raises(ValidationError, match="time order"):
+        plan(_fold((10, 40), (42, 52)), _fold((0, 30), (32, 42)))
+    with pytest.raises(ValidationError, match="development, holdout"):
+        _dataset(folds=[_fold((0, 30), (32, 42))])  # train/validation splits with folds
+    with pytest.raises(ValidationError, match="negative"):
+        plan(_fold((0, 30), (32, 42)), embargo=-DAY)
+
+
+def test_a_manifest_stored_before_fold_plans_still_loads() -> None:
+    old = _dataset().model_dump()
+    for key in ("folds", "embargo", "data_sources"):
+        old.pop(key)
+    assert DatasetManifest.model_validate(old) == _dataset()
 
 
 def test_dataset_versions_are_immutable(life: ModelLifecycle) -> None:
