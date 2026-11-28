@@ -88,8 +88,7 @@ class MarketRecorder:
         session: SessionSchedule | None = None,
         techniques: Sequence[Technique] = DEFAULT_TECHNIQUES,
     ) -> None:
-        if not all(isinstance(p, LoadedPredictor) for p in predictors):
-            raise Refused("the recorder takes approved models only: never an evaluation load")
+        self.use_predictors(predictors)
         self._conn, self._candles, self._symbol = conn, candles, symbol
         self._techniques = list(techniques)
         self._lookback = lookback(self._techniques)
@@ -103,11 +102,17 @@ class MarketRecorder:
                 raise ValueError(f"horizon {h.timeframe.value} does not line up with "
                                  f"{timeframe.value} bars")  # fmt: skip
         self._provenance, self._clock = provenance, clock
-        self._predictors = list(predictors)
         self._account_id, self._bot_id = account_id, bot_id
         self._log = BarLog(conn, clock=clock)
         self._retry_at: datetime | None = None
         self._healthy: bool | None = None
+
+    def use_predictors(self, predictors: Sequence[LoadedPredictor]) -> None:
+        """The models it records from the next pass on: the autonomy roster (#133) swaps in
+        the champion and the shadowing candidates. Approved models only."""
+        if not all(isinstance(p, LoadedPredictor) for p in predictors):
+            raise Refused("the recorder takes approved models only: never an evaluation load")
+        self._predictors = list(predictors)
 
     def tick(self) -> None:
         now = self._clock()

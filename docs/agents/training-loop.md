@@ -60,7 +60,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Metric baseline | `app/learning/evaluation.py`: multiclass Brier and Brier skill against the **training fold's** class frequencies (`class_prior` on train labels), log loss, per-class reliability on equal-mass bins, classwise binned ECE behind an `ece=` estimator argument (the debiased estimator is #132's), MDA permutation importance by log loss on an out-of-sample slice (never MDI). | [built #130]; debiased ECE [planned #132] |
 | Artifact | One weights file, format `m04.lightgbm.v1`, canonical JSON: class order, features, feature schema, label version, training cutoff, training record, the full config, the temperature, and one entry per seed `{seed, sha256, model}` where `model` is LightGBM's native `model_to_string` text. The card's `weights_hash` pins the file; each booster's sha256 is checked before `lightgbm.Booster(model_str=...)` parses it. Never pickle or joblib. | [built #130] |
 | Card | `ModelCard.training_cutoff` and `weights_hash`: `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. `label_version` and `feature_schema` (the transform version). `ModelCard.training` (`TrainingRecord`): dataset ref, config hash, seeds, library versions (lightgbm, numpy) and the code commit, passed in because a `git archive` has no `.git`. The cutoff is the latest `available_at` of every label read (train and validation). | cutoff and weights pin [built] #127; the other fields [built #130] |
-| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. `app.prediction.adapters.lightgbm_native` refuses a schema, label, feature list, class order, cutoff, seed list or config that differs from the card. `load_model(..., card=, weights=)` loads an adapter model on the live path (registered card, approval required); without them it still calls `build()`. | evaluation path [built] #127, see §10; live adapter load [built #130]; live wiring of a model provider [planned #133] |
+| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. `app.prediction.adapters.lightgbm_native` refuses a schema, label, feature list, class order, cutoff, seed list or config that differs from the card. `load_model(..., card=, weights=)` loads an adapter model on the live path (registered card, approval required); without them it still calls `build()`. | evaluation path [built] #127, see §10; live adapter load [built #130]; live wiring (`ChampionForecaster`, `ModelRoster`) [built #133], see §12 |
 | Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and no live path accepts it. | [built] #127, see §10 |
 | Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit, the VM holds no secrets, and only the artifact and manifest come back. Locally they are registered only after a hash check. Every VM is stopped after use. | [planned #134] |
 
@@ -112,11 +112,11 @@ Rules, adopted from mip-research (PRD #120):
 
 | Step | Mechanism | Status |
 |---|---|---|
-| Candidate | A model that passes every tier under a certified policy is proposed through `ModelLifecycle.propose_candidate`. | [built] #61 (lifecycle); wiring: [planned #133] |
-| Shadow scoring | The candidate's recorded predictions run beside the champion's on live bars. A champion-vs-candidate report compares them on forward data. | [planned #133] |
-| Promotion | A **policy-bound system actor** promotes to Shadow/Demo only under a certified policy version with the full evidence set. LIVE stays owner-only. | [planned #133] |
-| Rollback | Automatic when forward metrics breach the policy floors: back to the previous champion, or to no model (M05 waits). It never rolls forward to an unqualified model. | [planned #133] |
-| Drift | `psi` per feature above RETRAIN_PSI [PROPOSED] recommends a retrain. That opens a **new protocol version** evaluated on forward data only. | psi [built] #61; trigger [planned #133] |
+| Candidate | A model that passes every tier under a certified policy is proposed through `ModelLifecycle.propose_candidate`, then submitted to the loop (`Autonomy.submit`), which admits it to shadow only with the full evidence set. | [built] #61 (lifecycle); admission [built #133], see §12 |
+| Shadow scoring | The candidate's recorded predictions run beside the champion's on live bars; only the champion's forecast is journaled. The comparison is paired on forward LIVE bars with a known tb.v2 label. | [built #133], see §12 |
+| Promotion | A **policy-bound system actor** (`SYSTEM_ACTOR`) promotes to Shadow/Demo only under the certified protocol hash with the full evidence set, once per candidate, after the pre-declared window. LIVE stays owner-only. | [built #133], see §12 |
+| Rollback | Automatic on a kill switch: back to the previous champion, or to no model (M05 waits). It never rolls forward to an unqualified model, and a killed model never comes back on its own. | [built #133], see §12 |
+| Drift | `psi` per feature above RETRAIN_PSI [PROPOSED] recommends a retrain (#61). Under a champion, PSI above the protocol's `autonomy.psi_max` kills it (§12). Retraining opens a **new protocol version** evaluated on forward data only. | psi [built] #61; kill switch [built #133]; retrain trigger [not built] |
 | Independent safety | M06 checks registry eligibility itself, so whoever promoted a model or strategy, a missing, expired or revoked approval is refused. | [planned #121] (BLK-04) |
 
 ## 8. Research cycle (what the agent does on its own)
@@ -268,3 +268,90 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 - **Speed.** On the tracer's real shape (`test_the_system_backtest_runs_the_tracer_model_on_the_session`: M5 driving, M15/H1 context, `XAUUSD_NY_1700`, the M04-transform model, `trend_following`, the full technique library), the backtest ran 190 steps across the daily break in about 7 s, or about 28 steps/s. That works out to roughly 1 h per year of M5 per run on this laptop, before Colab. On that run the loop decided on every step, and the break never stalled it. The M15 fixtures without context run at about 100 steps/s.
 - **Cross-process determinism.** Three processes with different `PYTHONHASHSEED` values gave the same `output_hash`, random baseline included.
 - **Random baseline.** It reports closed trades, positions still open at the end, and the equity change, so an open loser is never hidden. On the tracer run it closed 0 trades, held 1 position open at the end, and had an equity change of -15.30.
+
+## 12. The autonomous champion/candidate loop (#133)
+
+**Status:** [built] on `feat/133-autonomous-loop`. It is unmerged, and this is a risk path (promotion, approval, the live forecast), so it needs an independent review before merge. Modules: `app/learning/autonomy.py` (the loop), `app/runtime/autonomy.py` (the runtime wiring), `app/learning/lifecycle.py` (the system actor), migration `0017_learning_autonomy.sql`. Tests: `tests/unit/learning/test_autonomy.py`, `tests/unit/learning/test_lifecycle_system.py`, `tests/integration/test_autonomy_runtime.py`. It is not wired into `serve` yet: that waits on the MT5 adapter (#17), like the recorder.
+
+**SHADOW and DEMO only.** Every step acts as `SYSTEM_ACTOR` (`m07.autonomy`).
+- The loop refuses any account mode outside SHADOW/DEMO. The mode is read through an injected reader, because `TradingConfig` cannot say LIVE today.
+- The lifecycle refuses LIVE to the system actor. The system actor never replaces, restores, renews or withdraws an approval that names LIVE: the owner's Live champion is out of its reach.
+- The loop never mints `x02:live-qualification:` and never saves a `ReadinessPolicy` (ADR 0002 Decision 2). Its policy ref is `protocol:<hash>`.
+
+**Ports** (so #132's machinery can be wired when it lands; the branch does not merge it):
+- `ClaimLedger`:
+  - `certified(hash)`, the registered, hash-verified protocol (`RunLog.protocol`) with its `certified_by` and its named values;
+  - `holdout_consumed(hash)` (`RunLog.holdout_consumed`);
+  - `claim(hash)`, the winning config hash and the model, system and holdout verdicts;
+  - `spot_parity(hash, model_ref)`.
+- `ModelArtifacts.files(model_id, version)`: the card, the weights and the adapter module (the local import of #134).
+
+**The numbers come from the protocol, never from code.** The loop reads these named values of the certified protocol (`autonomy.<name>`). A missing or unparseable value refuses the whole policy, so the loop does nothing. Proposed values for protocol v1, which carry no certification yet:
+
+| Name | Proposed | Source |
+|---|---|---|
+| `label_version`, `feature_schema` | `m07.labels.tb.v2`, `m04.transforms.v1` | §3, §4 |
+| `modes` | `SHADOW,DEMO` | ADR 0001 |
+| `shadow_min_days`, `shadow_min_resolved` | 90, 300 | protocol v1 §9 (Shadow: ≥ 3 months, ≥ 300 signals) |
+| `shadow_max_days` | 120 | [PROPOSED] |
+| `min_brier_gain` | TBD | [PROPOSED]; must sit above the A/A noise floor (§6 rule 5) |
+| `cusum_k`, `cusum_h` | TBD | protocol v1 §4 item 19 leaves them to #133; [L] evidence, to be set before Shadow |
+| `ece_max`, `ece_min_resolved` | TBD, 300 | [PROPOSED]; the G2 noise floor at the live n_eff should set `ece_max` |
+| `psi_max` | 0.25 | protocol v1 §9 kill switch |
+| `psi_window_days`, `psi_min_rows` | 5, 300 | [PROPOSED] |
+| `demo_expectancy_floor_usd`, `demo_min_cycles` | TBD, 300 | §9 (Demo: ≥ 300 trades); the floor is the Demo-measured cost, TBD until Demo |
+| `approval_ttl_hours`, `renew_within_hours` | 168, 24 | [PROPOSED]; a dead-man's switch |
+
+**Admission to shadow** (`Autonomy.submit(version, protocol_hash=, mode=)`). It is refused, with every reason recorded, unless all of these hold:
+- the protocol is the active one, registered and certified;
+- the holdout is consumed;
+- the claim is the card's own config (`card.training.config_hash`), with the model tier, the system tier and the holdout passed;
+- spot parity passed;
+- `label_version` is `LABEL_VERSION` and the policy's (None is refused), and `feature_schema` is the policy's;
+- the card is the registered one;
+- the version was never submitted before.
+
+An admitted candidate gets a SHADOW-only approval (`ModelLifecycle.shadow`) until `shadow_max_days`.
+
+**Shadow beside the champion.** The recorder records the roster (`MarketRecorder.use_predictors`): the champion and every shadowing candidate, LIVE or BACKFILL by the bar. Only `ChampionForecaster` journals a `prediction.generated`, and only for the champion pointer's model, so a candidate never feeds M05 and never trades, whatever its mode approval. `champion_only` wraps `journal_evidence` and drops any forecast that is not the current, approved champion's.
+
+**Judging, once** (`Autonomy.step`). At the first step where `shadow_min_days` have passed and `shadow_min_resolved` paired labels exist, the admission checks run again (a changed protocol refuses). Scores are LIVE predictions with a known tb.v2 label, after admission, paired on the bars both models predicted. The candidate must beat the champion's Brier by `min_brier_gain`; with no champion it is the window's climatology.
+- A win promotes for `modes`, with an approval of `approval_ttl_hours`.
+- A loss or a refusal rejects.
+- A window that ends without enough labels expires.
+
+Either way the version is done: no re-peeking, and no second submission.
+
+**Kill switches** (on the champion, from its tenure on; on top of M06's own lock):
+- CUSUM of the per-bar Brier above the Brier it was promoted on (else its card's validation Brier);
+- binned ECE above `ece_max` on at least `ece_min_resolved` labels;
+- PSI per card feature above `psi_max`, between the window before its tenure and the latest one. A feature missing from one window kills too;
+- realised DEMO expectancy per closed cycle below the floor, in DEMO only;
+- the champion's files missing.
+
+A breach rolls back to the previous champion if its approval is still valid and names no LIVE. Otherwise it withdraws to no model, and M05 waits. A killed model is disabled, off the champion stack and already submitted, so it never comes back on its own.
+
+**Renewal.** A clean champion is renewed within `renew_within_hours` of expiry, and only if it has resolved LIVE predictions in the last TTL. If the scheduler or the feed stalls, the approval lapses (`approved_until`), `predict` refuses, and M05 waits.
+
+**Scheduler entry point.** `AutonomyWorker.tick()`, on its own connection and cadence like `MarketRecorder` and `NewsWorker`:
+1. read the account mode;
+2. `Autonomy.step`;
+3. refresh the recorder's roster.
+
+It never raises. A refusal (no certified policy, a mode outside SHADOW/DEMO) reports DEGRADED health and does nothing. A fault reports DOWN and backs off for 5 minutes [PROPOSED]. Wiring for `serve`, once #17 lands: run `MarketRecorder`, `ChampionForecaster` and `AutonomyWorker` on their cadences, and give `DecisionLoop` `champion_only(journal_evidence(conn), ...)` as its evidence.
+
+**Operator view.**
+- `Autonomy.status()` gives the champion, its tenure start, its approval expiry, the shadowing candidates with their admission time, and the latest records.
+- Every step is an append-only row in `learning_autonomy`. Its JSON body records the action, the actor, the protocol hash, the account mode, the evidence refs, the champion and its approval before and after, the reasons and the metrics.
+- The lifecycle adds its own audit lines: `learning.promote`, `learning.rollback`, `learning.withdraw`, `learning.renew`, `learning.shadow` and `learning.shadow_end`. The loop's are `learning.autonomy.<action>`, all with actor `m07.autonomy`.
+- The worker's health is `health.updated` with component `M07.autonomy`. Its detail lists what the step did, or why it refused.
+- To stop the loop, stop calling `AutonomyWorker.tick()`. The champion's approval then lapses within the TTL. To stop the model at once, the owner withdraws or rolls back through `ModelLifecycle` as `owner`.
+
+**Open items.**
+- **#132 adapter.** `RunLog` records neither the holdout's verdict nor which config it was opened for, so `ClaimLedger.claim` has nothing to read until #132 adds them.
+- **Spot parity.** It needs the spot feed (#17).
+- **Artifact store.** `ModelArtifacts` is the local import of #134.
+- **The proposed values.** The TBD values above must be certified in the protocol before the first Shadow run.
+- **Statistics.** The win rule is a plain Brier margin. A day-block LB on the paired difference (#132 `claimstats`) should replace it once that lands.
+- **M06's own model check.** M06 does not check model eligibility on an intent yet (BLK-04, #121), so the champion-only rule rests on the forecaster and `champion_only`.
+- **PSI cost.** For a transform model, PSI recomputes `transform_from_store` for every recorded bar in both windows, so keep the cadence coarse.

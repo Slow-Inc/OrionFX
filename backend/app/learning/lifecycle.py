@@ -8,15 +8,22 @@ AT-13, AT-16, AT-35). Nothing trains here and nothing promotes itself.
   - `propose_candidate` takes a `ModelCard` (the one source of hash, modes and
     validation metrics), needs at least one known dataset, registers the card's
     manifest and stores the candidate. It returns a `model.candidate`.
-  - `promote` makes a stored candidate the champion. Only the owner may approve, by
-    allow-list (OWNER_ACTOR); no module or system actor can. It needs evidence refs and
-    a policy ref, and the modes must be ones the model supports. LIVE additionally
+  - `promote` makes a stored candidate the champion. Two approvers, by allow-list: the
+    owner (OWNER_ACTOR), for any mode; and the policy-bound system actor (SYSTEM_ACTOR,
+    ADR 0001, #133), for SHADOW and DEMO only, which never handles a Live approval. No
+    other module can approve. It needs evidence refs and a policy ref, and the modes
+    must be ones the model supports. LIVE additionally
     needs a `x02:live-qualification:` ref that X02's verifier confirms was issued for
     this model under the current policy; with no verifier wired, LIVE is refused.
     The previous champion is disabled.
-  - `rollback` (owner only) restores the champion that preceded the current one, using
-    a champion stack: rolling back twice never brings back the version just rolled
-    away from. A restored approval that has expired is refused, not silently written.
+  - `rollback` restores the champion that preceded the current one, using a champion
+    stack: rolling back twice never brings back the version just rolled away from. A
+    restored approval that has expired is refused, not silently written, and the system
+    actor never restores one that approves LIVE.
+  - `withdraw` disables the current champion and leaves none (M05 waits); the withdrawn
+    version is off the stack, so no rollback brings it back. `renew` extends the current,
+    unexpired champion's approval. The system actor may do either only to an approval
+    without LIVE. `tenure` is the champion and when it took over (a renewal is not one).
   - `learning_promotions` is the champion-pointer log; the registry's eligibility
     records stay the authority on what may run. Every change is audited.
 - Drift: `psi` (Population Stability Index) per feature, over per-value bins for a
@@ -58,6 +65,9 @@ RETRAIN_PSI = D("0.25")
 PSI_FLOOR = D("0.0001")
 """Empty-bin proportion floor, so ln() stays finite."""
 OWNER_ACTOR = "owner"
+SYSTEM_ACTOR = "m07.autonomy"
+"""The policy-bound system actor of ADR 0001: SHADOW and DEMO only."""
+SYSTEM_MODES = frozenset({Mode.SHADOW, Mode.DEMO})
 SPLIT_ORDER = ("train", "validation", "holdout")
 
 
@@ -128,8 +138,13 @@ class DatasetStore:
         return None if row is None else DatasetManifest.model_validate_json(row[0])
 
 
-def _require_owner(actor: str) -> None:
-    if actor != OWNER_ACTOR:
+def _require_approver(actor: str, modes: Collection[Mode]) -> None:
+    """The owner approves anything; the system actor only SHADOW and DEMO (ADR 0001)."""
+    if actor == SYSTEM_ACTOR:
+        if not set(modes) <= SYSTEM_MODES:
+            raise LifecycleRefused(f"{actor} acts on SHADOW and DEMO only, not "
+                                   f"{sorted(set(modes) - SYSTEM_MODES)}")  # fmt: skip
+    elif actor != OWNER_ACTOR:
         raise LifecycleRefused(f"{actor!r} cannot approve: only the owner can")
 
 
@@ -138,6 +153,7 @@ class _Entry:
     action: str
     version: str
     record: EligibilityRecord
+    at: datetime
 
 
 class ModelLifecycle:
@@ -194,29 +210,72 @@ class ModelLifecycle:
         ).fetchone()
         return None if row is None else ModelCandidate.model_validate_json(row[0])
 
+    def shadow(self, model_id: str, version: str, *, approved_by: str, evidence_refs: list[str],
+               policy_ref: str, expires_at: datetime) -> None:  # fmt: skip
+        """Approve a candidate, never the champion, for SHADOW only until `expires_at`, so
+        its predictions can be recorded beside the champion's. Only the champion pointer
+        feeds decisions, so this approval never makes it trade."""
+        _require_approver(approved_by, [Mode.SHADOW])
+        manifest = self.registry.get("model", model_id, version)
+        if manifest is None or self.candidate(model_id, version) is None:
+            raise LifecycleRefused(f"{model_id}@{version} was never proposed as a candidate")
+        if self.champion(model_id) == version:
+            raise LifecycleRefused(f"{model_id}@{version} is the champion, not a candidate")
+        record = EligibilityRecord(
+            subject_hash=manifest.artifact_hash, subject_kind="model",
+            subject_ref=subject_ref(model_id, version), user_enabled=True,
+            eligibility=Eligibility.SHADOW_ONLY, approved_modes=[Mode.SHADOW],
+            context={"role": "shadow-candidate"}, evidence_refs=evidence_refs,
+            policy_version=policy_ref, expires_at=expires_at, revoked_at=None,
+        )  # fmt: skip
+        with transaction(self._conn):
+            self.registry.set_eligibility(record, actor=approved_by)
+            audit(self._conn, actor=approved_by, action="learning.shadow",
+                  detail=f"model {model_id}@{version} until {expires_at.isoformat()}")  # fmt: skip
+
+    def end_shadow(self, model_id: str, version: str, *, approved_by: str, reason: str) -> None:
+        """Disable a shadowing candidate's approval (never the champion's)."""
+        _require_approver(approved_by, [Mode.SHADOW])
+        if self.champion(model_id) == version:
+            raise LifecycleRefused(f"{model_id}@{version} is the champion, not a candidate")
+        with transaction(self._conn):
+            self._disable(model_id, version, actor=approved_by)
+            audit(self._conn, actor=approved_by, action="learning.shadow_end",
+                  detail=f"model {model_id}@{version}: {reason}")  # fmt: skip
+
     # --- champions -------------------------------------------------------------------------
 
     def champion(self, model_id: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT version FROM learning_promotions WHERE model_id = ? ORDER BY id DESC LIMIT 1",
-            (model_id,),
-        ).fetchone()
-        return None if row is None else str(row[0])
+        tenure = self.tenure(model_id)
+        return None if tenure is None else tenure[0]
+
+    def tenure(self, model_id: str) -> tuple[str, datetime] | None:
+        """The champion and when it took over (its PROMOTE or ROLLBACK); None after a
+        WITHDRAW, until the next promotion."""
+        history = self._history(model_id)
+        if not history or history[-1].action == "WITHDRAW":
+            return None
+        version = self._stack(history)[-1]
+        since = next(e.at for e in reversed(history)
+                     if e.version == version and e.action in ("PROMOTE", "ROLLBACK"))  # fmt: skip
+        return version, since
 
     def _history(self, model_id: str) -> list[_Entry]:
         rows = self._conn.execute(
-            "SELECT action, version, record FROM learning_promotions WHERE model_id = ?"
+            "SELECT action, version, record, at FROM learning_promotions WHERE model_id = ?"
             " ORDER BY id",
             (model_id,),
         ).fetchall()
-        return [_Entry(a, v, EligibilityRecord.model_validate_json(r)) for a, v, r in rows]
+        return [_Entry(a, v, EligibilityRecord.model_validate_json(r), datetime.fromisoformat(t))
+                for a, v, r, t in rows]  # fmt: skip
 
     @staticmethod
     def _stack(history: list[_Entry]) -> list[str]:
-        """Champions in order; a rollback pops the version it rolled away from."""
+        """Champions in order; a rollback pops the version it rolled away from, and a
+        withdrawal the version withdrawn."""
         stack: list[str] = []
         for e in history:
-            if e.action == "ROLLBACK":
+            if e.action in ("ROLLBACK", "WITHDRAW"):
                 stack.pop()
             else:
                 if e.version in stack:
@@ -224,32 +283,49 @@ class ModelLifecycle:
                 stack.append(e.version)
         return stack
 
-    def _disable(self, model_id: str, version: str, *, actor: str) -> None:
+    def _disable(self, model_id: str, version: str, *, actor: str) -> EligibilityRecord | None:
         current = self.registry.eligibility("model", subject_ref(model_id, version))
         if current is None:
-            return
-        self.registry.set_eligibility(
-            current.model_copy(update={
-                "eligibility": Eligibility.DISABLED, "approved_modes": [],
-                "revoked_at": self._clock(),
-            }),
-            actor=actor,
-        )  # fmt: skip
+            return None
+        disabled = current.model_copy(update={
+            "eligibility": Eligibility.DISABLED, "approved_modes": [], "revoked_at": self._clock(),
+        })  # fmt: skip
+        self.registry.set_eligibility(disabled, actor=actor)
+        return disabled
 
-    def _crown(self, model_id: str, version: str, record: EligibilityRecord, *, action: str,
-               approval: str) -> None:  # fmt: skip
-        previous = self.champion(model_id)
-        if previous is not None and previous != version:
-            self._disable(model_id, previous, actor=OWNER_ACTOR)
-        self.registry.set_eligibility(record, actor=OWNER_ACTOR)
+    def _log(self, model_id: str, version: str, record: EligibilityRecord, *, action: str,
+             actor: str, approval: str) -> None:  # fmt: skip
         self._conn.execute(
             "INSERT INTO learning_promotions (model_id, version, action, record, approved_by,"
             " approval, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (model_id, version, action, record.model_dump_json(), OWNER_ACTOR, approval,
+            (model_id, version, action, record.model_dump_json(), actor, approval,
              self._clock().isoformat()),
         )  # fmt: skip
-        audit(self._conn, actor=OWNER_ACTOR, action=f"learning.{action.lower()}",
+        audit(self._conn, actor=actor, action=f"learning.{action.lower()}",
               detail=f"model {model_id}@{version} {approval}")  # fmt: skip
+
+    def _crown(self, model_id: str, version: str, record: EligibilityRecord, *, action: str,
+               actor: str, approval: str) -> None:  # fmt: skip
+        previous = self.champion(model_id)
+        if previous is not None and previous != version:
+            current = self.registry.eligibility("model", subject_ref(model_id, previous))
+            if current is not None:  # the system actor never replaces an owner's Live approval
+                _require_approver(actor, current.approved_modes)
+            self._disable(model_id, previous, actor=actor)
+        self.registry.set_eligibility(record, actor=actor)
+        self._log(model_id, version, record, action=action, actor=actor, approval=approval)
+
+    def _current(self, model_id: str, actor: str) -> tuple[str, EligibilityRecord]:
+        """The champion and its current approval, if `actor` may act on that approval."""
+        version = self.champion(model_id)
+        if version is None:
+            raise LifecycleRefused(f"{model_id} has no champion")
+        record = self.registry.eligibility("model", subject_ref(model_id, version))
+        if record is None or not any(record.approves(m, self._clock())
+                                     for m in record.approved_modes):  # fmt: skip
+            raise LifecycleRefused(f"{model_id}@{version}'s approval has expired or was revoked")
+        _require_approver(actor, record.approved_modes)
+        return version, record
 
     def promote(
         self,
@@ -264,11 +340,11 @@ class ModelLifecycle:
         live_qualification_ref: str | None = None,
         expires_at: datetime | None = None,
     ) -> ModelApproved:
-        _require_owner(approved_by)
-        if not evidence_refs:
-            raise LifecycleRefused("promotion needs evidence refs")
         if not modes:
             raise LifecycleRefused("promotion needs at least one mode")
+        _require_approver(approved_by, modes)
+        if not evidence_refs:
+            raise LifecycleRefused("promotion needs evidence refs")
         manifest = self.registry.get("model", model_id, version)
         if manifest is None or self.candidate(model_id, version) is None:
             raise LifecycleRefused(f"{model_id}@{version} was never proposed as a candidate")
@@ -295,27 +371,52 @@ class ModelLifecycle:
             revoked_at=None,
         )  # fmt: skip
         with transaction(self._conn):
-            self._crown(model_id, version, record, action="PROMOTE", approval=approval_ref)
+            self._crown(model_id, version, record, action="PROMOTE", actor=approved_by,
+                        approval=approval_ref)  # fmt: skip
         return ModelApproved(model_id=model_id, model_version=version, approval_ref=approval_ref,
                              evidence_refs=evidence, policy_ref=policy_ref,
                              allowed_modes=modes)  # fmt: skip
 
     def rollback(self, model_id: str, *, approved_by: str, reason: str) -> str:
         """Restore the champion before the current one; returns its version."""
-        _require_owner(approved_by)
+        _require_approver(approved_by, ())
+        current = self.champion(model_id)
+        if current is None:
+            raise LifecycleRefused(f"{model_id} has no champion to roll back from")
         history = self._history(model_id)
         stack = self._stack(history)
         if len(stack) < 2:
             raise LifecycleRefused(f"{model_id} has no previous champion to roll back to")
-        current, version = stack[-1], stack[-2]
+        version = stack[-2]
+        # Its latest approval: a renewal may have extended the one it was promoted with.
         record = next(e.record for e in reversed(history)
-                      if e.version == version and e.action == "PROMOTE")  # fmt: skip
+                      if e.version == version and e.action != "WITHDRAW")  # fmt: skip
         if not any(record.approves(m, self._clock()) for m in record.approved_modes):
             raise LifecycleRefused(f"{model_id}@{version}'s approval has expired: promote it anew")
+        _require_approver(approved_by, record.approved_modes)
         with transaction(self._conn):
-            self._crown(model_id, version, record, action="ROLLBACK",
+            self._crown(model_id, version, record, action="ROLLBACK", actor=approved_by,
                         approval=f"rollback from {current}: {reason}")  # fmt: skip
         return version
+
+    def withdraw(self, model_id: str, *, approved_by: str, reason: str) -> str:
+        """Disable the champion and leave none: M05 waits. Returns the withdrawn version."""
+        with transaction(self._conn):
+            version, _ = self._current(model_id, approved_by)
+            disabled = self._disable(model_id, version, actor=approved_by)
+            assert disabled is not None  # _current read it
+            self._log(model_id, version, disabled, action="WITHDRAW", actor=approved_by,
+                      approval=f"withdraw: {reason}")  # fmt: skip
+        return version
+
+    def renew(self, model_id: str, *, approved_by: str, expires_at: datetime, reason: str) -> None:
+        """Extend the current, unexpired champion's approval to `expires_at`."""
+        with transaction(self._conn):
+            version, record = self._current(model_id, approved_by)
+            renewed = record.model_copy(update={"expires_at": expires_at})
+            self.registry.set_eligibility(renewed, actor=approved_by)
+            self._log(model_id, version, renewed, action="RENEW", actor=approved_by,
+                      approval=f"renew to {expires_at.isoformat()}: {reason}")  # fmt: skip
 
     # --- drift -----------------------------------------------------------------------------
 
