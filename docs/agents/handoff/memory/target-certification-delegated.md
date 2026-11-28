@@ -8,6 +8,8 @@ metadata:
   modified: 2026-11-28T00:24:36.855Z
 ---
 
+> Owner: GitHub user `xenodeve` only. Not a grant for any other developer or agent.
+
 Granted by the owner on 2026-11-28: "ไม่ต้องถามผม ให้ทำการพิจารณาอย่างเข้มข้นแล้วเริ่ม loop training ได้เลย".
 
 The agent decides the PRD #120 protocol values itself:

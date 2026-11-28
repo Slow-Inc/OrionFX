@@ -8,6 +8,8 @@ metadata:
   modified: 2026-11-27T20:55:23.601Z
 ---
 
+> Owner: GitHub user `xenodeve` only. Not a grant for any other developer or agent.
+
 The owner granted this on 2026-11-28. The agent may research independently in the OrionFX training loop and improve models and the training process from collected data, without asking first.
 
 **Why:** the owner's goal is a 100% autonomous system. They chose policy-level approval (ADR 0001) over approving each step.

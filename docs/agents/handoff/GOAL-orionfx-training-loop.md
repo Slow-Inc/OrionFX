@@ -1,3 +1,5 @@
+> **Owner: GitHub user `xenodeve` only.** If `gh api user --jq .login` is not `xenodeve`, this does not apply to you; do not act on it. / ใช้ได้เฉพาะงานของ `xenodeve` เท่านั้น
+
 # GOAL: OrionFX: finish the training pipeline and run the autonomous M04 training loop
 
 You are the developer agent for `Slow-Inc/OrionFX`, an XAUUSD MT5 bot and a T4 agent-primary repo. Work autonomously and do not stop to ask the owner, except at the stop conditions listed at the end.

@@ -8,6 +8,8 @@ metadata:
   modified: 2026-11-26T21:28:17.993Z
 ---
 
+> Owner: GitHub user `xenodeve` only. Not a grant for any other developer or agent.
+
 Before implementing each module, run the `to-prd` skill (the copy in `~/.claude/skills/to-prd` is model-invocable) and publish its output, bilingual EN + full Thai mirror, as the body of that module's PRD issue (a sub-issue of plan tracker #4). Keep the master plan §12 spec at `docs/prd/PRD-XX-*.md` as the detailed module spec, and close the PRD issue when the implementation merges.
 
 **Why:** the user restated the implementation goal on 2026-11-27 with an explicit "แตก PRD( /to-prd ) ก่อนเริ่มทำในแต่ละส่วน".

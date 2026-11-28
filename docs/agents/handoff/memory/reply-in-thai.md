@@ -8,6 +8,8 @@ metadata:
   modified: 2026-11-26T20:24:51.771Z
 ---
 
+> Owner: GitHub user `xenodeve` only. Not a grant for any other developer or agent.
+
 Every message to the user is written in Thai. Only identifiers (paths, commands, labels, branch names) stay in English.
 
 **Why:** the user asked for Thai at the start ("ตอบเป็นภาษาไทย") and then had to repeat "คุยเป็นภาษาไทยเท่านั้น" after a summary went out in English on 2026-11-27.
