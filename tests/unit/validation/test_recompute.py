@@ -22,6 +22,11 @@ def test_recompute_by_hand() -> None:
     assert got["brier_skill_multiclass"] == pytest.approx(1 - 0.92 / 1.25)
 
 
+def test_a_top_label_tie_goes_to_the_lowest_class_index() -> None:
+    assert recompute([Prediction((0.4, 0.4, 0.2), 1)])["top_label_accuracy"] == 0.0
+    assert recompute([Prediction((0.4, 0.4, 0.2), 0)])["top_label_accuracy"] == 1.0
+
+
 def test_without_a_prior_there_is_no_brier_skill() -> None:
     assert "brier_skill_multiclass" not in recompute(PREDS)
 

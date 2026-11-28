@@ -11,7 +11,12 @@ import pytest
 from pydantic import ValidationError
 from tests.unit.validation.test_protocol import make_protocol
 
-from app.validation.protocol import ProtocolWindow, protocol_hash
+from app.validation.protocol import (
+    ProtocolHashMismatch,
+    ProtocolWindow,
+    canonical_json,
+    protocol_hash,
+)
 from app.validation.runlog import (
     AlreadyCounted,
     BudgetExhausted,
@@ -174,6 +179,8 @@ def test_a_bugfix_rerun_needs_a_bug_note_and_a_fix_sha(ph: str) -> None:
         run(ph, "B0", RunStatus.BUGFIX_RERUN, bug_note="x", bug_fix_sha="not-a-sha")
     with pytest.raises(ValidationError):
         run(ph, "B0", RunStatus.OK, bug_note="x", bug_fix_sha=SHA)
+    with pytest.raises(ValidationError):
+        run(ph, "B0", RunStatus.BUGFIX_RERUN, bug_note="  ", bug_fix_sha=SHA)  # blank note
 
 
 def test_a_config_id_names_one_config_hash(log: RunLog, ph: str) -> None:
@@ -272,12 +279,54 @@ def test_an_opened_holdout_may_become_a_later_debug_window(log: RunLog, ph: str)
     log.open_holdout(ph, "B0")
     later = make_protocol(
         version="v2",
-        debug_window=_window(2000, 2006),
+        debug_window=_window(2005, 2006),  # v1's opened holdout, and nothing v1 seals
         unread_slice=None,
         holdout=_window(2007, 2008),
     )
     assert log.register(later) == protocol_hash(later)
     assert log.register(make_protocol(budget=3)) == ph  # re-registering v1 stays idempotent
+
+
+@pytest.mark.parametrize(
+    "debug",
+    [(2005, 2006), (2003, 2005)],
+    ids=["over v1's unopened holdout", "over v1's unread slice"],
+)
+def test_a_debug_window_cannot_read_what_another_version_seals(
+    log: RunLog, ph: str, debug: tuple[int, int]
+) -> None:
+    later = make_protocol(
+        version="v2", debug_window=_window(*debug), unread_slice=None, holdout=_window(2007, 2008)
+    )
+    with pytest.raises(HoldoutConsumed):
+        log.register(later)
+
+
+def test_a_holdout_cannot_sit_on_another_versions_debug_window(log: RunLog, ph: str) -> None:
+    """v1's debug window [2000, 2001) has been read freely: it cannot be anyone's holdout."""
+    later = make_protocol(
+        version="v2",
+        debug_window=_window(2007, 2008),
+        unread_slice=None,
+        holdout=_window(2000, 2001),
+    )
+    with pytest.raises(HoldoutConsumed):
+        log.register(later)
+
+
+def test_a_stored_row_that_does_not_hash_to_its_key_is_refused(
+    log: RunLog, conn: sqlite3.Connection
+) -> None:
+    body = canonical_json(make_protocol(version="forged")).decode()
+    conn.execute(
+        "INSERT INTO claim_protocols (protocol_hash, version, body, registered_at)"
+        " VALUES (?, 'forged', ?, '2030-01-01T00:00:00+00:00')",
+        ("0" * 64, body),
+    )
+    with pytest.raises(ProtocolHashMismatch):
+        log.protocol("0" * 64)
+    with pytest.raises(ProtocolHashMismatch):  # refused loudly, never skipped
+        log.register(make_protocol(version="v2"))
 
 
 def test_an_unread_slice_cannot_sit_on_another_versions_holdout(log: RunLog, ph: str) -> None:

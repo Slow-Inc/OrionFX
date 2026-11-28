@@ -174,6 +174,15 @@ def test_pbo_of_pure_noise_is_about_one_half() -> None:
     assert pbo_cscv(rows, splits=10).pbo == pytest.approx(0.5, abs=0.15)
 
 
+def test_pbo_averages_ties_in_the_out_of_sample_rank() -> None:
+    """Two identical configs tie everywhere: the winner's rank is (0 + (2 + 1) / 2) / 3 =
+    1/2, so every logit is exactly 0 (and counts as overfit, logit <= 0)."""
+    rows = [[x, x] for x in (1.0, 3.0, 2.0, 5.0, 4.0, 6.0, 2.0, 7.0)]
+    result = pbo_cscv(rows, splits=4)
+    assert result.logits == [0.0] * 6
+    assert result.pbo == 1.0
+
+
 def test_pbo_refuses_bad_shapes() -> None:
     with pytest.raises(ValueError):
         pbo_cscv([[1.0, 2.0]] * 8, splits=3)  # odd split count
@@ -338,25 +347,52 @@ def test_aa_noise_floor_from_seed_variation() -> None:
 
 
 def test_compare_to_floor() -> None:
-    assert compare_to_floor(1.5, 1.0, floor=0.4) is Comparison.BETTER
-    assert compare_to_floor(0.5, 1.0, floor=0.4) is Comparison.WORSE
-    assert compare_to_floor(1.3, 1.0, floor=0.4) is Comparison.UNCONFIRMED
+    assert compare_to_floor(1.5, 1.0, floor=0.4, higher_is_better=True) is Comparison.BETTER
+    assert compare_to_floor(0.5, 1.0, floor=0.4, higher_is_better=True) is Comparison.WORSE
+    assert compare_to_floor(1.3, 1.0, floor=0.4, higher_is_better=True) is Comparison.UNCONFIRMED
+
+
+def test_compare_to_floor_for_a_lower_is_better_metric() -> None:
+    """ECE, log loss and Brier error improve downwards: the direction flips the verdict."""
+    assert compare_to_floor(0.5, 1.0, floor=0.4, higher_is_better=False) is Comparison.BETTER
+    assert compare_to_floor(1.5, 1.0, floor=0.4, higher_is_better=False) is Comparison.WORSE
 
 
 def test_best_of_n_reports_n_and_the_lift_over_a_fresh_baseline() -> None:
     result = best_of_n(
-        {"B0": 0.10, "A2": 0.18, "A3": 0.12}, baseline=0.11, n_trials=5, noise_floor=0.05
+        {"B0": 0.10, "A2": 0.18, "A3": 0.12},
+        baseline=0.11,
+        n_trials=5,
+        noise_floor=0.05,
+        higher_is_better=True,
     )
     assert (result.best, result.n_trials) == ("A2", 5)
     assert result.lift == pytest.approx(0.07)
     assert result.confirmed
 
 
+def test_best_of_n_for_a_lower_is_better_metric() -> None:
+    result = best_of_n(
+        {"B0": 0.05, "A2": 0.02},
+        baseline=0.08,
+        n_trials=2,
+        noise_floor=0.01,
+        higher_is_better=False,
+    )
+    assert result.best == "A2"
+    assert result.lift == pytest.approx(0.06)  # the improvement, in the metric's direction
+    assert result.confirmed
+
+
 def test_best_of_n_below_the_floor_is_unconfirmed_and_n_cannot_be_understated() -> None:
-    result = best_of_n({"A": 0.13}, baseline=0.11, n_trials=1, noise_floor=0.05)
+    result = best_of_n(
+        {"A": 0.13}, baseline=0.11, n_trials=1, noise_floor=0.05, higher_is_better=True
+    )
     assert not result.confirmed
     with pytest.raises(ValueError):
-        best_of_n({"A": 0.1, "B": 0.2}, baseline=0.0, n_trials=1, noise_floor=0.0)
+        best_of_n(
+            {"A": 0.1, "B": 0.2}, baseline=0.0, n_trials=1, noise_floor=0.0, higher_is_better=True
+        )
 
 
 @pytest.mark.parametrize(
@@ -373,7 +409,7 @@ def test_best_of_n_below_the_floor_is_unconfirmed_and_n_cannot_be_understated() 
         lambda: pbo_cscv([[1.0, 2.0], [1.0]] * 4, splits=2),  # not rectangular
         lambda: pbo_cscv([[1.0, 2.0]] * 8, splits=0),
         lambda: mean_ci([1.0, 2.0], block=1, resamples=0, seed=1),
-        lambda: best_of_n({}, baseline=0.0, n_trials=0, noise_floor=0.0),
+        lambda: best_of_n({}, baseline=0.0, n_trials=0, noise_floor=0.0, higher_is_better=True),
         lambda: ece_noise_floor([], n_eff=100, bins=10, seed=1),
         lambda: ece_noise_floor([0.5, 1.5], n_eff=100, bins=10, seed=1),
         lambda: ece_noise_floor([0.5], n_eff=10, bins=10, seed=1),  # fewer than 2 per bin

@@ -37,6 +37,12 @@ def make_protocol(**overrides: object) -> Protocol:
     return Protocol.model_validate(fields | overrides)
 
 
+@pytest.mark.parametrize("field", ["values", "gates"])
+def test_a_protocol_needs_at_least_one_value_and_one_gate(field: str) -> None:
+    with pytest.raises(ValidationError):
+        make_protocol(**{field: []})
+
+
 def test_the_hash_is_a_full_sha256_of_canonical_json() -> None:
     p = make_protocol()
     h = protocol_hash(p)

@@ -20,12 +20,19 @@ single-use holdout, and errata (#132; PRD #120; training-loop.md §6 rules 1, 4,
 - **The holdout opens once** per protocol (`open_holdout`), for a counted config whose
   current result (its latest `ok` or `bugfix-rerun` run) carries no erratum. After that it
   is consumed: development data, and no new config counts.
-- **An opened window stays read across versions** (training-loop.md §6 rule 1): a new
-  protocol whose holdout or unread slice overlaps a holdout already opened under any
-  version is refused at `register`, and a holdout that overlaps one another version
-  opened cannot be opened. It may still serve a later version as debug data.
-  - Nor may a new version's unread slice overlap another version's holdout (that
-    version may open it at any time), or its holdout another version's unread slice.
+- **Windows stay honest across versions** (training-loop.md §6 rules 1-2). For every
+  other registered version, a window it has *read* is its debug window plus its holdout
+  once opened; a window it *seals* is its unread slice plus its holdout while unopened.
+  `register` refuses a new version when:
+  - its holdout or unread slice overlaps a window another version read (an opened
+    holdout is development data now, so a claim needs fresh forward data);
+  - its debug window overlaps a window another version seals;
+  - its unread slice overlaps another version's holdout, opened or not (that version
+    may open it at any time), or its holdout another version's unread slice.
+
+  Two versions may still name the same unopened holdout (an abandoned version hands it
+  on), and `open_holdout` refuses a holdout another version already opened. An opened
+  holdout may serve a later version as debug data.
 - **Stored protocols are verified by their stored bytes**: the sha256 of the body as
   written must equal its hash, so a change in how pydantic serializes cannot make a
   registered version unreadable.
@@ -125,7 +132,7 @@ class RunRecord(ContractModel):
 
     @model_validator(mode="after")
     def _bugfix_is_linked(self) -> Self:
-        linked = self.bug_note is not None and self.bug_fix_sha is not None
+        linked = bool(self.bug_note and self.bug_note.strip()) and self.bug_fix_sha is not None
         if self.status is RunStatus.BUGFIX_RERUN and not linked:
             raise ValueError("a bug-fix rerun needs a bug note and the fix's commit SHA")
         if self.status is not RunStatus.BUGFIX_RERUN and (self.bug_note or self.bug_fix_sha):
@@ -155,6 +162,24 @@ class HoldoutOpening:
     opened_at: datetime
 
 
+def _window_clash(new: Protocol, other: Protocol, *, opened: bool) -> str | None:
+    """Why `new` may not sit beside `other`, or None (see the module docstring)."""
+    unread = [other.unread_slice] if other.unread_slice else []
+    read = [other.debug_window, *([other.holdout] if opened else [])]
+    sealed = [*unread, *([] if opened else [other.holdout])]
+    rules: list[tuple[str, ProtocolWindow | None, list[ProtocolWindow]]] = [
+        ("the holdout overlaps a window already read", new.holdout, read),
+        ("the unread slice overlaps a window already read", new.unread_slice, read),
+        ("the debug window reads a sealed window", new.debug_window, sealed),
+        ("the unread slice overlaps the holdout", new.unread_slice, [other.holdout]),
+        ("the holdout overlaps the unread slice", new.holdout, unread),
+    ]
+    for reason, mine, theirs in rules:
+        if mine and any(mine.overlaps(w) for w in theirs):
+            return reason
+    return None
+
+
 def _stored(digest: str, body: str) -> Protocol:
     """A stored protocol: its bytes as written must hash to `digest`. A row that fails
     refuses loudly rather than being skipped (refusal when uncertain)."""
@@ -182,23 +207,10 @@ class RunLog:
                 if row[0] != digest:
                     raise ValueError(f"protocol {protocol.version} is immutable: use a new version")
                 return digest
-            unread = [w for w in (protocol.holdout, protocol.unread_slice) if w]
-            for version, opened in self._opened_holdouts():
-                if any(w.overlaps(opened) for w in unread):
-                    raise HoldoutConsumed(
-                        f"{protocol.version} reuses the holdout {version} opened: it is"
-                        " development data now, so the claim needs fresh forward data"
-                    )
-            for other in self._registered():
-                crossed = [
-                    (protocol.unread_slice, other.holdout),
-                    (protocol.holdout, other.unread_slice),
-                ]
-                if any(a and b and a.overlaps(b) for a, b in crossed):
-                    raise HoldoutConsumed(
-                        f"{protocol.version}'s unread slice and holdout must not cross"
-                        f" those of {other.version}"
-                    )
+            for other, opened in self._versions():
+                clash = _window_clash(protocol, other, opened=opened)
+                if clash:
+                    raise HoldoutConsumed(f"{protocol.version}: {clash} of {other.version}")
             self._conn.execute(
                 "INSERT INTO claim_protocols (protocol_hash, version, body, registered_at)"
                 " VALUES (?, ?, ?, ?)",
@@ -219,9 +231,13 @@ class RunLog:
         ).fetchone()
         return None if row is None else _stored(digest, row[0])
 
-    def _registered(self) -> list[Protocol]:
-        rows = self._conn.execute("SELECT protocol_hash, body FROM claim_protocols").fetchall()
-        return [_stored(digest, body) for digest, body in rows]
+    def _versions(self) -> list[tuple[Protocol, bool]]:
+        """Every registered protocol, verified, with whether its holdout was opened."""
+        rows = self._conn.execute(
+            "SELECT p.protocol_hash, p.body, o.protocol_hash IS NOT NULL"
+            " FROM claim_protocols p LEFT JOIN claim_holdout_openings o USING (protocol_hash)"
+        ).fetchall()
+        return [(_stored(digest, body), bool(opened)) for digest, body, opened in rows]
 
     def _require(self, digest: str) -> Protocol:
         protocol = self.protocol(digest)
@@ -330,9 +346,9 @@ class RunLog:
             holdout = self._require(digest).holdout
             if self.holdout_consumed(digest):
                 raise HoldoutConsumed(f"the holdout of {digest} was already opened")
-            for version, opened in self._opened_holdouts():
-                if holdout.overlaps(opened):
-                    raise HoldoutConsumed(f"this holdout overlaps the one {version} opened")
+            for other, opened in self._versions():
+                if opened and holdout.overlaps(other.holdout):
+                    raise HoldoutConsumed(f"this holdout overlaps the one {other.version} opened")
             latest = self._conn.execute(
                 "SELECT run_id, EXISTS (SELECT 1 FROM claim_run_errata e"
                 "   WHERE e.run_id = claim_runs.run_id) FROM claim_runs"
@@ -357,15 +373,6 @@ class RunLog:
                 detail=f"{digest} for {config_id}",
             )
         return HoldoutOpening(digest, config_id, datetime.fromisoformat(opened_at))
-
-    def _opened_holdouts(self) -> list[tuple[str, ProtocolWindow]]:
-        """(version, holdout) for every holdout opened under any protocol."""
-        rows = self._conn.execute(
-            "SELECT p.protocol_hash, p.body FROM claim_holdout_openings o"
-            " JOIN claim_protocols p USING (protocol_hash)"
-        ).fetchall()
-        opened = [_stored(digest, body) for digest, body in rows]
-        return [(p.version, p.holdout) for p in opened]
 
     def holdout_consumed(self, digest: str) -> bool:
         return (

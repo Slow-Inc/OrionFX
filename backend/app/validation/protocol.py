@@ -60,9 +60,9 @@ class Protocol(ContractModel):
     """Read by nobody while debugging (PRD #120 story 42)."""
     holdout: ProtocolWindow
     """Opened once, by `RunLog.open_holdout`."""
-    values: list[ProtocolValue]
+    values: list[ProtocolValue] = Field(min_length=1)
     """Targets, config space, regime rule, fold plan, estimators: each with a rationale."""
-    gates: list[ProtocolValue]
+    gates: list[ProtocolValue] = Field(min_length=1)
     """The binding pass rules, each with a rationale."""
 
     @model_validator(mode="after")

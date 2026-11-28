@@ -521,9 +521,13 @@ def aa_noise_floor(seed_values: Sequence[float], *, z: float = 1.96) -> float:
     return z * math.sqrt(2) * statistics.stdev(seed_values)
 
 
-def compare_to_floor(candidate: float, baseline: float, *, floor: float) -> Comparison:
-    """Higher is better; a difference within the floor is unconfirmed."""
-    diff = candidate - baseline
+def compare_to_floor(
+    candidate: float, baseline: float, *, floor: float, higher_is_better: bool
+) -> Comparison:
+    """A difference within the floor is unconfirmed. The direction is required, because
+    the gates mix metrics that improve upwards (Brier skill) and downwards (ECE, log
+    loss, Brier error): guessing it would silently invert the verdict."""
+    diff = candidate - baseline if higher_is_better else baseline - candidate
     if abs(diff) <= floor:
         return Comparison.UNCONFIRMED
     return Comparison.BETTER if diff > 0 else Comparison.WORSE
@@ -536,29 +540,42 @@ class BestOfN:
     n_trials: int
     baseline: float
     noise_floor: float
+    higher_is_better: bool
 
     @property
     def lift(self) -> float:
-        return self.value - self.baseline
+        """The improvement over the baseline, positive in the metric's good direction."""
+        diff = self.value - self.baseline
+        return diff if self.higher_is_better else -diff
 
     @property
     def confirmed(self) -> bool:
         """The lift over the fresh baseline exceeds the A/A noise floor."""
-        return compare_to_floor(self.value, self.baseline, floor=self.noise_floor) is (
-            Comparison.BETTER
+        verdict = compare_to_floor(
+            self.value,
+            self.baseline,
+            floor=self.noise_floor,
+            higher_is_better=self.higher_is_better,
         )
+        return verdict is Comparison.BETTER
 
 
 def best_of_n(
-    scores: Mapping[str, float], *, baseline: float, n_trials: int, noise_floor: float
+    scores: Mapping[str, float],
+    *,
+    baseline: float,
+    n_trials: int,
+    noise_floor: float,
+    higher_is_better: bool,
 ) -> BestOfN:
-    """The best config (higher is better) against a baseline rerun on the same folds and
-    seeds, reported with N. The caller must pass the run log's counter,
+    """The best config, in the metric's stated direction, against a baseline rerun on
+    the same folds and seeds, reported with N. The caller must pass the run log's counter,
     `RunLog.counted_configs(protocol_hash)`: this function cannot see the log, so it
     checks only that N does not fall below the scores shown (failed configs count too)."""
     if not scores:
         raise ValueError("no scores")
     if n_trials < len(scores):
         raise ValueError("n_trials cannot be smaller than the configs shown")
-    best = max(scores, key=lambda k: scores[k])
-    return BestOfN(best, scores[best], n_trials, baseline, noise_floor)
+    pick = max if higher_is_better else min
+    best = pick(scores, key=lambda k: scores[k])
+    return BestOfN(best, scores[best], n_trials, baseline, noise_floor, higher_is_better)
