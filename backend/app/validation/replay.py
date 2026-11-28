@@ -37,7 +37,12 @@ from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot,
 from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
 from app.market_data.techniques.indicators import Technique
-from app.prediction.engine import EvaluationPredictor, Refused, predict_for_evaluation
+from app.prediction.engine import (
+    EvaluationOnly,
+    EvaluationPredictor,
+    Refused,
+    predict_for_evaluation,
+)
 from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
 from app.storage.registry import ArtifactRegistry
 from app.validation.metrics import Metric, expectancy, max_drawdown, profit_factor, win_rate
@@ -61,7 +66,7 @@ EvidenceProvider = Callable[[datetime, FeatureSnapshot], Evidence]
 
 
 @dataclass(frozen=True)
-class EvaluationEvidence:
+class EvaluationEvidence(EvaluationOnly):
     """The forecast of an evaluation-loaded model on the step's snapshot. A model that
     reads the M04 transforms gets them from `transform_from_store`, as the recorder and
     the dataset export do (#129), so it is scored on what it was trained on; give it the
@@ -72,10 +77,16 @@ class EvaluationEvidence:
     candles: CandleStore | None = None
     session: SessionSchedule | None = None
 
+    def __post_init__(self) -> None:
+        if self._transforms and self.candles is None:
+            raise ValueError("a transform model needs the candles to transform from")
+
+    @property
+    def _transforms(self) -> bool:
+        return self.model.predictor.card.feature_schema == TRANSFORM_SCHEMA
+
     def __call__(self, now: datetime, snapshot: FeatureSnapshot) -> Evidence:
-        if self.model.predictor.card.feature_schema == TRANSFORM_SCHEMA:
-            if self.candles is None:
-                raise ValueError("a transform model needs the candles to transform from")
+        if self._transforms and self.candles is not None:
             snapshot = transform_from_store(self.candles, snapshot, session=self.session)
         try:
             return Evidence(forecast=predict_for_evaluation(self.model, snapshot, now=now))

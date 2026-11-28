@@ -44,8 +44,11 @@ def build(card: ModelCard, weights: bytes) -> BarrierSoftmax:
     n = len(card.required_features)
     if w["features"] != card.required_features:
         raise ValueError(f"{card.ref}: the weights' features are not the card's")
-    if len(w["intercept"]) != len(CLASSES) or any(len(r) != n for r in w["coef"]):
+    if (len(w["intercept"]) != len(CLASSES) or len(w["coef"]) != len(CLASSES)
+            or any(len(r) != n for r in w["coef"])):  # fmt: skip
         raise ValueError(f"{card.ref}: one intercept and one coefficient row per class")
+    if Decimal(w["temperature"]) <= 0:  # a negative one would swap UP and DOWN
+        raise ValueError(f"{card.ref}: the temperature must be positive")
     return BarrierSoftmax(card, tuple(map(Decimal, w["intercept"])),
                           tuple(tuple(map(Decimal, r)) for r in w["coef"]),
                           Decimal(w["temperature"]))  # fmt: skip

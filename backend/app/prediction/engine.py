@@ -146,6 +146,11 @@ class EvaluationPredictor:
             raise Refused("evaluation predictors are loaded through load_for_evaluation")
 
 
+class EvaluationOnly:
+    """A marker for anything that carries an evaluation-loaded model (replay's
+    `EvaluationEvidence`): live paths refuse it without importing the replay harness."""
+
+
 def load_for_evaluation(
     loader: ArtifactLoader,
     registry: ArtifactRegistry,

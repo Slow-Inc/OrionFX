@@ -34,6 +34,8 @@ DEFAULT_TECHNIQUES: tuple[Technique, ...] = (
 
 def lookback(techniques: Sequence[Technique]) -> int:
     """Closed bars to read per timeframe: exactly what the slowest technique needs."""
+    if not techniques:
+        raise ValueError("a snapshot needs at least one technique")
     return max(t.lookback for t in techniques)
 
 

@@ -4,6 +4,7 @@ approval, so no live path may accept it."""
 
 import json
 import sqlite3
+import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -15,9 +16,10 @@ from tests.support import tracer
 from app.core.bet import LABEL_VERSION
 from app.core.contracts import FeatureSnapshot, ParameterBound, sha256_ref
 from app.core.enums import DataQuality, Direction, ForecastLineage, Mode, Timeframe
-from app.decision.fusion import Costs
+from app.decision.fusion import Costs, Evidence
 from app.learning.bars import Horizon, Provenance
 from app.learning.experience import ExperienceLog
+from app.market_data.features import lookback
 from app.market_data.store import CandleStore
 from app.prediction.adapters import barrier_softmax
 from app.prediction.baseline import BASELINE
@@ -209,3 +211,86 @@ def test_weights_naming_other_features_than_the_card_are_refused(conn: sqlite3.C
     reg.register("model", card.manifest(), actor="m07")
     with pytest.raises(Refused, match="features"):
         _evaluate(reg, card=card, weights=other)
+
+
+def _weights(**over: object) -> bytes:
+    base: dict[str, object] = json.loads(WEIGHTS)
+    base.update(over)
+    return json.dumps(base).encode()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"intercept": ["0", "0"]},  # two classes
+        {"coef": [["1.5", "1.0"], ["-1.5", "-1.0"]]},  # a row missing
+        {"coef": [["1.5"], ["-1.5", "-1.0"], ["0", "0"]]},  # a short row
+        {"temperature": "0"},
+        {"temperature": "-1"},  # would swap UP and DOWN
+    ],
+)
+def test_the_adapter_refuses_misshapen_weights(bad: dict[str, object]) -> None:
+    weights = _weights(**bad)
+    with pytest.raises(ValueError):
+        barrier_softmax.build(_card(weights), weights)
+
+
+def test_a_refused_prediction_gives_no_forecast(registry: ArtifactRegistry) -> None:
+    evidence = EvaluationEvidence(_evaluate(registry))
+    in_sample = _snapshot(CUTOFF)  # at the cutoff: refused, not raised
+    assert evidence(CUTOFF + timedelta(seconds=5), in_sample) == Evidence()
+    assert evidence(NOW, _snapshot()).forecast is not None
+
+
+def test_a_transform_model_without_candles_is_refused_at_construction(
+    conn: sqlite3.Connection,
+) -> None:
+    card = _card(model_version="6", feature_schema="m04.transforms.v1")
+    reg = ArtifactRegistry(conn)
+    reg.register("model", card.manifest(), actor="m07")
+    with pytest.raises(ValueError, match="candles"):
+        EvaluationEvidence(_evaluate(reg, card=card))
+
+
+def test_an_adapter_whose_bytes_are_not_registered_is_refused(conn: sqlite3.Connection) -> None:
+    card = _card(model_version="7", artifact_hash="sha256:" + "0" * 64)
+    reg = ArtifactRegistry(conn)
+    reg.register("model", card.manifest(), actor="m07")
+    with pytest.raises(Refused, match="hash"):
+        _evaluate(reg, card=card)
+
+
+IMPOSTOR = """from app.prediction.adapters import barrier_softmax
+
+
+def build(card, weights):
+    m = barrier_softmax.build(card, weights)
+    other = card.model_copy(update={"semantics": "another card"})
+    return barrier_softmax.BarrierSoftmax(other, m.intercept, m.coef, m.temperature)
+"""
+
+
+def test_an_adapter_that_builds_another_card_is_refused(
+    conn: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "impostor_adapters"
+    root.mkdir()
+    (root / "__init__.py").write_text("", encoding="utf-8")
+    path = root / "swap.py"
+    path.write_text(IMPOSTOR, encoding="utf-8", newline="\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    card = _card(model_version="8", artifact_hash=sha256_ref(path.read_bytes()))
+    reg = ArtifactRegistry(conn)
+    reg.register("model", card.manifest(), actor="m07")
+    loader = ArtifactLoader(reg, allowed_packages=("impostor_adapters",))
+    try:
+        with pytest.raises(Refused, match="another card"):
+            load_for_evaluation(loader, reg, card=card, weights=WEIGHTS,
+                                module="impostor_adapters.swap")  # fmt: skip
+    finally:
+        sys.modules.pop("impostor_adapters", None)
+
+
+def test_lookback_names_an_empty_library() -> None:
+    with pytest.raises(ValueError, match="at least one technique"):
+        lookback([])

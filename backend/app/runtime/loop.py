@@ -14,8 +14,8 @@ input is not known well enough (no Initial Lot, no bars, a stale quote, position
 freshly reported, a basket outside the open cycle) it decides nothing and reports
 DEGRADED; while a cycle is closing it decides nothing. A failing tick reports DOWN and
 is not retried until a backoff has passed. Health is journaled on change and as a
-heartbeat. It refuses replay's `EvaluationEvidence`: a model with no approval never
-reaches a live decision.
+heartbeat. It refuses anything `EvaluationOnly` (replay's `EvaluationEvidence`): a model
+with no approval never reaches a live decision.
 """
 
 import logging
@@ -57,12 +57,11 @@ from app.learning.experience import ExperienceLog
 from app.market_data.features import DEFAULT_TECHNIQUES, build_feature_snapshot, lookback
 from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
-from app.prediction.engine import Refused
+from app.prediction.engine import EvaluationOnly, Refused
 from app.risk.policy import DEFAULT_POLICY, RiskPolicy
 from app.storage.config_store import ConfigStore
 from app.storage.journal import Journal, payload_as
 from app.storage.registry import ArtifactRegistry
-from app.validation.replay import EvaluationEvidence
 
 COMPONENT = "M05.loop"
 SOURCE = "m05"
@@ -106,7 +105,7 @@ class DecisionLoop:
         clock: Clock = utc_now,
         session: SessionSchedule | None = None,
     ) -> None:
-        if isinstance(evidence, EvaluationEvidence):
+        if isinstance(evidence, EvaluationOnly):
             raise Refused("an evaluation-loaded model has no approval: never live evidence")
         self._session = session  # the market's trading schedule; None means 24/7
         self._conn = conn
