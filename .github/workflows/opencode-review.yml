@@ -98,7 +98,9 @@ jobs:
           # is included only when a collaborator wrote it (prompt-injection guard);
           # otherwise only the title (post.py `linked_issue_text`, tested).
           for n in $({ grep -oE '#[0-9]+' "$ctx/pr.md" || true; } | tr -d '#' | sort -un | head -n 3); do
-            if gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json title,body,authorAssociation > "$RUNNER_TEMP/issue-$n.json"; then
+            # REST, not `gh issue view --json`: only the REST issue carries author_association.
+            if gh api "repos/$GITHUB_REPOSITORY/issues/$n" \
+              --jq '{title, body, authorAssociation: .author_association}' > "$RUNNER_TEMP/issue-$n.json"; then
               python3 -I _trusted/opencode/post.py issue-context "$RUNNER_TEMP/issue-$n.json" > "$ctx/issue-$n.md"
             else
               echo "::notice::#$n is not a readable issue; skipped."

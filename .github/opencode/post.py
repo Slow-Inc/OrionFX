@@ -173,6 +173,11 @@ def review(
             raw_block = match.group(1)[:3000]
             inline_bodies.append(raw_block)
             extra += "\n\n#### Inline block that was not valid JSON\n" + _one_line(raw_block)
+        if not isinstance(items, list):
+            # Valid JSON but not an array: keep it visible and let its severities count.
+            raw_block = match.group(1)[:3000]
+            inline_bodies.append(raw_block)
+            extra += "\n\n#### Inline block that was not a JSON array\n" + _one_line(raw_block)
         for item in items if isinstance(items, list) else []:
             if not isinstance(item, dict):
                 continue

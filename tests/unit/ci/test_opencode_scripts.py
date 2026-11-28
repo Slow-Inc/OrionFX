@@ -920,3 +920,55 @@ def test_a_finding_that_mentions_a_verdict_is_kept_and_counted(
 
 def test_crlf_diff_anchors_the_same_lines() -> None:
     assert post.commentable_lines(DIFF.replace("\n", "\r\n")) == post.commentable_lines(DIFF)
+
+
+# --- OpenCode round 7 ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"path": "x.py", "line": 2, "body": "[blocker] object, not an array"},
+        "[blocker] a bare string",
+    ],
+    ids=["object", "string"],
+)
+def test_a_non_list_inline_block_still_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, block: object
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    post.review(_answer(tmp_path, block, summary="- [nit] a"), _diff(tmp_path), "o/r", "7", "abc")
+    body = rec.calls[0]["body"]
+    assert body.splitlines()[-1] == "Verdict: 1 blocker, 0 major"
+    assert "not an array" in body or "bare string" in body
+
+
+def test_over_cap_inline_severities_all_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    n = post.MAX_INLINE + 3
+    inline = [{"path": "x.py", "line": 2, "body": f"[major] n{i}"} for i in range(n)]
+    post.review(_answer(tmp_path, inline, summary="- [nit] a"), _diff(tmp_path), "o/r", "7", "abc")
+    assert rec.calls[0]["body"].splitlines()[-1] == f"Verdict: 0 blocker, {n} major"
+
+
+def test_linked_issues_come_from_rest_with_author_association() -> None:
+    # `gh issue view --json` has no authorAssociation field; the REST issue does.
+    workflow = (ROOT / ".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    assert "authorAssociation: .author_association" in workflow
+    assert "--json title,body,authorAssociation" not in workflow
+
+
+def test_extract_logs_usage_from_step_finish(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    finish = {
+        "type": "step_finish",
+        "part": {"cost": 0.0125, "tokens": {"input": 100, "output": 7, "cache": {"read": 20}}},
+    }
+    events = [finish, finish, _text("m", "answer")]
+    assert extract.main(_events(tmp_path, events), str(tmp_path / "out.md")) == 0
+    assert "usage: input~240 tokens, output~14 tokens, cost $0.0250" in capsys.readouterr().out
