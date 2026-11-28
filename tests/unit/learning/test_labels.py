@@ -81,7 +81,13 @@ def test_a_bar_touching_both_barriers_is_ambiguous_not_a_class() -> None:
 
 
 @pytest.mark.parametrize(
-    ("open_", "outcome", "move"), [("2005", Outcome.UP, D(4)), ("1995", Outcome.DOWN, D(-4))]
+    ("open_", "outcome", "move"),
+    [
+        ("2005", Outcome.UP, D(4)),
+        ("1995", Outcome.DOWN, D(-4)),
+        ("2004", Outcome.UP, D(4)),
+        ("1996", Outcome.DOWN, D(-4)),
+    ],
 )
 def test_a_bar_that_gaps_over_a_barrier_resolves_on_that_barrier(
     open_: str, outcome: Outcome, move: Decimal

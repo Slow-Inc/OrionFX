@@ -125,9 +125,14 @@ def test_a_non_positive_atr_makes_ev_unknown(atr: Decimal) -> None:
     assert expected_value(ctx, inp, COSTS) == (None, None)
 
 
-@pytest.mark.parametrize("contract_size", [D(0), D(-100)])
-def test_a_non_positive_contract_size_makes_ev_unknown(contract_size: Decimal) -> None:
-    costs = replace(COSTS, contract_size=contract_size)
+@pytest.mark.parametrize(
+    "change",
+    [{"contract_size": D(0)}, {"contract_size": D(-100)}, {"commission_per_lot": D("-0.01")}],
+)
+def test_a_cost_input_that_would_lower_the_hurdle_makes_ev_unknown(
+    change: dict[str, Decimal],
+) -> None:  # fmt: skip
+    costs = replace(COSTS, **change)
     f = _forecast().model_copy(update={"class_probabilities": ClassProbabilities(
         label_version=LABEL_VERSION, up=D("0.6"), down=D("0.1"), flat=D("0.3"))})  # fmt: skip
     inp = gather(CTX, [_proposal()], Evidence(forecast=f), cycle=CYCLE, costs=costs,

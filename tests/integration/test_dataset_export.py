@@ -40,7 +40,7 @@ def candles(conn: sqlite3.Connection) -> CandleStore:
     store = CandleStore(conn, dataset_version="v1")
     _bars(store, _closes(N))
     MarketRecorder(conn, candles=store, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
-                   horizons=[H4], provenance=Provenance.BACKFILL,
+                   session=None, horizons=[H4], provenance=Provenance.BACKFILL,
                    clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
     return store
 
@@ -171,7 +171,7 @@ def test_only_the_requested_candle_dataset_version_is_exported(
     other = CandleStore(conn, dataset_version="v2")
     _bars(other, _closes(N))
     MarketRecorder(conn, candles=other, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
-                   horizons=[H4], provenance=Provenance.BACKFILL,
+                   session=None, horizons=[H4], provenance=Provenance.BACKFILL,
                    clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
     _export(conn, tmp_path / "d.jsonl")
     assert {r["dataset_version"] for r in _rows(tmp_path / "d.jsonl")} == {"v1"}
@@ -214,7 +214,7 @@ def test_purge_uses_the_longest_horizon_and_rows_say_if_fully_labelled(
 
     two = Horizon(M15, 2)
     MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
-                   horizons=[two, H4], provenance=Provenance.BACKFILL,
+                   session=None, horizons=[two, H4], provenance=Provenance.BACKFILL,
                    clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
     _export(conn, tmp_path / "d.jsonl", version="two", horizons=[two, H4])
     rows = _rows(tmp_path / "d.jsonl")

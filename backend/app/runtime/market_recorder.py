@@ -77,10 +77,12 @@ class MarketRecorder:
         clock: Clock = utc_now,
         account_id: str = "local-account",
         bot_id: str = "bot-1",
-        session: SessionSchedule | None = None,
+        session: SessionSchedule | None,
     ) -> None:
         self._conn, self._candles, self._symbol = conn, candles, symbol
-        self._session = session  # the market's trading schedule; None means 24/7
+        # The market's trading schedule; None means 24/7. No default: the export and
+        # label scoring must use the same one (train/serve parity, #129).
+        self._session = session
         self._timeframes = [timeframe, *context_timeframes]
         self._horizons = list(horizons)
         step = TIMEFRAME_DURATION[timeframe]

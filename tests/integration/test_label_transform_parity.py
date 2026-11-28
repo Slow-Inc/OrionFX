@@ -68,7 +68,7 @@ def candles(conn: sqlite3.Connection, model: Stationary) -> CandleStore:
     store = CandleStore(conn, dataset_version="v1")
     _bars(store, [str(2000 + i) for i in range(N)])
     MarketRecorder(conn, candles=store, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
-                   horizons=[H4], provenance=Provenance.BACKFILL,
+                   session=None, horizons=[H4], provenance=Provenance.BACKFILL,
                    predictors=[load_baseline(model, mode=Mode.DEMO)],
                    clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
     return store
@@ -152,7 +152,7 @@ def test_a_dual_touch_row_is_left_out_of_the_export_and_counted(
                             open=p - 3, high=p + 10, low=p - 10, close=p, volume=Decimal(100),
                             spread=None, available_at=t + STEP + LAG))  # fmt: skip
     MarketRecorder(conn, candles=store, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
-                   horizons=[H4], provenance=Provenance.BACKFILL,
+                   session=None, horizons=[H4], provenance=Provenance.BACKFILL,
                    clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
     exported, manifest = _export_with_manifest(conn, tmp_path / "d.jsonl")
     rows = {r["as_of"] for r in exported}
@@ -254,7 +254,7 @@ def test_predictions_are_scored_only_against_their_own_dataset_version(
     other = CandleStore(conn, dataset_version="v2")
     _bars(other, [str(3000 + i) for i in range(N)])
     MarketRecorder(conn, candles=other, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
-                   horizons=[H4], provenance=Provenance.BACKFILL,
+                   session=None, horizons=[H4], provenance=Provenance.BACKFILL,
                    predictors=[load_baseline(model, mode=Mode.DEMO)],
                    clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
     log = BarLog(conn)
