@@ -1,5 +1,7 @@
 # Dukascopy historical data: terms of use
 
+> **Owner decision 2026-11-28:** "ถ้าฟรีและแจกแบบ public แสดงว่าสามารถนำมาใช้ได้... อย่าระวังเกินไป" (if it is free and publicly distributed, it may be used; do not be over-cautious). Dukascopy XAUUSD is the **primary training corpus** and HistData the fallback. The reading below is kept as history; the owner decided with it in view. Raw files stay local and gitignored (`data/historical/dukascopy/`), are fetched one at a time with a pause and a cache, and are never redistributed.
+
 Status: **SNAPSHOT** (2026-11-28). This reads Dukascopy's published terms for #128 / PRD #120. It is not legal advice. **The owner decides** whether and how to use Dukascopy data. Nothing was downloaded for this note.
 
 ## Question

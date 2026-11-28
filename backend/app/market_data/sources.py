@@ -24,21 +24,32 @@ run of them flat instead of calling it a gap. A source's key names its import ru
 (schedule, fill limit, which series is read). Only the schedule is stored with the
 binding, so changing another rule for stored data needs a new key, not an edit.
 
-`firstrate-gc` is FirstRate's ratio-adjusted continuous GC 1-minute series: gold futures
-trades as a proxy for spot XAUUSD. Its prices are not tradable spot levels.
+`dukascopy-xauusd` is Dukascopy's public XAUUSD M1 datafeed, bid with the close spread
+(`dukascopy.py`): the primary training corpus by owner decision 2026-11-28. `dukascopy`
+is a converted export read through the generic CSV format. `firstrate-gc` is FirstRate's
+ratio-adjusted continuous GC 1-minute series: gold futures trades as a proxy for spot
+XAUUSD, kept for reference. Its prices are not tradable spot levels.
+
+`SEALED_FROM` keeps the holdout and the unread slice (protocol v1, #132) out of every
+export and statistic: fixed by calendar rule on 2026-11-28, before any statistic read the
+data. The import may store bars there; nothing reads them until a recorded step opens a
+window.
 """
 
 import sqlite3
 from collections.abc import Mapping
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from app.core.time import Clock, utc_iso, utc_now
 from app.market_data.session import CME_GLOBEX_GC, XAUUSD_NY_1700, SessionSchedule
 from app.storage.db import transaction
 
 __all__ = [
+    "HOLDOUT",
     "NO_TRADE_FILL",
+    "SEALED_FROM",
     "SOURCE_SCHEDULES",
+    "UNREAD_SLICE",
     "SourceConflict",
     "SourceRegistry",
     "UnknownSource",
@@ -48,15 +59,29 @@ SOURCE_SCHEDULES: Mapping[str, SessionSchedule] = {
     "dukascopy": XAUUSD_NY_1700,  # [PROPOSED] unverified against Dukascopy XAU/USD data
     "mt5": XAUUSD_NY_1700,  # [PROPOSED] confirm against the broker's symbol spec (#17)
     "firstrate-gc": CME_GLOBEX_GC,  # [PROPOSED] CME Globex hours; no holiday calendar
+    "dukascopy-xauusd": XAUUSD_NY_1700,  # [PROPOSED] broker-style; checked by audit on import
 }
 """XAUUSD session schedule per data source."""
 
 NO_TRADE_FILL: Mapping[str, timedelta] = {
     "firstrate-gc": timedelta(minutes=15),  # [PROPOSED] check the run lengths on import
+    "dukascopy-xauusd": timedelta(minutes=15),  # [PROPOSED] a minute with no tick
 }
 """The longest run of open-session minutes with no bar that a source's import fills as
 "no trade": a flat bar at the previous close, volume 0. Only a source that omits no-trade
 minutes has an entry. A longer run, or any hole in another source, is a real gap."""
+
+HOLDOUT = (datetime(2025, 11, 28, tzinfo=UTC), datetime(2026, 11, 28, tzinfo=UTC))
+"""Protocol v1 holdout, [start, end): the last 12 months up to 2026-11-28 (#132)."""
+UNREAD_SLICE = (datetime(2025, 5, 28, tzinfo=UTC), HOLDOUT[0])
+"""Protocol v1 unread slice, [start, end): the 6 months before the holdout (#132)."""
+SEALED_FROM: Mapping[str, datetime] = {
+    "dukascopy-xauusd": UNREAD_SLICE[0],
+    "firstrate-gc": UNREAD_SLICE[0],
+}
+"""Per real-market data source: nothing at or after this instant may be exported or
+read by a statistic until a recorded protocol step opens it. The generic `dukascopy` CSV
+key is not sealed (synthetic tests use it), so real data goes through `dukascopy-xauusd`."""
 
 
 class UnknownSource(ValueError):

@@ -6,7 +6,16 @@ Nothing was bought, no account was created, no terms were accepted, and no data 
 
 **Need:** XAUUSD M1 (or M5) bars from 2016 to the present, ideally with bid or spread, for personal, non-commercial ML training. They are stored in a local SQLite store, processed on Google Colab (#134), and never redistributed.
 
-## Decision
+## Owner decision 2026-11-28 (supersedes the decision below)
+
+The owner: "ถ้าฟรีและแจกแบบ public แสดงว่าสามารถนำมาใช้ได้... อย่าระวังเกินไป" (if it is free and publicly distributed, it may be used; do not be over-cautious).
+
+- **Primary corpus: Dukascopy XAUUSD** (spot, M1 bid and ask candles from the public datafeed; `app/market_data/dukascopy.py`, data source `dukascopy-xauusd`). No purchase is needed.
+- **Fallback: HistData** (spot bid M1). The permission draft stays optional.
+- FirstRate GC is no longer needed; its importer stays as a reference source. The ledger's purchase row is withdrawn.
+- The terms reading below and in `2026-11-28-dukascopy-terms.md` is kept as history: it records what the terms say, and the owner decided with it in view.
+
+## Decision (before the owner decision; history)
 
 **FirstRate Data gold futures (GC) 1-minute bars are the planned training corpus, pending the owner's purchase** ($213.95 one-time, read from the page HTML; check it at checkout). It has the clearest licence found: perpetual, import into databases, internal models, and hosting by a service provider "regardless of location" (Colab) are all granted in writing.
 
@@ -44,7 +53,7 @@ Colab note: training on Colab puts the data on a third-party host. Only FirstRat
 | 13 | FXCM `MarketData` GitHub repo | "This is for personal use and abides by our EULA" (summary). No LICENSE file | Free | **No XAUUSD candles** (21 FX pairs, 2017–2020) | UTC | n/a |
 | 14 | TrueFX (Integral) | **Unverified.** No terms text or instrument list shown | Free with registration | Tick only; metals not shown | n/a | n/a |
 | 15 | Norgate Data | n/a | Paid | **End-of-day only** for futures | n/a | Excluded: no intraday data |
-| — | Dukascopy | Restricted (`2026-11-28-dukascopy-terms.md`: bans "construct a database of any kind"; automated retrieval needs consent) | — | — | — | Rejected |
+| — | Dukascopy | Restricted (`2026-11-28-dukascopy-terms.md`: bans "construct a database of any kind"; automated retrieval needs consent) | — | — | — | Rejected at the time; **primary corpus by owner decision 2026-11-28** |
 
 Not reviewed in depth: QuantConnect (its OANDA FX dataset has no XAU; downloads cost QCC or $800 bulk), Barchart, TickData LLC and TraderMade.
 

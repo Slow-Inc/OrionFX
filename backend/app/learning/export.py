@@ -58,7 +58,7 @@ from app.core.time import live
 from app.learning.bars import BarLog, BarOutcome, Horizon, Provenance, SnapshotRow
 from app.learning.lifecycle import DatasetManifest, DatasetStore, FoldWindow, Split
 from app.market_data.features import FEATURE_SCHEMA
-from app.market_data.sources import SourceRegistry
+from app.market_data.sources import SEALED_FROM, SourceRegistry
 from app.storage.journal import Journal, payload_as
 from app.validation.splits import WalkForward, walk_forward
 
@@ -161,6 +161,11 @@ def export_dataset(
         raise ValueError("a dataset needs a sealed holdout")
     registry = SourceRegistry(conn)
     sources = {v: registry.require(v)[0] for v in sorted(dataset_versions)}
+    for source in sorted(set(sources.values())):
+        sealed = SEALED_FROM.get(source)
+        if sealed is not None and window_end > sealed:
+            raise ValueError(f"{source} is sealed from {sealed.isoformat()} (protocol holdout"
+                             " and unread slice, #132): end the window by then")  # fmt: skip
     plan = walk_forward(window_start, window_end, train=train, test=test, embargo=embargo,
                         holdout=holdout)  # fmt: skip
     log = BarLog(conn)
