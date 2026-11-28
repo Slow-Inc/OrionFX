@@ -271,7 +271,7 @@ reset; run block "--match-head-commit of another commit" "gh pr merge 7 --match-
 reset; run allow "--match-head-commit=<sha> form" "gh pr merge 7 --squash --match-head-commit=$HEAD"
 reset; run allow "redirection after the merge" "gh pr merge 7 --squash $MHC 2>&1"
 reset; reviews '[]'; run block "quoted absolute gh path is gated" "\"/c/Program Files/GitHub CLI/gh.exe\" pr merge 7 $MHC" "no review by"
-reset; reviews '[]'; run block "merge after cd && is gated" "cd /x && gh pr merge 7 $MHC" "no review by"
+reset; run block "merge after cd && is refused: the merge must be its own command" "cd /x && gh pr merge 7 $MHC" "only command"
 reset; run block "two merges in one command" "gh pr merge 1 $MHC; gh pr merge 2 $MHC" "$UNPARSED"
 reset; run block "env-prefixed merge is refused" "GH_REPO=other/repo gh pr merge 7 $MHC" "$UNPARSED"
 reset; reviews '[]'; run block "PowerShell call operator is gated" "& 'C:\\Program Files\\GitHub CLI\\gh.exe' pr merge 7 $MHC" "no review by" PowerShell
@@ -407,11 +407,22 @@ reset; run block "--auto built by brace expansion" "gh pr merge 7 --squash $MHC 
 reset; run block "--auto split by a line continuation" $'gh pr merge 7 --squash '"$MHC"$' -\\\n-auto' "cannot check|unknown"
 reset; run block "--auto hidden in a flag value's brace expansion" "gh pr merge 7 --squash $MHC --subject {x,--auto}" "cannot check"
 reset; run block "glob in the merge arguments" "gh pr merge 7 --squash $MHC --subject *" "cannot check"
-reset; run block "command substitution in the merge arguments" "gh pr merge 7 --squash $MHC \$(echo --auto)" "cannot check"
-reset; run block "PowerShell expression argument" "gh pr merge 7 --squash $MHC ('--au'+'to')" "cannot check" PowerShell
+reset; run block "command substitution in the merge arguments" "gh pr merge 7 --squash $MHC \$(echo --auto)" "cannot check|only command"
+reset; run block "PowerShell expression argument" "gh pr merge 7 --squash $MHC ('--au'+'to')" "cannot check|only command" PowerShell
 reset; run block "PowerShell splatting" "gh pr merge 7 --squash $MHC @a" "cannot check" PowerShell
 reset; run block "unknown flag" "gh pr merge 7 --squash $MHC --frobnicate" "unknown"
 reset; run block "--admin is refused" "gh pr merge 7 --squash $MHC --admin" "--admin"
+# OpenCode round 3 on PR #150: another statement can change which gh runs; comments;
+# a marker after blank lines. On the passing baseline, so only these rules can deny.
+reset; run block "PATH changed before the merge" "export PATH=/tmp/evil:/usr/bin; gh pr merge 7 --squash $MHC" "only command"
+reset; run block "hash -p before the merge" "hash -p /tmp/evil/gh gh; gh pr merge 7 --squash $MHC" "only command"
+reset; run block "alias before the merge" "alias gh=/tmp/evil/gh; gh pr merge 7 --squash $MHC" "only command"
+reset; run block "merge piped onward" "gh pr merge 7 --squash $MHC | cat" "only command"
+reset; run block "PowerShell env change before the merge" "\$env:Path='C:\\evil'; gh pr merge 7 --squash $MHC" "only command" PowerShell
+reset; run allow "trailing comment with expansion characters" "$M # after review (round 3) {ok} \$x *"
+reset; files '[{"filename":".claude/hooks/x"}]'; comments "[$(comment "
+$IND")]"
+run block "marker after a blank first line does not count" "$M" "risk paths"
 # OpenCode round 2 on PR #150: ANSI-C escapes in the `pr` word, trailing comments, riskPaths.
 P "ANSI-C hex-encoded pr"      "gh \$'\\x70r' merge 7"
 P "ANSI-C hex in part of pr"   "gh p\$'\\x72' merge 7"

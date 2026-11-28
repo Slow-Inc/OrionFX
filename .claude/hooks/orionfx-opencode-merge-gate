@@ -18,7 +18,11 @@
 # would be lost there. Every error path, and any unexpected exit or signal (trap),
 # also prints the deny JSON. Allow = exit 0 with empty stdout.
 #
-# THE ONLY MERGE IT LETS THROUGH is one plain command segment of the form
+# The policy and procedure of record are docs/agents/workflow.md -> Review gates; this
+# header describes the code.
+#
+# THE ONLY MERGE IT LETS THROUGH is a tool call that is exactly one plain command (no
+# other statement before or after it, which could change which gh runs) of the form
 #     gh pr merge <number|PR URL> [flags] --match-head-commit <head sha>
 # Any other text that looks like a merge -- `pr merge`, `/pulls/<n>/merge`,
 # `mergePullRequest`, `enablePullRequestAutoMerge` -- is refused (fail closed):
@@ -330,19 +334,26 @@ for my $v (@variants) {
 }
 exit 0 unless $n_kw;
 
-my @merges = grep { @$_ >= 3 && is_gh($_->[0]) && $_->[1] eq 'pr' && $_->[2] eq 'merge' } @segs;
+sub is_merge_seg { my $s = shift; @$s >= 3 && is_gh($s->[0]) && $s->[1] eq 'pr' && $s->[2] eq 'merge' }
+my @merges = grep { is_merge_seg($_) } @segs;
 block("this command mentions a merge ($n_kw place(s)) $UNCHECKABLE") unless @merges == 1 && $n_kw == 1;
+# Another statement in the same call can change WHICH gh runs (`export PATH=...;`,
+# `hash -p`, `alias`, `cd`) or where its output goes, so the merge must stand alone.
+block("the merge must be the only command in this tool call (no `;`, `&&`, `||`, `|`, newline or other "
+    . "statement before or after it): another statement can change which `gh` actually runs. Run `$FORM` by itself.")
+    unless @segs == 1;
 
-# The shell must not be able to build arguments the lexer did not see: outside quotes,
-# no expansion or expression characters ($ ` { } * ? [ ] ( ), PowerShell @splat), and
-# no line continuation that changes the words (`-\<newline>-auto`).
+# The shell must not be able to build arguments the lexer did not see: outside quotes
+# and comments, no expansion or expression characters ($ ` { } * ? [ ] ( ), PowerShell
+# @splat), and no line continuation that changes the words (`-\<newline>-auto`).
 sub unquoted {
     my $s = shift;
     my $e = quotemeta($ps ? '`' : '\\');
     $s =~ s{$e.|'[^']*'|"(?:$e.|[^"])*"}{ substr($&, 0, 1) =~ /['"]/ ? "''" : $& }gse;
+    $s =~ s{(^|[\s;&|()])#[^\n]*}{$1}g;   # a comment is not code
     return $s;
 }
-my @merges0 = grep { @$_ >= 3 && is_gh($_->[0]) && $_->[1] eq 'pr' && $_->[2] eq 'merge' } segments($data_variants[1]);
+my @merges0 = grep { is_merge_seg($_) } segments($data_variants[1]);
 block("the merge command uses shell expansion, an expression or a line continuation, so the arguments `gh` receives "
     . "are not the ones checked. $UNCHECKABLE")
     if unquoted($text) =~ /[\$`{}*?\[\]()]|(?:^|\s)\@/
@@ -538,10 +549,10 @@ if (@risk_hits || !@head_reviews) {
         next unless trusted_assoc($c->{author_association});
         my $body = $c->{body} // '';
         next if ref $body;
-        if ($body =~ /\A\s*<!--\s*t4:independent-review\s+head=([0-9a-fA-F]{40})\s*-->[^\n]*\n(.*)\z/s && lc $1 eq $head) {
+        if ($body =~ /\A[^\S\n]*<!--\s*t4:independent-review\s+head=([0-9a-fA-F]{40})\s*-->[^\n]*\n(.*)\z/s && lc $1 eq $head) {
             $ind_ok = 1 if $2 =~ /\S/;
         }
-        if ($body =~ /\A\s*<!--\s*t4:opencode-fallback\s+head=([0-9a-fA-F]{40})\s+reason="([^"\n]*)"\s*-->/ && lc $1 eq $head) {
+        if ($body =~ /\A[^\S\n]*<!--\s*t4:opencode-fallback\s+head=([0-9a-fA-F]{40})\s+reason="([^"\n]*)"\s*-->/ && lc $1 eq $head) {
             (my $r = $2) =~ s/^\s+|\s+$//g;
             $fb_ok = 1 if $r ne '' && $r !~ /^\.+$/;
         }
