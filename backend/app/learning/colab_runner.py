@@ -22,7 +22,8 @@
    owner-governed record.
 
 A hard kill (Windows TerminateProcess, SIGKILL) cannot be caught: recover with
-`colab sessions` and `colab stop -s <session>`.
+`colab sessions` and `colab --config <work>/colab-state.json stop -s <session>` (the
+session is recorded in that state file, not in the default one).
 """
 
 import argparse
@@ -61,6 +62,7 @@ from app.storage.registry import ArtifactRegistry
 ACTOR = "m04.colab_runner"
 MIN_CU = Decimal(20)
 STOP_TIMEOUT_S = 180.0
+STATE_FILE = "colab-state.json"
 _BALANCE = re.compile(r"Current balance:\s*([0-9]+(?:\.[0-9]+)?)\s*compute units")
 
 
@@ -195,7 +197,8 @@ def verify_return(out_tar: Path, job: JobSpec, staging: Path) -> ModelCard:
             tar.extractall(staging, filter="data")
         files = {name: (staging / name).read_bytes() for name in expected}
         manifest = json.loads(files[vm.MANIFEST])
-        if manifest.get("job") != vm.binding(job.model_dump(mode="json")):
+        bound = vm.binding(job.model_dump(mode="json"))
+        if not isinstance(manifest, dict) or manifest.get("job") != bound:
             raise ReturnRefused("the manifest is not bound to this job")
         listed = manifest.get("files")
         if not isinstance(listed, dict) or sorted(listed) != [vm.CARD, vm.WEIGHTS]:
@@ -305,7 +308,8 @@ class ColabRunner:
                 except Exception as exc:
                     raise VmStopFailed(
                         f"colab stop failed for {session}; the VM may still be billing:"
-                        f" check `colab sessions` and run `colab stop -s {session}`"
+                        f" check `colab sessions` and run"
+                        f" `colab --config {self._work / STATE_FILE} stop -s {session}`"
                     ) from exc
 
 
@@ -333,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     args.work.mkdir(parents=True, exist_ok=True)
     conn = connect(args.db)
     migrate(conn)
-    cli = ColabCli(state=args.work / "colab-state.json")
+    cli = ColabCli(state=args.work / STATE_FILE)
     runner = ColabRunner(cli, ArtifactRegistry(conn), artifacts=args.artifacts,
                          work=args.work, min_cu=args.min_cu)  # fmt: skip
     try:

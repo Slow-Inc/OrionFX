@@ -197,7 +197,7 @@ def test_a_signal_routes_into_the_stop(
 
 def test_a_failed_stop_is_loud(conn: sqlite3.Connection, tmp_path: Path, job_path: Path) -> None:
     fake = FakeColab(fail={"stop": ColabError("stop broke")})
-    with pytest.raises(VmStopFailed, match="may still be billing"):
+    with pytest.raises(VmStopFailed, match=r"may still be billing.*--config .*colab-state\.json"):
         _runner(fake, conn, tmp_path).run(job_path)
     _nothing_registered(conn, tmp_path)
 
@@ -217,8 +217,17 @@ def _edit_json(path: Path, **changes: Any) -> None:
         (lambda out: (out / "sub").mkdir(), "sub"),
         (lambda out: _edit_json(out / vm.MANIFEST, job={"job_id": "other"}), "bound"),
         (lambda out: _rehash_card(out, horizon_bars=0), "not a valid ModelCard"),
+        (lambda out: (out / vm.MANIFEST).write_text("[]"), "not bound"),
     ],
-    ids=["hash-mismatch", "extra-file", "missing-file", "directory", "unbound", "bad-card"],
+    ids=[
+        "hash-mismatch",
+        "extra-file",
+        "missing-file",
+        "directory",
+        "unbound",
+        "bad-card",
+        "manifest-not-an-object",
+    ],
 )
 def test_a_return_that_fails_verification_is_refused_and_nothing_is_registered(
     conn: sqlite3.Connection, tmp_path: Path, job_path: Path, tamper: Any, reason: str
