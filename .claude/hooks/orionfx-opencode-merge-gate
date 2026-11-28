@@ -5,7 +5,12 @@
 # this one is OrionFX's own and is edited here. Upstream design: xenodeve/xeno-skills#441.
 #
 # PreToolUse on Bash, PowerShell and Monitor commands, and on GitHub MCP merge tools.
-# Active only when .claude/t4.json has "requireOpenCodeReview": true.
+# Active when "requireOpenCodeReview" is true in the working-tree .claude/t4.json OR in
+# the default branch's copy on GitHub (read with `gh api`; its settings win when it is
+# on). So an uncommitted edit or an old worktree cannot switch the gate off. If the
+# default branch cannot be read when it matters, the command is denied.
+# Limit: the hook registration in .claude/settings.json is also working-tree, so this
+# closes the invisible-disable case, not a determined local edit.
 #
 # HOW IT BLOCKS: a PreToolUse "deny" JSON object on stdout, exit 0 -- like t4-gate, and
 # NEVER by exit code. On Windows run-hook.cmd (vendored) runs `exit /b %ERRORLEVEL%`
@@ -70,24 +75,28 @@ trap 'deny "interrupted by a signal. Blocking (fail closed)."' HUP INT TERM
 input=""
 IFS= read -r -d '' input || true
 
+# The working-tree switch is only half of it: perl also reads the DEFAULT BRANCH's
+# .claude/t4.json from GitHub when it matters, and the gate is on if either says true
+# (a local edit or an old worktree cannot turn it off -- #150 review).
 cfg="${CLAUDE_PROJECT_DIR:-.}/.claude/t4.json"
 cfg_txt=""
 [ -f "$cfg" ] && { IFS= read -r -d '' cfg_txt < "$cfg" || true; }
-if [[ ! "$cfg_txt" =~ \"requireOpenCodeReview\"[[:space:]]*:[[:space:]]*(true|false) ]]; then
-  shopt -s nocasematch
-  [[ "$input" == *merge* ]] && echo "OpenCode merge gate: no \"requireOpenCodeReview\" in $cfg, so the gate is DISABLED for this command." >&2
-  exit 0
-fi
-[ "${BASH_REMATCH[1]}" = true ] || exit 0
+ORIONFX_LOCAL_ON=false
+[[ "$cfg_txt" =~ \"requireOpenCodeReview\"[[:space:]]*:[[:space:]]*true ]] && ORIONFX_LOCAL_ON=true
 
-command -v perl >/dev/null 2>&1 || deny "perl is not available, so the command cannot be checked. Blocking (fail closed)."
+if ! command -v perl >/dev/null 2>&1; then
+  # Without perl nothing can be checked, not even the default branch. Locally off:
+  # no opinion (documented limit). Locally on: deny.
+  [ "$ORIONFX_LOCAL_ON" = true ] || exit 0
+  deny "perl is not available, so the command cannot be checked. Blocking (fail closed)."
+fi
 ORIONFX_GH="$(command -v gh 2>/dev/null || true)"
 if [ -z "$ORIONFX_GH" ]; then
   for c in "/c/Program Files/GitHub CLI/gh" "/c/Program Files/GitHub CLI/gh.exe"; do
     [ -x "$c" ] && { ORIONFX_GH="$c"; break; }
   done
 fi
-export ORIONFX_GH ORIONFX_CFG="$cfg"
+export ORIONFX_GH ORIONFX_CFG="$cfg" ORIONFX_LOCAL_ON
 out="$(printf '%s' "$input" | perl -x "$0")"
 rc=$?
 [ "$rc" = 0 ] || deny "internal error (the checker exited with $rc). Blocking (fail closed)."
@@ -105,30 +114,55 @@ use warnings;
 use JSON::PP;
 use File::Temp qw(tempfile);
 
+use MIME::Base64 qw(decode_base64);
+
 my $JSON = JSON::PP->new->allow_nonref;
 my $T0 = time;
 my $BUDGET = 100;   # seconds for all gh calls; the hook's settings.json timeout is 150
+my $GH = $ENV{ORIONFX_GH} // '';
+my $HAS_TIMEOUT = grep { -x "$_/timeout" } split /:/, ($ENV{PATH} // '');
+# `gh api repos/{owner}/{repo}/...` resolves the repo from the cwd: pin it to the project.
+chdir $ENV{CLAUDE_PROJECT_DIR} if defined $ENV{CLAUDE_PROJECT_DIR} && -d $ENV{CLAUDE_PROJECT_DIR};
+
+# --- is the gate on? -----------------------------------------------------------------
+# On if the working tree OR the default branch's .claude/t4.json says
+# "requireOpenCodeReview": true; when the default branch says so, ITS settings (bot,
+# riskPaths, cap) are used. The default branch is read lazily -- only before a deny or
+# the first gh call -- so with the switch off locally, ordinary commands cost nothing.
+my $LOCAL_ON = ($ENV{ORIONFX_LOCAL_ON} // '') eq 'true';
+my ($cfg, $resolved) = (undef, 0);
 
 # One deny object on stdout, exit 0 (see the header: the exit code can be lost).
-sub block {
+sub deny_json {
     print JSON::PP->new->ascii->canonical->encode({ hookSpecificOutput => {
         hookEventName => 'PreToolUse', permissionDecision => 'deny',
         permissionDecisionReason => "OpenCode merge gate (.claude/hooks/orionfx-opencode-merge-gate): $_[0]" } });
     exit 0;
 }
+sub block {
+    resolve_cfg() unless $resolved || $LOCAL_ON;   # switch off everywhere: no opinion (exit 0)
+    deny_json($_[0]);
+}
 sub H { ref $_[0] eq 'HASH' ? $_[0] : {} }
 sub A { ref $_[0] eq 'ARRAY' ? $_[0] : [] }
+sub is_on { my $v = H($_[0])->{requireOpenCodeReview}; JSON::PP::is_bool($v) && $v }
+
+sub resolve_cfg {
+    $resolved = 1;   # first: a deny raised while fetching must not recurse here
+    my $f = gh_json('api', 'repos/{owner}/{repo}/contents/.claude/t4.json');
+    my $remote = eval { $JSON->decode(decode_base64($f->{content} // '')) };
+    deny_json("could not parse the default branch's .claude/t4.json, so the gate cannot tell whether it is on. "
+        . "Blocking (fail closed).") unless ref $remote eq 'HASH';
+    if (is_on($remote)) { $cfg = $remote; return }
+    exit 0 unless $LOCAL_ON;
+    $cfg = eval { open my $fh, '<', $ENV{ORIONFX_CFG} or die; local $/; $JSON->decode(<$fh>) };
+    deny_json("could not parse $ENV{ORIONFX_CFG}.") unless ref $cfg eq 'HASH';
+}
 
 my $raw = do { local $/; <STDIN> };
 my $in = eval { $JSON->decode($raw) };
 block("could not parse the hook input as JSON. Blocking rather than guessing.") unless ref $in eq 'HASH';
 my $tool = $in->{tool_name} // '';
-
-my $cfg = eval {
-    open my $fh, '<', $ENV{ORIONFX_CFG} or die;
-    local $/; $JSON->decode(<$fh>);
-};
-block("could not parse $ENV{ORIONFX_CFG}.") unless ref $cfg eq 'HASH';
 
 block("`$tool` can merge without this gate seeing the review. Use `gh pr merge <n> --match-head-commit <sha>` instead.")
     if $tool =~ /^mcp__github__.*merge/i;
@@ -328,7 +362,8 @@ my $sel = $pos[0];
 block("add `--match-head-commit <head sha>`, so a push after this check cannot merge an unreviewed head: `$FORM`.")
     unless $mhc =~ /^[0-9a-fA-F]{40}$/;
 
-# --- config -------------------------------------------------------------------------
+# --- config (the default branch's when it has the gate on; see resolve_cfg) --------
+resolve_cfg() unless $resolved;
 my $bot = $cfg->{opencodeBotLogin};
 block('.claude/t4.json "opencodeBotLogin" must be a non-empty string when "requireOpenCodeReview" is true.')
     unless defined $bot && !ref $bot && $bot =~ /\S/;
@@ -355,13 +390,10 @@ sub glob_re {
 }
 my @risk_re = map { glob_re($_) } @$risk;
 
-# --- gh -------------------------------------------------------------------------------
-my $GH = $ENV{ORIONFX_GH} // '';
-block('gh (GitHub CLI) was not found, so the OpenCode review cannot be checked.') unless $GH ne '';
-my $HAS_TIMEOUT = grep { -x "$_/timeout" } split /:/, ($ENV{PATH} // '');
-
+# --- gh ($GH and $HAS_TIMEOUT are set at the top: resolve_cfg calls gh early) --------
 sub gh {
     my (@args) = @_;
+    block('gh (GitHub CLI) was not found, so the review state cannot be checked.') unless $GH ne '';
     my $label = join ' ', map { /^query=/ ? 'query=...' : $_ } @args;
     my $left = $T0 + $BUDGET - time;
     block("time budget used up before `gh $label`. Blocking (fail closed); retry the merge.") if $left < 5;

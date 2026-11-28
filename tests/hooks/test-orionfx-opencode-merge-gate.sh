@@ -22,6 +22,12 @@ case "$1 $2" in
        */reviews*) k=reviews ;;
        */files*) k=files ;;
        */comments*) k=comments ;;
+       */contents/.claude/t4.json)  # the default branch's config: remote.json, else a mirror of the local one
+         if [ -f "$FIX/fail.contents" ]; then cat "$FIX/fail.contents" >&2; exit 1; fi
+         src="$FIX/remote.json"; [ -f "$src" ] || src="$CLAUDE_PROJECT_DIR/.claude/t4.json"
+         [ -f "$src" ] || { echo "HTTP 404: Not Found" >&2; exit 1; }
+         perl -MMIME::Base64 -0777 -ne '(my $b = encode_base64($_)) =~ s/\n/\\n/g; print qq({"type":"file","encoding":"base64","content":"$b"})' "$src"
+         exit 0 ;;
        *) echo "fake gh: unexpected call: $*" >&2; exit 99 ;;
      esac ;;
 esac
@@ -141,8 +147,23 @@ UNPARSED="form the gate cannot check"
 # --- scope ------------------------------------------------------------------------
 reset; run allow "non-merge command is not touched" "git status"; called "non-merge: gh never called" ""
 reset; run allow "git merge is not a PR merge" "git merge --ff-only origin/main"; called "git merge: gh never called" ""
-reset; set_cfg false; reviews '[]'; run allow "opt-in off allows" "$M"; called "opt-in off: gh never called" ""
-reset; rm "$TMP/proj/.claude/t4.json"; run allow "no t4.json: allowed, with a notice" "$M" "gate is DISABLED"
+reset; set_cfg false; reviews '[]'; run allow "opt-in off (local and default branch) allows" "$M"
+called "opt-in off: only the default-branch config is read" "^api repos/\{owner\}/\{repo\}/contents/\.claude/t4\.json$"
+if grep -qv "contents/" "$FIX/calls.log"; then fail=$((fail + 1)); echo "FAIL - opt-in off: no other gh call"; else pass=$((pass + 1)); echo "ok   - opt-in off: no other gh call"; fi
+reset; set_cfg false; run allow "opt-in off: git merge never calls gh" "git merge --ff-only origin/main"; called "opt-in off, git merge: gh never called" ""
+reset; set_cfg false; run allow "opt-in off: git status never calls gh" "git status"; called "opt-in off, git status: gh never called" ""
+# The switch is not read only from the working tree (#150 review): the default branch's
+# .claude/t4.json counts too, so a local edit or an old worktree cannot turn the gate off.
+on_remote() { cp "$ROOT/.claude/t4.json" "$FIX/remote.json"; perl -0777 -i -pe "s/\"requireOpenCodeReview\": *[a-z]+/\"requireOpenCodeReview\": $1/" "$FIX/remote.json"; }
+reset; set_cfg false; on_remote true; reviews '[]'; run block "local false, default branch true: gated" "$M" "no review by"
+reset; rm "$TMP/proj/.claude/t4.json"; on_remote true; reviews '[]'; run block "no local t4.json, default branch true: gated" "$M" "no review by"
+reset; rm "$TMP/proj/.claude/t4.json"; run allow "no local t4.json: git status is untouched" "git status"; called "no local t4.json, git status: gh never called" ""
+reset; rm "$TMP/proj/.claude/t4.json"; run block "no t4.json anywhere: a merge fails closed" "$M" "contents.*fail closed"
+reset; set_cfg false; echo "HTTP 502" > "$FIX/fail.contents"; run block "local off, default branch unreadable: a merge fails closed" "$M" "fail closed"
+reset; on_remote false; reviews '[]'; run block "local true, default branch false: still gated" "$M" "no review by"
+reset; on_remote true; perl -0777 -i -pe 's/"riskPaths": \[.*?\]/"riskPaths": ["nothing\/**"]/s' "$TMP/proj/.claude/t4.json"
+files '[{"filename":"backend/app/risk/veto.py"}]'; run block "default-branch riskPaths win over a narrowed local list" "$M" "risk paths"
+reset; echo "HTTP 502" > "$FIX/fail.contents"; run block "local on, default branch unreadable: fail closed" "$M" "fail closed"
 reset; run allow "merge mentioned inside a heredoc" "cat > f <<'EOF'
 gh pr merge 5 --squash
 EOF"

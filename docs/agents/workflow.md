@@ -93,9 +93,9 @@ Local verify is `.claude/t4.json` `"verify"` (backend: ruff, format, mypy, pytes
 
 ## Review gates — OpenCode merge gate (#149, owner decision 2026-11-28)
 
-This section **supersedes** the "Before merge / ship → `/code-review` + `/scrutinize`" row in the table above. It also supersedes any wording elsewhere in this file that calls the OpenCode review advisory only, or says it "does not replace" those gates.
+This section is the before-merge review policy, and the "Before merge / ship" row in the table above points here. It also supersedes any wording elsewhere in this file, or in the OpenCode workflows' own text, that calls the OpenCode review advisory only.
 
-**The hook is the real gate.** `.claude/hooks/orionfx-opencode-merge-gate` enforces this section on Bash, PowerShell and Monitor commands, and on GitHub MCP merge tools, when `.claude/t4.json` has `"requireOpenCodeReview": true`.
+**The hook is the real gate.** `.claude/hooks/orionfx-opencode-merge-gate` enforces this section on Bash, PowerShell and Monitor commands, and on GitHub MCP merge tools. It is on when `"requireOpenCodeReview": true` is set in the working-tree `.claude/t4.json` **or** in the default branch's copy on GitHub, which the hook reads with `gh api`. When the default branch has it on, the hook uses that copy's settings (bot login, `riskPaths`, cap). So an uncommitted edit or an old worktree cannot switch the gate off.
 
 ### Who reviews
 
@@ -183,4 +183,5 @@ Independent review (subagent: code-review + scrutinize) of <sha>:
 - **What a text hook cannot close.** It cannot see indirect forms: `$(…)`, a variable holding the command, encoded commands (`pwsh -EncodedCommand`, `base64 -d | sh`), or a script written in one tool call and run in another. The ruleset on `main` is the server-side backstop.
 - **`run-hook.cmd` fails open when bash is missing.** It exits 0 silently (an upstream defect in the vendored file). This is one more reason the gate relies on the deny JSON plus the ruleset, not on the exit code.
 - A PR with more than 100 review threads is blocked, because the gate does not page them.
-- If `.claude/t4.json` or its `requireOpenCodeReview` key is missing, the gate is off. It prints a notice on every merge-looking command, so it never turns off silently.
+- **The on/off switch.** The gate is off only when neither the working tree nor the default branch says `"requireOpenCodeReview": true`. With the switch off locally, the hook reads the default branch only when it would otherwise deny a command or call `gh` for a merge, so ordinary commands cost nothing. If the default branch cannot be read at that point, the command is denied. Without perl, a locally-off gate has no opinion.
+- **Working-tree registration.** The hook's registration in `.claude/settings.json` is also working-tree. Reading the default branch closes the invisible-disable case (a stale or edited config), not a determined local edit that removes the hook. The ruleset is the backstop.
