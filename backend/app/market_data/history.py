@@ -26,11 +26,17 @@ Resampling and gaps:
 
 No-trade minutes (`NO_TRADE_FILL`, pre-declared per source). A source such as FirstRate
 leaves out minutes with no trade, so a missing minute there is not missing data. Between
-two consecutive bars, the open-session minutes with no bar form one run (scheduled
-closures do not count toward it). A run of at most the source's limit is filled: each
+two consecutive bars, the open-session minutes with no bar after the last scheduled
+closure between them form one run: a run never spans a closure. The open minutes before
+a closure have no trade after them in their session, so they are not filled. A run of at
+most the source's limit is filled: each
 minute becomes a flat bar at the previous close with volume 0 and no spread, marked
 `filled`, and a resampled bar made only of filled minutes carries `NO_TRADE`. So it is
-neither a GAP nor a missing bar for labels. A longer run is a real gap. A run with no bar
+neither a GAP nor a missing bar for labels. A longer run is a real gap, and so is a run
+holding a minute whose row validation dropped: that minute had bad data, not no trade.
+Look-ahead: whether a minute is filled, and so a bar's NO_TRADE flag, depends on a trade
+at most `limit` open minutes later in the same session. That is the import's only
+look-ahead, and the limit and the closure rule bound it. A run with no bar
 after it in the range is not filled: nothing says trading resumed. So extending a range
 that ended inside a run rebuilds a stored bar differently, and the store refuses it
 (`CandleConflict`): import the longer range as a new dataset version. To fill the start
@@ -43,9 +49,11 @@ Chunks: the source is read once, in order, and split into chunks aligned to H1 b
 transaction each, so no bar spans two chunks. A chunk's first M5 bar takes its gap state
 from the last bar stored before the chunk. Re-running a chunk therefore rebuilds
 identical bars, and the store treats them as no-ops. An interrupted import resumes at
-the chunk holding the newest stored bar. Import a version's range in time order:
-extending it backwards would change the gap state of a stored chunk, and the store
-refuses that (`CandleConflict`).
+the chunk holding the newest stored bar. Import a version's range in time order.
+Extending it backwards would skip the new rows (the resume starts after them) or leave a
+stored bar's gap state wrong. So `import_history` refuses (ValueError) a range that starts
+before the oldest stored bar while the source has valid rows there. Re-running a range
+whose first rows come after its start is not an extension.
 
 `CsvM1Source` is the generic source. Its format is documented on the class so that any
 vendor export (Dukascopy or another) can be converted to it. `FirstRateGcSource`
@@ -133,17 +141,26 @@ def import_history(
         raise ValueError("the range must end on an H1 bar boundary")
     if end > clock():
         raise ValueError("the range must end by the clock: only closed bars are imported")
-    schedule = SourceRegistry(conn, clock=clock).register(dataset_version, data_source)
     store = CandleStore(conn, dataset_version=dataset_version)
+    oldest = store.earliest_open(symbol, Timeframe.M5)
+    if oldest is not None and start < oldest:
+        before = _validated(source.m1_bars(start, oldest), clock(), Counter(), start, set())
+        if next(before, None) is not None:
+            raise ValueError(
+                f"{dataset_version} starts at {oldest}: extending a stored version"
+                " backwards is refused, import a new dataset version"
+            )
+    schedule = SourceRegistry(conn, clock=clock).register(dataset_version, data_source)
     newest = store.latest_open(symbol, Timeframe.M5, as_of=end)
     first = start if newest is None or newest < start else start + (newest - start) // chunk * chunk
     report = ImportReport()
     fill = NO_TRADE_FILL.get(data_source)
     lead = timedelta(0) if fill is None else MAX_CLOSED + fill
+    dropped: set[datetime] = set()  # minutes of rows validation dropped
     # One pass over the source, split at chunk ends: validated rows only move forward.
-    rows = _validated(source.m1_bars(first - lead, end), clock(), report.issues, first)
+    rows = _validated(source.m1_bars(first - lead, end), clock(), report.issues, first, dropped)
     if fill is not None:
-        rows = _no_trade_filled(rows, schedule, fill, first, report.filled_runs)
+        rows = _no_trade_filled(rows, schedule, fill, first, report.filled_runs, dropped)
     rows = (b for b in rows if b.open_time >= first)  # earlier rows only seed the fill
     pending = next(rows, None)
     t = first
@@ -181,9 +198,14 @@ def _import_chunk(
 
 
 def _validated(
-    rows: Iterable[M1Bar], now: datetime, issues: Counter[Issue], count_from: datetime
+    rows: Iterable[M1Bar],
+    now: datetime,
+    issues: Counter[Issue],
+    count_from: datetime,
+    dropped: set[datetime],
 ) -> Iterator[M1Bar]:
-    """Valid rows in order; dropped rows from `count_from` on are counted in `issues`."""
+    """Valid rows in order. Each dropped row's minute is added to `dropped`, and dropped
+    rows from `count_from` on are counted in `issues`."""
     last: datetime | None = None
     for row in rows:
         if row.open_time.tzinfo is None:
@@ -201,6 +223,7 @@ def _validated(
             last = bar.open_time
             yield bar
             continue
+        dropped.add(floor_time(bar.open_time, M1))
         if bar.open_time >= count_from:
             issues[issue] += 1
 
@@ -211,35 +234,63 @@ def _no_trade_filled(
     limit: timedelta,
     first: datetime,
     runs: list[int],
+    dropped: set[datetime],
 ) -> Iterator[M1Bar]:
-    """The rows, with each no-trade run of at most `limit` open minutes between two rows
-    filled flat at the previous close. Runs reaching `first` or later are listed in `runs`."""
+    """The rows, with each no-trade run of at most `limit` open minutes before a row
+    filled flat at the previous close. Runs reaching `first` or later are listed in `runs`.
+    A run holding a dropped minute is not filled. A run is decided only once the next row
+    is read, so an out-of-order row that falls in it, and arrives just after the row that
+    ends it, has been dropped and seen by then."""
     prev: M1Bar | None = None
+    held: M1Bar | None = None  # the row that ends the run not decided yet
     for bar in rows:
-        if prev is not None:
-            run = _open_minutes(schedule, prev.open_time + M1, bar.open_time, limit // M1)
-            if run and run[-1] >= first:
-                runs.append(len(run))
-            for t in run:
-                yield M1Bar(t, prev.close, prev.close, prev.close, prev.close, Decimal(0),
-                            spread=None, filled=True)  # fmt: skip
-        yield bar
-        prev = bar
+        if held is not None:
+            yield from _fill(schedule, prev, held, limit, first, runs, dropped)
+            yield held
+            prev = held
+        held = bar
+    if held is not None:
+        yield from _fill(schedule, prev, held, limit, first, runs, dropped)
+        yield held
+
+
+def _fill(
+    schedule: SessionSchedule,
+    prev: M1Bar | None,
+    bar: M1Bar,
+    limit: timedelta,
+    first: datetime,
+    runs: list[int],
+    dropped: set[datetime],
+) -> Iterator[M1Bar]:
+    """Flat bars at `prev`'s close for the no-trade run before `bar`, if it is filled."""
+    if prev is None:
+        return
+    run = _open_minutes(schedule, prev.open_time + M1, bar.open_time, limit // M1)
+    if any(t in dropped for t in run):
+        return  # bad data, not a minute with no trade: a real gap
+    if run and run[-1] >= first:
+        runs.append(len(run))
+    for t in run:
+        yield M1Bar(t, prev.close, prev.close, prev.close, prev.close, Decimal(0),
+                    spread=None, filled=True)  # fmt: skip
 
 
 def _open_minutes(
     schedule: SessionSchedule, lo: datetime, hi: datetime, most: int
 ) -> list[datetime]:
-    """The open-session minutes in [lo, hi), or none if there are more than `most`."""
+    """The open-session minutes in [lo, hi) after its last scheduled closure, or none if
+    there are more than `most`. A run never spans a closure: the open minutes before one
+    have no trade after them in their session, so they are not filled."""
     out: list[datetime] = []
     t = lo
     while t < hi:
-        if schedule.is_open(t):
-            if len(out) == most:
-                return []
+        if not schedule.is_open(t):
+            out = []
+        elif len(out) <= most:
             out.append(t)
         t += M1
-    return out
+    return out if len(out) <= most else []
 
 
 def _valid(b: M1Bar) -> bool:

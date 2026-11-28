@@ -15,3 +15,8 @@ CREATE TRIGGER candle_sources_no_update BEFORE UPDATE ON candle_sources
 BEGIN SELECT RAISE(ABORT, 'candle sources are append-only'); END;
 CREATE TRIGGER candle_sources_no_delete BEFORE DELETE ON candle_sources
 BEGIN SELECT RAISE(ABORT, 'candle sources are append-only'); END;
+-- INSERT OR REPLACE would delete and reinsert without firing the triggers above: an
+-- insert for a bound version is ignored instead (the registry compares the binding).
+CREATE TRIGGER candle_sources_no_replace BEFORE INSERT ON candle_sources
+WHEN EXISTS (SELECT 1 FROM candle_sources WHERE dataset_version = NEW.dataset_version)
+BEGIN SELECT RAISE(IGNORE); END;

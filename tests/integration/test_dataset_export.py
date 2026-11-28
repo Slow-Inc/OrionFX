@@ -29,7 +29,7 @@ from tests.integration.test_market_recorder import (
 from app.core.contracts import Confidence, NewsAssessment
 from app.core.enums import Direction, Mode
 from app.core.events import make_event
-from app.learning.bars import Horizon, Provenance
+from app.learning.bars import BarLog, Horizon, Provenance
 from app.learning.export import export_dataset
 from app.learning.lifecycle import DatasetStore, FoldWindow, LifecycleRefused
 from app.market_data.sources import SourceRegistry, UnknownSource
@@ -98,8 +98,20 @@ def test_export_is_deterministic_hashed_and_registered_with_its_fold_plan(
 def test_every_window_is_purged_by_label_end_and_availability(
     conn: sqlite3.Connection, candles: CandleStore, tmp_path: Path
 ) -> None:
-    m = _export(conn, tmp_path / "d.jsonl")
+    # A snapshot known long after its bar: its label ends inside fold 0's training window,
+    # but it became available only after that window ended, so it belongs to no window.
+    (early,) = BarLog(conn).snapshots("XAUUSD", M15, start=_bar_close(4),
+                                      end=_bar_close(4) + STEP)  # fmt: skip
+    late = early.snapshot.model_copy(update={"available_at": _bar_close(13),
+                                             "valid_until": _bar_close(14)})  # fmt: skip
+    assert late.available_at > late.as_of + LONGEST
+    SourceRegistry(conn).register("late-v1", "dukascopy")
+    BarLog(conn).record(late, timeframe=M15, provenance=Provenance.BACKFILL, mode=None,
+                        dataset_version="late-v1")  # fmt: skip
+    m = _export(conn, tmp_path / "d.jsonl", dataset_versions=["v1", "late-v1"])
     rows = _rows(tmp_path / "d.jsonl")
+    assert not [r for r in rows if r["dataset_version"] == "late-v1"]
+    rows = [r for r in rows if r["dataset_version"] == "v1"]
     holdout = m.splits[1]
 
     def inside(r: dict, start: datetime, end: datetime) -> bool:  # type: ignore[type-arg]

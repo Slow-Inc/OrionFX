@@ -210,20 +210,60 @@ def test_a_run_longer_than_the_limit_is_a_real_gap(
     assert m5[_et("2026-01-07 15:40")].quality_flags == [QualityFlag.GAP.value]
 
 
-def test_the_scheduled_break_does_not_count_toward_a_run(
-    conn: sqlite3.Connection, tmp_path: Path
-) -> None:
-    """Last trade 16:57 ET, first after the break 18:03 ET: 2 + 3 open minutes with no
-    trade are filled, the closed hour is not, and the audit still fits."""
-    quiet = [(_et("2026-01-07 16:58"), _et("2026-01-07 17:00")),
+def test_a_run_never_spans_a_scheduled_closure(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    """Last trade 16:54 ET, first after the break 18:03 ET. The 3 open minutes after the
+    reopen are a run and are filled. The 5 before the close have no trade after them in
+    their session: filling them would look past the break, so they stay a real gap."""
+    quiet = [(_et("2026-01-07 16:55"), _et("2026-01-07 17:00")),
              (_et("2026-01-07 18:00"), _et("2026-01-07 18:03"))]  # fmt: skip
     starts = _minutes(WED.replace(hour=21), WED + timedelta(days=1), skip=quiet)
     report = _import(conn, _write(tmp_path / NAME, starts), start=WED.replace(hour=21))
-    assert report.filled_runs == [5] and report.fits
-    assert all(report.unexpected_gaps(tf) == 0 for tf in Timeframe)
+    assert report.filled_runs == [3] and report.fits
+    assert report.unexpected_gaps(Timeframe.M5) == 1
     m5 = {b.open_time: b for b in _stored(conn, Timeframe.M5)}
-    assert m5[_et("2026-01-07 18:00")].quality_flags == []  # 18:03 and 18:04 traded
+    assert _et("2026-01-07 16:55") not in m5
+    assert m5[_et("2026-01-07 18:00")].quality_flags == [QualityFlag.GAP.value]
     assert not any(_et("2026-01-07 17:00") <= t < _et("2026-01-07 18:00") for t in m5)
+
+
+def test_a_run_after_a_closure_at_the_range_start_is_filled_as_one_pass(
+    conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """The range starts at the 18:00 ET reopen, with no trade until 18:03. The run is
+    seeded by the 16:59 bar, over an hour earlier: the MAX_CLOSED lead reads it."""
+    quiet = (_et("2026-01-07 18:00"), _et("2026-01-07 18:03"))
+    path = _write(tmp_path / NAME, _minutes(WED.replace(hour=21), WED + timedelta(days=1),
+                                            skip=[quiet]))  # fmt: skip
+    _import(conn, path, start=WED.replace(hour=21), dataset_version="one-pass")
+    report = _import(conn, path, start=WED.replace(hour=23))
+    assert report.filled_runs == [3] and report.unexpected_gaps(Timeframe.M5) == 0
+    m5 = _stored(conn, Timeframe.M5)
+    assert m5[0].open_time == _et("2026-01-07 18:00") and m5[0].quality_flags == []
+    assert m5 == [b for b in _stored(conn, Timeframe.M5, "one-pass")
+                  if b.open_time >= WED.replace(hour=23)]  # fmt: skip
+
+
+@pytest.mark.parametrize("drop", ["invalid", "out_of_order"])
+def test_a_run_holding_a_dropped_row_is_a_real_gap(
+    conn: sqlite3.Connection, tmp_path: Path, drop: str
+) -> None:
+    """A row dropped by validation in 15:28-15:42 ET means the minute had data that was
+    bad, not that it had no trade: the run is never filled."""
+    quiet = (_et("2026-01-07 15:28"), _et("2026-01-07 15:43"))
+    path = _write(tmp_path / NAME, _minutes(WED.replace(hour=20), WED.replace(hour=21),
+                                            skip=[quiet]))  # fmt: skip
+    lines = path.read_text(encoding="utf-8").splitlines()
+    after = next(i for i, x in enumerate(lines) if x.startswith("2026-01-07 15:43"))
+    if drop == "invalid":
+        lines.insert(after, "2026-01-07 15:35:00,1,0,2,1,1")  # crossed: high below low
+    else:
+        lines.insert(after + 1, _row(_et("2026-01-07 15:35"), D(2000)))  # after 15:43
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    report = _import(conn, path, end=WED.replace(hour=21))
+    assert sum(report.issues.values()) == 1 and report.filled_runs == []
+    m5 = {b.open_time: b for b in _stored(conn, Timeframe.M5)}
+    assert _et("2026-01-07 15:30") not in m5 and _et("2026-01-07 15:35") not in m5
+    assert m5[_et("2026-01-07 15:40")].quality_flags == [QualityFlag.GAP.value]
 
 
 def test_a_run_with_no_trade_after_it_in_the_range_is_not_filled(
@@ -337,6 +377,9 @@ def test_roll_dates_are_recorded_per_dataset_version_append_only(
         log.record("frd-gc-v1", [Roll(ROLL.roll_at, "GCG26", "GCM26")])
     with pytest.raises(sqlite3.DatabaseError, match="append-only"):
         conn.execute("DELETE FROM candle_rolls")
+    conn.execute("INSERT OR REPLACE INTO candle_rolls VALUES"
+                 " ('frd-gc-v1', ?, 'GCG26', 'GCM26')", (ROLL.roll_at.isoformat(),))  # fmt: skip
+    assert log.rolls_of("frd-gc-v1") == [ROLL, later]
     assert log.rolls_of("other") == []
 
 
