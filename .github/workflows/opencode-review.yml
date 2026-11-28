@@ -64,6 +64,10 @@ jobs:
         run: |
           set -euo pipefail
           base=_trusted-base/.github
+          # A PR could commit its own `_trusted/`; remove it so cp creates a fresh copy
+          # (cp -r into an existing directory would nest, keeping the PR's files).
+          rm -rf _trusted
+          [ ! -e _trusted ]
           if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ] && [ -f "$base/opencode/with-app-token.sh" ]; then
             cp -r "$base" _trusted
           else
@@ -90,11 +94,14 @@ jobs:
           gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json title,body \
             --jq '"# " + .title + "\n\n" + (.body // "")' > "$ctx/pr.md"
           # Linked issues: digits only are taken from the PR title and body. A
-          # number that is a PR, not an issue, is skipped with a notice.
+          # number that is a PR, not an issue, is skipped with a notice. The body
+          # is included only when a collaborator wrote it (prompt-injection guard);
+          # otherwise only the title (post.py `linked_issue_text`, tested).
           for n in $({ grep -oE '#[0-9]+' "$ctx/pr.md" || true; } | tr -d '#' | sort -un | head -n 3); do
-            if ! gh issue view "$n" --repo "$GITHUB_REPOSITORY" > "$ctx/issue-$n.md"; then
+            if gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json title,body,authorAssociation > "$RUNNER_TEMP/issue-$n.json"; then
+              python3 -I _trusted/opencode/post.py issue-context "$RUNNER_TEMP/issue-$n.json" > "$ctx/issue-$n.md"
+            else
               echo "::notice::#$n is not a readable issue; skipped."
-              rm -f "$ctx/issue-$n.md"
             fi
           done
           # Conditional skills: triggers are computed (and tested) in post.py
@@ -113,7 +120,7 @@ jobs:
           Apply CLAUDE.md and karpathy-guidelines. Use the skill tool to load and follow exactly these repo skills, in this order: $run_skills. Do not run the skipped ones: ${skipped:-none}. Report each finding once; a later section refers to an earlier one instead of repeating it. Be concise: report findings, not praise. Stay inside this checkout: do not try to inspect the OpenCode installation, the runner or paths outside the repo (those reads are denied), and do not review _trusted/ or _trusted-base/ (copies of tooling from the base branch). End with the full review as your final message.
 
           Your final answer has two parts.
-          1. The review summary in Markdown: first line "OpenCode review of $HEAD_SHA (advisory)"; then one section per skill that ran, in the order above, in the exact format its SKILL.md defines, with severity tags [blocker], [major], [minor] or [nit] at the start of each finding bullet; then a "Skipped:" list with one "- <skill> — <reason>" line per skipped skill. Do not write a Verdict line; the poster computes it.
+          1. The review summary in Markdown: first line "OpenCode review of $HEAD_SHA (advisory)"; then one section per skill that ran, in the order above, in the exact format its SKILL.md defines, with severity tags [blocker], [major], [minor] or [nit] at the start of each finding bullet; then a line "Skipped:" followed by one "- <skill> — <reason>" line per skipped skill (write "Skipped: none" when nothing was skipped). Each section heading must be "### <skill>: ..." exactly; a review missing a section or the Skipped line is discarded. Do not write a Verdict line; the poster computes it.
           2. At the very end, one fenced code block whose info string is exactly "json opencode-inline", holding a JSON array with one entry per finding that points at a line added or kept in the diff: {"path": "<file path as in the diff>", "line": <line number in the new version of the file>, "body": "[severity] finding. Why. Suggested fix."}. At most 15 entries. Findings that cannot be tied to a diff line stay only in the summary. Use [] if there are none.
           EOF
       - name: Run OpenCode
@@ -138,7 +145,8 @@ jobs:
           set -uo pipefail
           rc=0
           bash _trusted/opencode/with-app-token.sh python3 -I _trusted/opencode/post.py review \
-            "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA" || rc=$?
+            "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA" \
+            .git/opencode-ctx/skills.json || rc=$?
           python3 -I _trusted/opencode/post.py cause-for-post "$rc" > "$RUNNER_TEMP/opencode-cause"
           exit "$rc"
       - name: OpenCode unavailable notice

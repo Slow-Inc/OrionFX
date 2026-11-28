@@ -4,7 +4,8 @@ The model never holds a GitHub token. These helpers turn its answer into
 GitHub writes that the workflow permits: a COMMENT review, or labels/comments
 on a new issue. They validate everything the model chose before writing.
 
-  post.py review ANSWER DIFF REPO PR HEAD_SHA
+  post.py review ANSWER DIFF REPO PR HEAD_SHA SKILLS_JSON
+  post.py issue-context ISSUE_JSON   (linked-issue context; body only from collaborators)
   post.py triage ANSWER REPO ISSUE BODY_FILE EXISTING_LABELS
   post.py notice CAUSE_FILE REPO PR HEAD_SHA
   post.py skills FILES_TXT   (prints {"run": [...], "skipped": [...]})
@@ -38,17 +39,54 @@ MAX_INLINE = 15
 AUTH_FAILURE = 2  # review() exit code for HTTP 401/403 (config), vs 1 (transient)
 VERDICT_RE = re.compile(r"^\s*Verdict:.*$", re.M)
 FIRST_LINE_RE = re.compile(r"\A\s*\**OpenCode review of[^\n]*\n?", re.I)
-SEVERITY_RE = re.compile(r"^\s*[-*]\s*\[(blocker|major)\]", re.M | re.I)
+SEVERITY_RE = re.compile(r"\[(blocker|major)\]", re.I)
+FAIL_ROW_RE = re.compile(r"^\s*\|\s*(\d+)\s*\|.*\|\s*fail\s*\|", re.I)
+NEVER_LIST_GATE = "10"  # t4-gates item whose fail is a blocker (see its SKILL.md)
+MALFORMED = 5  # review() exit code: the answer lacks a required section; nothing posted
 
 
-def verdict_line(summary: str) -> str:
+def verdict_line(summary: str, inline_bodies: list[str] | tuple[str, ...] = ()) -> str:
     """The merge gate parses this exact last line: `Verdict: <n> blocker, <n> major`.
 
-    It counts the summary's finding bullets tagged [blocker] / [major]; each finding is
-    reported once in the summary (the prompt says so), so inline copies are not counted.
+    It must never undercount, so it overcounts: every [blocker]/[major] tag anywhere in a
+    line of the summary or of any inline comment body counts (inline copies of summary
+    findings count twice), and each failed t4-gates table row counts as a major, or a
+    blocker for the never-list gate.
     """
-    tags = [m.lower() for m in SEVERITY_RE.findall(summary)]
-    return f"Verdict: {tags.count('blocker')} blocker, {tags.count('major')} major"
+    blockers = majors = 0
+    for text in (summary, *inline_bodies):
+        for line in text.split("\n"):
+            tags = [t.lower() for t in SEVERITY_RE.findall(line)]
+            blockers += tags.count("blocker")
+            majors += tags.count("major")
+            row = FAIL_ROW_RE.match(line)
+            if row and not tags:
+                if row.group(1) == NEVER_LIST_GATE:
+                    blockers += 1
+                else:
+                    majors += 1
+    return f"Verdict: {blockers} blocker, {majors} major"
+
+
+def missing_sections(summary: str, skills_path: str) -> list[str]:
+    """The `### <skill>` sections and the `Skipped:` line a well-formed review must have."""
+    selected = json.loads(Path(skills_path).read_text(encoding="utf-8"))
+    headings = {
+        m.group(1).lower() for m in re.finditer(r"^#{2,4}\s*([a-z0-9-]+)", summary, re.M | re.I)
+    }
+    missing = [f"### {s}" for s in selected["run"] if s.lower() not in headings]
+    if not re.search(r"^\W*Skipped\b", summary, re.M | re.I):
+        missing.append("Skipped:")
+    return missing
+
+
+def linked_issue_text(issue: dict) -> str:
+    """Context for a linked issue: the body only when a collaborator wrote it (M2)."""
+    title = str(issue.get("title") or "")
+    association = str(issue.get("authorAssociation") or "")
+    if association in {"OWNER", "MEMBER", "COLLABORATOR"}:
+        return f"# {title}\n\n{issue.get('body') or ''}\n"
+    return f"# {title}\n\n(Body omitted: the author is not a collaborator ({association}).)\n"
 
 
 def gh_api(endpoint: str, payload: dict) -> subprocess.CompletedProcess:
@@ -72,7 +110,9 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
     lines: dict[str, set[int]] = {}
     path: str | None = None
     new_line = old_left = new_left = 0
-    for raw in diff.splitlines():
+    # split("\n"), not splitlines(): content may hold \u2028, \x0b and other separators.
+    for raw in diff.split("\n"):
+        raw = raw.removesuffix("\r")
         if old_left > 0 or new_left > 0:  # inside a hunk body
             tag = raw[:1]
             if tag == "\\":  # "\ No newline at end of file"
@@ -86,7 +126,8 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
                 old_left -= 1
             continue
         if raw.startswith("+++ "):
-            path = raw[6:] if raw.startswith("+++ b/") else None
+            # git appends a TAB to header paths that contain spaces.
+            path = raw[6:].removesuffix("\t") if raw.startswith("+++ b/") else None
             if path is not None:
                 lines.setdefault(path, set())
         elif m := HUNK_RE.match(raw):
@@ -96,12 +137,25 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
     return lines
 
 
-def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) -> int:
+def _one_line(text: str) -> str:
+    """Flatten model text placed in our own sections, so it cannot fake a `Verdict:` line."""
+    return re.sub(r"\s*[\r\n]+\s*", " ", text)
+
+
+def review(
+    answer_path: str,
+    diff_path: str,
+    repo: str,
+    pr: str,
+    head_sha: str,
+    skills_path: str | None = None,
+) -> int:
     answer = Path(answer_path).read_text(encoding="utf-8")
     allowed = commentable_lines(Path(diff_path).read_text(encoding="utf-8"))
     comments: list[dict] = []
     off_diff: list[str] = []
     over_cap: list[str] = []
+    inline_bodies: list[str] = []
     extra = ""
     # The last block wins: an earlier one is usually an example such as "[]".
     blocks = list(INLINE_RE.finditer(answer))
@@ -112,16 +166,21 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
         except ValueError:
             items = []
             print("::warning::The inline-comment block is not valid JSON; kept as text.")
-            extra += "\n\n#### Inline block that was not valid JSON\n" + match.group(1)[:3000]
+            raw_block = match.group(1)[:3000]
+            inline_bodies.append(raw_block)
+            extra += "\n\n#### Inline block that was not valid JSON\n" + _one_line(raw_block)
         for item in items if isinstance(items, list) else []:
             if not isinstance(item, dict):
                 continue
             path, line, body = item.get("path"), item.get("line"), item.get("body")
             if not isinstance(body, str):
                 continue
-            entry = f"- `{path}:{line}` {body[:500]}"
+            inline_bodies.append(body)
+            entry = f"- `{_one_line(str(path))}:{_one_line(str(line))}` {_one_line(body[:500])}"
             on_diff = (
-                isinstance(path, str) and isinstance(line, int) and line in allowed.get(path, set())
+                isinstance(path, str)
+                and type(line) is int  # bool is an int subclass
+                and line in allowed.get(path, set())
             )
             if not on_diff:
                 off_diff.append(entry)
@@ -130,11 +189,14 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
             else:
                 comments.append({"path": path, "line": line, "side": "RIGHT", "body": body[:2000]})
         answer = INLINE_RE.sub("", answer).strip()
-    # The verdict counts the summary only: the prompt requires every finding to be in the
-    # summary, and the inline entries are copies of some of them (counting both would
-    # double-count).
     summary = VERDICT_RE.sub("", answer).strip()
-    verdict = verdict_line(summary)
+    if skills_path is not None:
+        missing = missing_sections(summary, skills_path)
+        if missing:
+            print(f"::error::Malformed review, missing {missing}; nothing is posted.")
+            return MALFORMED
+    # Overcounts on purpose (summary + inline bodies + failed gate rows); see verdict_line.
+    verdict = verdict_line(summary, inline_bodies)
     # The gate finds the review by this exact first line, so post.py owns it.
     summary = FIRST_LINE_RE.sub("", summary).strip()
     summary = f"OpenCode review of {head_sha} (advisory)\n\n{summary}"
@@ -153,7 +215,9 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
     if result.returncode != 0 and comments:
         reason = result.stderr.strip()[:300]
         print(f"::warning::Inline comments rejected ({reason}); moving them to the summary.")
-        moved = "\n".join(f"- `{c['path']}:{c['line']}` {c['body'][:500]}" for c in comments)
+        moved = "\n".join(
+            f"- `{c['path']}:{c['line']}` {_one_line(c['body'][:500])}" for c in comments
+        )
         extra += "\n\n#### Inline comments GitHub rejected\n" + moved
         payload["body"] = f"{summary}{extra}\n\n{verdict}"
         payload["comments"] = []
@@ -270,6 +334,8 @@ def cause_for_post(rc: int) -> str:
         return "config: GitHub refused the review (401/403); check the OpenCode App's permissions"
     if rc == 4:
         return "unavailable: the OpenCode App token exchange failed"
+    if rc == MALFORMED:
+        return "unavailable: malformed review"
     return "unavailable: posting the review to GitHub failed"
 
 
@@ -331,6 +397,10 @@ if __name__ == "__main__":
         sys.exit(notice(*args))
     if command == "skills":
         sys.exit(skills(*args))
+    if command == "issue-context":
+        issue_json = json.loads(Path(args[0]).read_text(encoding="utf-8"))
+        print(linked_issue_text(issue_json), end="")
+        sys.exit(0)
     if command == "cause-for-post":
         print(cause_for_post(int(args[0])))
         sys.exit(0)

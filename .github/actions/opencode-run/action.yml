@@ -44,13 +44,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
-          -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RESULTS_URL -u ACTIONS_CACHE_URL \
-          npm install -g --no-fund --no-audit opencode-ai@1.19.6 || {
+        scrub=(env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RESULTS_URL -u ACTIONS_CACHE_URL)
+        "${scrub[@]}" npm install -g --no-fund --no-audit opencode-ai@1.19.6 || {
           echo "unavailable: installing opencode-ai@1.19.6 from npm failed" > "$RUNNER_TEMP/opencode-cause"
           exit 1
         }
-        opencode --version
+        "${scrub[@]}" opencode --version
     # Sign in and run in ONE step: the 1-hour key lives only in this step's
     # process env (never GITHUB_ENV), so no later step ever sees it.
     - name: Sign in to OpenCode and run
@@ -94,6 +93,11 @@ runs:
         echo "::add-mask::$token"
         export OPENCODE_API_KEY="$token"
         unset token
+        # OpenCode (and any project plugin it loads from the checkout) runs with no
+        # OIDC request credentials or runtime tokens: the exchange above is done.
+        scrub=(env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RESULTS_URL -u ACTIONS_CACHE_URL)
+        "${scrub[@]}" bash -c '[ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}${ACTIONS_ID_TOKEN_REQUEST_URL:-}${ACTIONS_RUNTIME_TOKEN:-}" ]' \
+          || cause "security: OIDC or runtime tokens would reach OpenCode"
         events="$RUNNER_TEMP/opencode-events.jsonl"
         # Up to RETRIES extra attempts, only when the model ended cleanly without
         # any answer text (seen on e5d1606). Never after a breach or a timeout.
@@ -101,7 +105,7 @@ runs:
         for attempt in $(seq 0 "$RETRIES"); do
           status=0
           timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
-            opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
+            "${scrub[@]}" opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
             < /dev/null > "$events" || status=$?
           # extract.py owns the outcome (tested): 0 = answer written, 75 = no
           # answer after a clean exit (retry once), else a cause was recorded with

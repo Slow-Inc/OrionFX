@@ -18,14 +18,15 @@ on:
   pull_request_review_comment:
     types: [created]
 
-concurrency:
-  group: opencode-ask-${{ github.event.issue.number || github.event.pull_request.number }}
-  cancel-in-progress: true
-
 permissions: {}
 
 jobs:
   answer:
+    # Job-level, queued (not cancelled): every comment on the thread starts this
+    # workflow, and a run whose job is skipped must never cancel a real /oc answer.
+    concurrency:
+      group: opencode-ask-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
     if: >-
       (startsWith(github.event.comment.body, '/oc ') || startsWith(github.event.comment.body, '/opencode '))
       && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
@@ -59,6 +60,9 @@ jobs:
         run: |
           set -euo pipefail
           base=_trusted-base/.github
+          # A PR could commit its own `_trusted/`; remove it so cp creates a fresh copy.
+          rm -rf _trusted
+          [ ! -e _trusted ]
           if [ -f "$base/actions/opencode-run/action.yml" ] && [ -f "$base/opencode/post.py" ] && [ -f "$base/opencode/app-token.sh" ] && [ -f "$base/opencode/with-app-token.sh" ]; then
             cp -r "$base" _trusted
           else
