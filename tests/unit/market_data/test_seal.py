@@ -2,19 +2,12 @@
 statistic read the data. A real source's window may end after the seal only once the
 holdout was opened, and then never reads the unread slice or past the holdout."""
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
+from tests.support.seal import Opened
 
 from app.market_data.sources import HOLDOUT, UNREAD_SLICE, Sealed, require_unsealed
-
-
-@dataclass(frozen=True)
-class Opened:
-    protocol_hash: str = "sha256:" + "0" * 64
-    config_id: str = "c1"
-    opened_at: datetime = datetime(2026, 11, 28, tzinfo=UTC)
 
 
 def _t(y: int, m: int, d: int) -> datetime:
@@ -37,6 +30,12 @@ def test_past_the_seal_needs_an_opened_holdout() -> None:
         require_unsealed("dukascopy-xauusd", _t(2023, 11, 29))
     require_unsealed("dukascopy-xauusd", HOLDOUT[1], start=HOLDOUT[0], opening=Opened())
     require_unsealed("dukascopy-xauusd", HOLDOUT[1], opening=Opened())  # a recorder: no start
+
+
+def test_fresh_forward_data_after_both_windows_is_free() -> None:
+    require_unsealed("dukascopy-xauusd", _t(2027, 6, 1), start=HOLDOUT[1])
+    with pytest.raises(Sealed):
+        require_unsealed("dukascopy-xauusd", _t(2027, 6, 1), start=_t(2026, 11, 27))
 
 
 def test_an_opened_holdout_still_never_reads_the_unread_slice_or_past_the_holdout() -> None:

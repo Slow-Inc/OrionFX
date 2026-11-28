@@ -76,6 +76,8 @@ NO_TRADE_FILL: Mapping[str, timedelta] = {
 "no trade": a flat bar at the previous close, volume 0. Only a source that omits no-trade
 minutes has an entry. A longer run, or any hole in another source, is a real gap."""
 
+# TODO(#132): move HOLDOUT and UNREAD_SLICE into the hashed protocol record once the
+# protocol machinery lands; until then this is the one copy the code enforces.
 HOLDOUT = (datetime(2024, 5, 28, tzinfo=UTC), datetime(2026, 11, 28, tzinfo=UTC))
 """Protocol v1 holdout, [start, end): 30 months up to 2026-11-28, by the length rule (#132)."""
 UNREAD_SLICE = (datetime(2023, 11, 28, tzinfo=UTC), HOLDOUT[0])
@@ -113,8 +115,10 @@ def require_unsealed(
     opening: HoldoutToken | None = None,
 ) -> None:
     """Refuse a window of a sealed data source that ends after its `SEALED_FROM`, unless
-    the holdout was opened (`opening`). Even then the window must end by the holdout's end
-    and, if it has a `start`, must not read the unread slice, which v1 never opens.
+    it starts after the holdout (fresh forward data) or the holdout was opened (`opening`).
+    Even then the window must end by the holdout's end and, if it has a `start`, must not
+    read the unread slice, which v1 never opens. A window with no `start` (the recorder)
+    is taken to start at the beginning.
 
     Callers: `export_dataset`, `MarketRecorder` (its window ends at its clock) and the
     statistics (`era_costs` takes `sealed_from`). TODO(#131): `run_system_backtest` calls
@@ -124,6 +128,8 @@ def require_unsealed(
     sealed = SEALED_FROM.get(data_source) if data_source is not None else None
     if sealed is None or end <= sealed:
         return
+    if start is not None and start >= HOLDOUT[1]:
+        return  # fresh forward data after both windows: the next claim's evidence
     if opening is None:
         raise Sealed(f"{data_source} is sealed from {sealed.isoformat()} (protocol v1 holdout"
                      " and unread slice, #132): end the window by then")  # fmt: skip

@@ -28,32 +28,32 @@ from pathlib import Path
 from app.core.enums import Timeframe
 from app.learning.cost_log import era_costs
 from app.market_data.dukascopy import (
+    SIDES,
     DukascopyFetcher,
     DukascopyM1Source,
     check_day,
     decode_candles,
 )
 from app.market_data.history import import_history
-from app.market_data.sources import SEALED_FROM
+from app.market_data.session import MAX_CLOSED, SATURDAY
+from app.market_data.sources import NO_TRADE_FILL, SEALED_FROM
 from app.market_data.store import CandleStore
 from app.storage.db import connect, migrate
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / "data" / "historical" / "dukascopy"
 SOURCE = "dukascopy-xauusd"
-LEAD = timedelta(days=5)
-"""The importer reads MAX_CLOSED + the no-tick fill limit before a range: fetch that too."""
+LEAD = MAX_CLOSED + NO_TRADE_FILL[SOURCE] + timedelta(days=1)
+"""The importer reads MAX_CLOSED + the no-tick fill limit before a range (`import_history`);
+fetch that too, plus a day for whole-day files."""
 REFERENCE_DAY = date(2020, 8, 6)
 REFERENCE_RANGE = (Decimal(1990), Decimal(2100))
 """Gold's record near $2,070 on 2020-08-06 [from memory, not a cited source]. The
 neighbouring months (July ~$1,780, September ~$1,930) and a wrong divisor (x10) fall
 outside it, so a pass checks both the price scale and the 0-based month."""
 STRESSED_SPREAD, STRESSED_TOTAL = Decimal("0.80"), Decimal("1.07")
-"""`STRESSED_COST` on the #129 branch (spread 0.80; spread + 2 slippage + commission 1.07)."""
-
-
-def _day(text: str) -> date:
-    return date.fromisoformat(text)
+"""`STRESSED_COST` on the #129 branch (spread 0.80; spread + 2 slippage + commission 1.07).
+TODO(#129): import `app.core.bet.STRESSED_COST` once #129 merges onto this branch."""
 
 
 def _utc(d: date) -> datetime:
@@ -66,7 +66,7 @@ def check_reference(fetcher: DukascopyFetcher) -> None:
     sides = [
         [c for c in decode_candles(fetcher.day_file("XAUUSD", s, REFERENCE_DAY), REFERENCE_DAY)
          if c.volume > 0]
-        for s in ("BID", "ASK")
+        for s in SIDES
     ]  # fmt: skip
     problems = check_day(*sides, *REFERENCE_RANGE)
     if problems:
@@ -84,8 +84,8 @@ def fetch(args: argparse.Namespace) -> None:
         free_gb = shutil.disk_usage(args.cache).free / 1e9
         if free_gb < args.min_free_gb:
             sys.exit(f"stopped at {day}: {free_gb:.1f} GB free < {args.min_free_gb} GB")
-        if day.weekday() != 5:
-            for side in ("BID", "ASK"):
+        if day.weekday() != SATURDAY:
+            for side in SIDES:
                 fetcher.day_file("XAUUSD", side, day)
         if day.day == 1:
             print(f"{day} requests={fetcher.requests} {time.perf_counter() - t0:.0f}s "
@@ -134,8 +134,8 @@ def main() -> None:
     f = sub.add_parser("fetch")
     i = sub.add_parser("import")
     for s in (f, i):
-        s.add_argument("--start", type=_day, required=True)
-        s.add_argument("--end", type=_day, required=True)
+        s.add_argument("--start", type=date.fromisoformat, required=True)
+        s.add_argument("--end", type=date.fromisoformat, required=True)
         s.add_argument("--cache", type=Path, default=CACHE)
     f.add_argument("--interval", type=float, default=1.0)
     f.add_argument("--min-free-gb", type=float, default=3.0)
@@ -143,7 +143,10 @@ def main() -> None:
     i.add_argument("--version", required=True)
     args = p.parse_args()
     args.cache.mkdir(parents=True, exist_ok=True)
-    fetch(args) if args.cmd == "fetch" else run_import(args)
+    if args.cmd == "fetch":
+        fetch(args)
+    else:
+        run_import(args)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,13 @@ def test_median_spread_and_spread_over_atr_per_year_before_the_seal() -> None:
                                                                              D("0.2"))  # fmt: skip
 
 
+def test_the_median_of_an_even_count_is_the_mean_of_the_middle_two() -> None:
+    t = datetime(2010, 3, 1, tzinfo=UTC)
+    rows = [_m1(t, s) for s in ("0.1", "0.4", "0.4", "0.2")]
+    (row,) = era_costs(rows, [], sealed_from=datetime(2025, 5, 28, tzinfo=UTC))
+    assert row.median_spread == D("0.3") and row.minutes == 4
+
+
 def test_minutes_before_any_atr_have_a_spread_but_no_ratio() -> None:
     t = datetime(2008, 1, 2, tzinfo=UTC)
     (row,) = era_costs([_m1(t, "0.5")], [], sealed_from=datetime(2025, 5, 28, tzinfo=UTC))

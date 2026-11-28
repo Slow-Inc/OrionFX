@@ -6,13 +6,13 @@ series, CME Globex hours. Every fixture is a tiny hand-made CSV: no real data.""
 import gzip
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from tests.support.seal import Opened
 
 from app.core.enums import QualityFlag, Timeframe
 from app.learning.bars import Horizon, Provenance
@@ -33,14 +33,7 @@ LATER = datetime(2030, 1, 1, tzinfo=UTC)
 NAME = "GC_full_1min_continuous_ratio_adjusted.txt"
 
 
-@dataclass(frozen=True)
-class _Opened:  # the shape of #132's HoldoutOpening
-    protocol_hash: str
-    config_id: str
-    opened_at: datetime
-
-
-OPENED = _Opened("sha256:" + "0" * 64, "c1", datetime(2026, 11, 28, tzinfo=UTC))
+OPENED = Opened()
 """The fixtures lie in protocol v1's sealed holdout, so recording them needs an opening."""
 # Wednesday 2026-01-07: New York is UTC-5 (EST), so the CME break is 22:00-23:00 UTC.
 WED = datetime(2026, 1, 7, tzinfo=UTC)

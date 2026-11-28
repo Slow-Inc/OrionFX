@@ -6,6 +6,7 @@ bytes and a fake transport: no network, no real data."""
 import lzma
 import sqlite3
 import struct
+from collections.abc import Collection
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -141,7 +142,7 @@ def test_the_fetcher_retries_with_backoff_then_gives_up(tmp_path: Path) -> None:
 
 
 def _day(day: date, closed: tuple[int, int] | None, *, ask_over: float = 0.25,
-         zero_volume: set[int] = frozenset()) -> dict[str, bytes]:  # type: ignore[assignment]  # fmt: skip
+         zero_volume: Collection[int] = frozenset()) -> dict[str, bytes]:  # fmt: skip
     """One synthetic day of bid and ask candles; `closed` is a [from, to) UTC hour range
     with no ticks (left out of the file, as on a day with a break)."""
     bid, ask = [], []

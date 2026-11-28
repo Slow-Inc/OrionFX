@@ -311,6 +311,8 @@ def test_a_real_source_is_sealed_from_the_protocol_holdout_and_unread_slice(
     SourceRegistry(conn).register("real", "dukascopy-xauusd")
     with pytest.raises(Sealed):  # the backfill's window ends at its clock, after the seal
         _record(conn, "real")
-    with pytest.raises(Sealed):
-        _export(conn, tmp_path / "x.jsonl", dataset_versions=["real"])
+    with pytest.raises(Sealed):  # a development window that runs into the sealed slice
+        _export(conn, tmp_path / "x.jsonl", dataset_versions=["real"],
+                window_start=_t("2023-01-01T00:00:00+00:00"),
+                window_end=_t("2024-01-01T00:00:00+00:00"))  # fmt: skip
     assert not (tmp_path / "x.jsonl").exists()

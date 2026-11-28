@@ -40,6 +40,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from app.market_data.port import M1Bar
+from app.market_data.session import SATURDAY
 
 __all__ = [
     "PRICE_DIVISOR",
@@ -64,7 +65,6 @@ MAX_RAW = 256 * 1024
 """The largest compressed day file accepted (a full day is about 10-40 KB): remote bytes
 are capped before and after decompression, so a hostile or broken file cannot exhaust
 memory or disk."""
-SATURDAY = 5
 SYMBOL = re.compile(r"[A-Z0-9]{3,12}")
 SIDES = ("BID", "ASK")
 
@@ -96,7 +96,7 @@ def day_url(symbol: str, side: str, day: date) -> str:
     )
 
 
-def decode_candles(raw: bytes, day: date, divisor: int = PRICE_DIVISOR) -> list[Candle]:
+def decode_candles(raw: bytes, day: date) -> list[Candle]:
     if not raw:
         return []
     if len(raw) > MAX_RAW:
@@ -110,18 +110,16 @@ def decode_candles(raw: bytes, day: date, divisor: int = PRICE_DIVISOR) -> list[
     if len(data) % RECORD.size:
         raise ValueError(f"{day}: {len(data)} bytes is not a whole number of 24-byte records")
     start = datetime(day.year, day.month, day.day, tzinfo=UTC)
-    scale = Decimal(divisor)
+    scale = Decimal(PRICE_DIVISOR)
     out: list[Candle] = []
+    previous = -1
     for s, o, c, lo, h, v in RECORD.iter_unpack(data):
-        if (
-            not 0 <= s < 86400
-            or s % 60
-            or (out and start + timedelta(seconds=s) <= out[-1].open_time)
-        ):
+        if not previous < s < 86400 or s % 60:
             raise ValueError(f"{day}: record time {s}s is off the minute grid or out of order")
-        o_, c_, lo_, h_ = (Decimal(x) / scale for x in (o, c, lo, h))
+        previous = s
         volume = Decimal(format(v, ".7g"))  # float32: keep its 7 significant digits
-        out.append(Candle(start + timedelta(seconds=s), o_, c_, lo_, h_, volume))
+        out.append(Candle(start + timedelta(seconds=s), Decimal(o) / scale, Decimal(c) / scale,
+                          Decimal(lo) / scale, Decimal(h) / scale, volume))  # fmt: skip
     return out
 
 
@@ -185,7 +183,6 @@ class DukascopyFetcher:
         self._attempts = attempts
         self._backoff = backoff
         self._timeout = timeout
-        self._requested = False
         self.requests = 0
 
     def path(self, symbol: str, side: str, day: date) -> Path:
@@ -204,9 +201,8 @@ class DukascopyFetcher:
         return body
 
     def _get(self, url: str) -> bytes:
-        if self._requested:
+        if self.requests:
             self._sleep(self._interval)
-        self._requested = True
         status = 0
         for attempt in range(self._attempts):
             if attempt:
