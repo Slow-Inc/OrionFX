@@ -16,23 +16,21 @@ Evidence votes once per independent source:
 - the chart: one vote when the live OPEN proposals agree on a direction.
 Stale or uncited evidence is ignored and not referenced.
 
-EV = size x d x (p_side - p_opposite) - size x p_flat x (spread + 2 x slippage)
-     - 2 x commission per lot x lot,
-where size = lot x contract size, d = TARGET_ATR x ATR_M15, and p_side, p_opposite,
-p_flat are the forecast's calibrated class probabilities for the chosen side (#129).
-Equivalently EV = size x d x (p_side - p_opposite - `cost_over_atr`). It is used only
-when the forecast agrees, has OK data and the trade's horizon, and carries class
-probabilities of LABEL_VERSION; otherwise EV is unknown (fail-safe). Thresholds are
-[PROPOSED].
+EV = size x (d x (p_side - p_opposite) - (spread + 2 x slippage)) - 2 x commission
+per lot x lot, i.e. size x d x (p_side - p_opposite - `cost_over_atr`), where size = lot x
+contract size, d = TARGET_ATR x ATR_M15, and p_side, p_opposite are the forecast's
+calibrated class probabilities of the chosen side's barrier and the other's (#129). The
+spread is the decision-time one. It is used only when the forecast agrees, has OK data
+and the trade's horizon, and carries class probabilities of LABEL_VERSION; otherwise EV
+is unknown (fail-safe). Thresholds are [PROPOSED].
 
-EV prices the triple-barrier label's event (`app.learning.labels`, `app.core.bet`):
-a bet with TP and SL at +/- d from its entry fill over the forecast's horizon. The
-label's fills already pay the spread (a long buys at ask, a short buys back at ask) and
-the slippage, so a TP realises exactly +d and an SL exactly -d; a FLAT (no barrier
-within the horizon) realises its drift minus those fills, and EV takes that drift as 0.
-The commission is charged on every outcome. So each cost is charged once, and EV at a
-certain outcome is that outcome's realised P&L (`test_ev_label_alignment`). An even
-bet on P(side) alone, (2p - 1), would overstate EV whenever FLAT has mass.
+EV prices the triple-barrier label's event (`app.learning.labels`, `app.core.bet`): one
+cost-free bid-path event for both sides, UP (+d), DOWN (-d) or FLAT (its drift, taken
+as 0). A long is paid +d on UP and -d on DOWN, a short the mirror, so one triple prices
+both sides. Every cost (the spread, two slippages, the commission) is charged once, on
+every outcome, so EV at a certain outcome is what that outcome pays the side
+(`test_ev_label_alignment`). An even bet on P(side) alone, (2p - 1), would overstate EV
+whenever FLAT has mass.
 
 A PROXY: the bot places no per-position SL/TP (RSK-05); its exits are the Emergency
 SL, the cycle Profit Target and basket trailing. Only the system backtest (#131) judges
@@ -314,7 +312,7 @@ def expected_value(
     cost = UnitCost(spread=ctx.spread, slippage=SLIPPAGE,
                     commission=2 * costs.commission_per_lot / costs.contract_size)  # fmt: skip
     size = ctx.initial_lot * costs.contract_size
-    edge = side - opposite - cost_over_atr(cost, atr, flat=cp.flat)
+    edge = side - opposite - cost_over_atr(cost, atr)
     return (size * TARGET_ATR * atr * edge).quantize(CENT), f.probability
 
 

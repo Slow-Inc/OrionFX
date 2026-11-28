@@ -2,7 +2,7 @@
   "$defs": {
     "ClassProbabilities": {
       "additionalProperties": false,
-      "description": "Calibrated probabilities of the triple-barrier label's three outcomes (#129) for\nthe bet in the forecast's `direction`: that side's label, whose TP outcome is the\ndirection itself (a long's TP is UP, a short's TP is DOWN) and whose time barrier is\nFLAT. They sum to 1. `label_version` names the label they were calibrated on.",
+      "description": "Calibrated probabilities of the triple-barrier label's three outcomes (#129):\nthe upper barrier first (UP), the lower first (DOWN), neither (FLAT). The label is\nthe same for both sides, so one triple prices a long (p_side = up) and a short\n(p_side = down). They sum to 1. `label_version` names the label they were calibrated\non.",
       "properties": {
         "down": {
           "ge": 0,

@@ -150,12 +150,10 @@ def _leader(card: ModelCard, scores: Mapping[Direction, Decimal]) -> tuple[Direc
     return leader
 
 
-def _classes(
-    card: ModelCard, scores: Mapping[Direction, Decimal], direction: Direction
-) -> ClassProbabilities | None:
+def _classes(card: ModelCard, scores: Mapping[Direction, Decimal]) -> ClassProbabilities | None:
     """The class probabilities of a calibrated three-class model with a label version
-    (#129); None for any other model, or when it leads with FLAT (no side to price)."""
-    if not card.calibrated or card.label_version is None or direction is Direction.NEUTRAL:
+    (#129); None for any other model. One triple prices both sides."""
+    if not card.calibrated or card.label_version is None:
         return None
     if set(scores) != set(Direction):
         raise Refused(f"{card.ref}: a labelled model must score UP, DOWN and NEUTRAL")
@@ -204,7 +202,7 @@ def predict(
     except Exception as exc:
         raise Refused(f"{card.ref} failed: {type(exc).__name__}") from None
     direction, score = _leader(card, scores)
-    classes = _classes(card, scores, direction)
+    classes = _classes(card, scores)
     horizon_end = snapshot.as_of + card.horizon_bars * TIMEFRAME_DURATION[card.horizon]
     if horizon_end <= now:
         raise Refused(f"{card.ref}: the forecast horizon ended at {horizon_end.isoformat()}")

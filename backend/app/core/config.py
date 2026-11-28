@@ -53,12 +53,14 @@ class UserConfig(ContractModel):
 class ProtectedPolicy(ContractModel):
     """Not editable from settings (VAL-06). Changing it is a reviewed code/policy change."""
 
-    policy_version: str = "policy-0.4"
+    policy_version: str = "policy-0.5"
     """0.2: M05 news veto (#115). 0.3: the veto also guards ADD (NEWS_VETO_ADD), a
     Hybrid majority drops the members it outvoted for entries only, the decision horizon
     is the chosen proposal's, EXIT intents ignore a stale snapshot's expiry (#121).
     0.4: EV prices the triple-barrier label's three outcomes from the forecast's class
-    probabilities of LABEL_VERSION and is unknown without them (#129)."""
+    probabilities of LABEL_VERSION and is unknown without them (#129). 0.5: the label
+    is m07.labels.tb.v2 (one cost-free bid-path label for both sides) and EV charges the
+    spread, two slippages and the commission on every outcome (#129)."""
     live_allowed: bool = False
 
 

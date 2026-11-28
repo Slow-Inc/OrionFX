@@ -52,8 +52,8 @@ class ModelCard(ContractModel):
     evidence_refs: list[str]
     label_version: str | None = None
     """The triple-barrier label a calibrated three-class model was calibrated on (#129).
-    Its scores are then P(UP), P(DOWN) and P(FLAT, as NEUTRAL) of the label of the side
-    it predicts, and the forecast carries them as class probabilities."""
+    Its scores are then P(UP), P(DOWN) and P(FLAT, as NEUTRAL) of that label, which
+    is the same for both sides, and the forecast carries them as class probabilities."""
     supported_modes: list[Mode] = Field(default_factory=lambda: [Mode.SHADOW, Mode.DEMO])
     catalog_ids: list[CatalogId] = Field(default_factory=lambda: ["CAT-A01-05"])
 
