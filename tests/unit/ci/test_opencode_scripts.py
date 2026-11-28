@@ -292,7 +292,7 @@ def test_extract_falls_back_when_the_last_step_has_no_text(tmp_path: Path) -> No
 )
 def test_extract_fails_without_a_clean_answer(tmp_path: Path, events: list[dict[str, Any]]) -> None:
     out = tmp_path / "out.md"
-    assert extract.main(_events(tmp_path, events), str(out)) == 1
+    assert extract.main(_events(tmp_path, events), str(out)) != 0
     assert not out.exists()
 
 
@@ -447,7 +447,7 @@ esac
 STUB_GH = """#!/usr/bin/env bash
 case "$*" in
   *DELETE*) echo deleted >> "$STUB_LOG" ;;
-  *installation/repositories*) printf '%s' "$STUB_REPOS" ;;
+  *installation/repositories*) [ "$STUB_REPOS" = FAIL ] && exit 1; printf '%s' "$STUB_REPOS" ;;
 esac
 """
 
@@ -461,8 +461,16 @@ esac
         ('{"token": "ghs_x"}', "200", "o/r", 0, False),
         ('{"token": "ghs_x"}', "200", "o/r,o/other", 3, True),
         ('{"error": "not installed"}', "404", "o/r", 1, False),
+        ('{"token": "ghs_x"}', "200", "FAIL", 1, True),
+        ('{"token": "ghs_x"}', "200", "NO_OIDC", 1, False),
     ],
-    ids=["exact-repo", "wrong-scope-is-security", "exchange-refused"],
+    ids=[
+        "exact-repo",
+        "wrong-scope-is-security",
+        "exchange-refused",
+        "scope-check-fails-revokes",
+        "no-oidc",
+    ],
 )
 def test_app_token_script_classifies_scope_and_failures(
     tmp_path: Path, body: str, status: str, repos: str, rc: int, revoked: bool
@@ -484,6 +492,8 @@ def test_app_token_script_classifies_scope_and_failures(
         "STUB_REPOS": repos,
         "STUB_LOG": str(log),
     }
+    if repos == "NO_OIDC":
+        del env["ACTIONS_ID_TOKEN_REQUEST_URL"]
     result = subprocess.run(
         ["bash", str(ROOT / ".github/opencode/app-token.sh")],
         env=env,
@@ -493,3 +503,99 @@ def test_app_token_script_classifies_scope_and_failures(
     assert result.returncode == rc, result.stderr
     assert (result.stdout == "ghs_x") is (rc == 0)
     assert log.exists() is revoked
+
+
+# --- skill selection -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("files", "security", "tests", "ui"),
+    [
+        (["docs/agents/workflow.md"], False, False, False),
+        ([".github/workflows/x.yml"], True, False, False),
+        ([".opencode/skills/t4-gates/SKILL.md"], True, False, False),
+        ([".claude/settings.json"], True, False, False),
+        ([".githooks/pre-push"], True, False, False),
+        ([".env.example"], True, False, False),
+        (["backend/app/api/auth.py"], True, True, False),
+        (["backend/app/core/secrets.py"], True, True, False),
+        (["backend/app/risk/veto.py"], False, True, False),
+        (["scripts/gen_schemas.py"], False, True, False),
+        (["frontend/src/app.tsx"], False, True, True),
+        (["frontend/package.json"], False, False, True),
+    ],
+)
+def test_skill_selection_follows_the_changed_files(
+    files: list[str], security: bool, tests: bool, ui: bool
+) -> None:
+    run, skipped = post.select_skills(files)
+    assert run[:3] == ["code-review", "scrutinize", "simplify"] and run[-1] == "t4-gates"
+    for skill, expected in (
+        ("security-review", security),
+        ("test-quality", tests),
+        ("ui-audit", ui),
+    ):
+        assert (skill in run) is expected
+        assert any(s.startswith(skill) for s in skipped) is (not expected)
+
+
+# --- extract.py outcome precedence and retry -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("events", "status", "rc", "cause"),
+    [
+        ([_tool("bash"), _text("m", "a")], 124, 1, "security:"),
+        ([_text("m", "a")], 124, 1, "timed out"),
+        ([_text("m", "a")], 137, 1, "timed out"),
+        ([{"type": "error", "error": {"name": "E"}}], 1, 1, "model error"),
+        ([_tool("read")], 0, extract.RETRY, "no final answer"),
+        ([_tool("read")], 2, 1, "no final answer"),
+        ([_text("m", "a")], 2, 1, "exited with status 2"),
+        ([_text("m", "a")], 0, 0, None),
+    ],
+    ids=[
+        "breach-beats-timeout",
+        "timeout",
+        "killed",
+        "model-error",
+        "no-answer-retryable",
+        "no-answer-after-failure",
+        "bad-status-with-answer",
+        "clean",
+    ],
+)
+def test_extract_outcome_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict[str, Any]],
+    status: int,
+    rc: int,
+    cause: str | None,
+) -> None:
+    cause_file = tmp_path / "cause"
+    monkeypatch.setenv("OPENCODE_CAUSE_FILE", str(cause_file))
+    assert extract.main(_events(tmp_path, events), str(tmp_path / "out.md"), status) == rc
+    if cause is None:
+        assert not cause_file.exists()
+    else:
+        assert cause in cause_file.read_text(encoding="utf-8")
+
+
+# --- canonical first line and hunk parsing -------------------------------------------------
+
+
+def test_post_owns_the_first_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    path = tmp_path / "answer.md"
+    path.write_text("**OpenCode review of WRONG**\n\n- [nit] a\n", encoding="utf-8")
+    post.review(str(path), _diff(tmp_path), "o/r", "7", "abc")
+    lines = rec.calls[0]["body"].splitlines()
+    assert lines[0] == "OpenCode review of abc (advisory)"
+    assert "WRONG" not in rec.calls[0]["body"]
+
+
+def test_header_lookalikes_inside_a_hunk_are_content() -> None:
+    diff = "--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n--- old comment\n+++ new comment\n keep\n"
+    assert post.commentable_lines(diff) == {"q.sql": {1, 2}}

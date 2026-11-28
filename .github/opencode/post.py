@@ -7,6 +7,7 @@ on a new issue. They validate everything the model chose before writing.
   post.py review ANSWER DIFF REPO PR HEAD_SHA
   post.py triage ANSWER REPO ISSUE BODY_FILE EXISTING_LABELS
   post.py notice CAUSE_FILE REPO PR HEAD_SHA
+  post.py skills FILES_TXT   (prints the skills to run, then the skipped ones)
 """
 
 import json
@@ -35,6 +36,7 @@ ROLES = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human"}
 MAX_INLINE = 15
 AUTH_FAILURE = 2  # review() exit code for HTTP 401/403 (config), vs 1 (transient)
 VERDICT_RE = re.compile(r"^\s*Verdict:.*$", re.M)
+FIRST_LINE_RE = re.compile(r"\A\s*\**OpenCode review of[^\n]*\n?", re.I)
 SEVERITY_RE = re.compile(r"^\s*[-*]\s*\[(blocker|major)\]", re.M | re.I)
 
 
@@ -57,23 +59,39 @@ def gh_api(endpoint: str, payload: dict) -> subprocess.CompletedProcess:
     )
 
 
+HUNK_RE = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
 def commentable_lines(diff: str) -> dict[str, set[int]]:
-    """Right-side line numbers present in the diff, per file."""
+    """Right-side line numbers present in the diff, per file.
+
+    Hunk bodies are consumed by their declared line counts, so content lines that look
+    like headers (`--- x` removed, `+++ y` added) are never mistaken for file headers.
+    """
     lines: dict[str, set[int]] = {}
-    path, new_line, prev = None, 0, ""
+    path: str | None = None
+    new_line = old_left = new_left = 0
     for raw in diff.splitlines():
-        is_header = raw.startswith("+++ ") and prev.startswith("--- ")
-        prev = raw
-        if is_header:
+        if old_left > 0 or new_left > 0:  # inside a hunk body
+            tag = raw[:1]
+            if tag == "\\":  # "\ No newline at end of file"
+                continue
+            if tag in (" ", "+") and path is not None:
+                lines[path].add(new_line)
+            if tag in (" ", "+"):
+                new_line += 1
+                new_left -= 1
+            if tag in (" ", "-"):
+                old_left -= 1
+            continue
+        if raw.startswith("+++ "):
             path = raw[6:] if raw.startswith("+++ b/") else None
             if path is not None:
                 lines.setdefault(path, set())
-        elif raw.startswith("@@"):
-            m = re.search(r"\+(\d+)", raw)
-            new_line = int(m.group(1)) if m else 0
-        elif path is not None and raw[:1] in (" ", "+"):
-            lines[path].add(new_line)
-            new_line += 1
+        elif m := HUNK_RE.match(raw):
+            old_left = int(m.group(1) or 1)
+            new_line = int(m.group(2))
+            new_left = int(m.group(3) or 1)
     return lines
 
 
@@ -116,6 +134,9 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
     # double-count).
     summary = VERDICT_RE.sub("", answer).strip()
     verdict = verdict_line(summary)
+    # The gate finds the review by this exact first line, so post.py owns it.
+    summary = FIRST_LINE_RE.sub("", summary).strip()
+    summary = f"OpenCode review of {head_sha} (advisory)\n\n{summary}"
     if off_diff:
         extra += "\n\n#### Not on a diff line\n" + "\n".join(off_diff)
     if over_cap:
@@ -204,6 +225,38 @@ def triage(answer_path: str, repo: str, issue: str, body_path: str, existing_csv
     return 0
 
 
+SECURITY_PATHS = re.compile(
+    r"^(\.env|backend/app/core/(secrets|config)\.py|backend/app/api/auth\.py"
+    r"|\.github/|\.claude/|\.githooks/|\.opencode/)"
+)
+CODE_PATHS = re.compile(r"(\.py|\.ts|\.tsx)$|^(backend|frontend/src|scripts|migrations)/")
+
+
+def select_skills(files: list[str]) -> tuple[list[str], list[str]]:
+    """Map the PR's changed files to (skills to run, "skill — reason" skipped)."""
+    run = ["code-review", "scrutinize", "simplify"]
+    skipped = []
+    conditional = (
+        ("security-review", SECURITY_PATHS, "no security paths touched"),
+        ("test-quality", CODE_PATHS, "no code changes"),
+        ("ui-audit", re.compile(r"^frontend/"), "no frontend changes"),
+    )
+    for skill, pattern, reason in conditional:
+        if any(pattern.search(f) for f in files):
+            run.append(skill)
+        else:
+            skipped.append(f"{skill} — {reason}")
+    return [*run, "t4-gates"], skipped
+
+
+def skills(files_path: str) -> int:
+    files = [f.strip() for f in Path(files_path).read_text(encoding="utf-8").splitlines()]
+    run, skipped = select_skills([f for f in files if f])
+    print(", ".join(run))
+    print("; ".join(skipped) or "none")
+    return 0
+
+
 # Causes that mean a broken setup or a broken boundary: fail the check red. Everything
 # else is OpenCode being unavailable: degrade to a notice and keep the check green.
 RED_CATEGORIES = {"config", "security"}
@@ -260,4 +313,6 @@ if __name__ == "__main__":
         sys.exit(triage(*args))
     if command == "notice":
         sys.exit(notice(*args))
+    if command == "skills":
+        sys.exit(skills(*args))
     sys.exit(f"unknown command {command}")

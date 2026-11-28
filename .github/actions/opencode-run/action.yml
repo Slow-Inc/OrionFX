@@ -96,24 +96,16 @@ runs:
           timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
             opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
             < /dev/null > "$events" || status=$?
+          # extract.py owns the outcome (tested): 0 = answer written, 75 = no
+          # answer after a clean exit (retry once), else a cause was recorded with
+          # the precedence breach > timeout > model error > no answer > status.
           extract=0
-          env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" "$events" "$OUTPUT_FILE" || extract=$?
-          if [ "$extract" -ne 0 ] && [ "$attempt" -eq 1 ] && [ "$status" -eq 0 ] \
-            && grep -q "no final answer" "$OPENCODE_CAUSE_FILE" 2> /dev/null; then
+          env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" \
+            "$events" "$OUTPUT_FILE" "$status" || extract=$?
+          if [ "$extract" -eq 75 ] && [ "$attempt" -eq 1 ]; then
             echo "::warning::OpenCode gave no final answer; retrying once."
-            rm -f "$OPENCODE_CAUSE_FILE"
             continue
           fi
           break
         done
-        # Cause precedence: a policy breach (security) beats a timeout, which beats
-        # extract.py's own cause (model error, no answer), which beats an exit status.
-        if grep -q "^security:" "$OPENCODE_CAUSE_FILE" 2> /dev/null; then
-          exit 1
-        elif [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
-          cause "unavailable: OpenCode timed out after ${TIMEOUT_MINUTES}m"
-        elif [ "$extract" -ne 0 ]; then
-          exit 1
-        elif [ "$status" -ne 0 ]; then
-          cause "unavailable: OpenCode exited with status $status"
-        fi
+        [ "$extract" -eq 0 ] || exit 1

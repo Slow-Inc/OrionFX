@@ -7,7 +7,8 @@
 # APPROVE or REQUEST_CHANGES) on the head SHA, with inline comments on the exact
 # diff lines. The step posts with an OpenCode GitHub App installation token,
 # so the review shows as the OpenCode app bot. The job's own GITHUB_TOKEN is
-# read-only. Every script that holds a token runs from the PR's BASE revision
+# read-only except `issues: write`, which is used only for the "OpenCode
+# unavailable" notice (posted as github-actions[bot]). Every script that holds a token runs from the PR's BASE revision
 # (_trusted), never from the PR head, because the repo is public.
 #
 # Model auth: Console service account "OrionFX PR Review" (OIDC, pinned to repo
@@ -89,29 +90,14 @@ jobs:
               rm -f "$ctx/issue-$n.md"
             fi
           done
-          # Conditional skills: triggers are computed here, not left to the model.
+          # Conditional skills: triggers are computed (and tested) in post.py
+          # `select_skills`, not left to the model.
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only > "$ctx/files.txt"
-          run_skills="code-review, scrutinize, simplify"
-          skipped=""
-          if grep -qE '^(\.env|backend/app/core/(secrets|config)\.py|backend/app/api/auth\.py|\.github/|\.claude/|\.githooks/|\.opencode/)' "$ctx/files.txt"; then
-            run_skills="$run_skills, security-review"
-          else
-            skipped="$skipped; security-review — no security paths touched"
-          fi
-          if grep -qE '(\.py|\.ts|\.tsx)$|^(backend|frontend/src|scripts|migrations)/' "$ctx/files.txt"; then
-            run_skills="$run_skills, test-quality"
-          else
-            skipped="$skipped; test-quality — no code changes"
-          fi
-          if grep -q '^frontend/' "$ctx/files.txt"; then
-            run_skills="$run_skills, ui-audit"
-          else
-            skipped="$skipped; ui-audit — no frontend changes"
-          fi
-          run_skills="$run_skills, t4-gates"
-          skipped="${skipped#; }"
+          python3 -I _trusted/opencode/post.py skills "$ctx/files.txt" > "$ctx/skills.txt"
+          run_skills=$(sed -n 1p "$ctx/skills.txt")
+          skipped=$(sed -n 2p "$ctx/skills.txt")
           echo "Skills to run: $run_skills"
-          echo "Skipped: ${skipped:-none}"
+          echo "Skipped: $skipped"
           cat > "$ctx/prompt.md" <<EOF
           You are an advisory, read-only code reviewer for pull request #$PR at head $HEAD_SHA. You must not change code: you have no shell and cannot edit files. Claude is this repo's developer; your review is advisory evidence only.
 
