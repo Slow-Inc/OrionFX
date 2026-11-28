@@ -60,7 +60,45 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Card | `ModelCard` gains a training cutoff, dataset ref, label version and transform version. `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. | [planned #130] |
 | Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | **[decision]** in the tracer PR #127: decide whether `build` receives the card and the verified weight bytes. Generating a module per version would break "allowlisted packages hold reviewed code only". |
 | Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and is marked so that no live path accepts it. | **[decision]** #127 |
-| Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit, the VM holds no secrets, and only the artifact and manifest come back. Locally they are registered only after a hash check. Every VM is stopped after use. | [planned #134] |
+| Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit, and the VM holds no secrets. The artifact, the manifest and the run log come back; only the artifact and the manifest are hash-checked and registered. Every VM is stopped after use. Runbook: §4a. | [built] #134 (runner, bundle scan, verified import; the trainer is a stub until #130). Resumable stages: not built. |
+
+## 4a. Runbook: a training job on Colab [built #134]
+
+**Run it.** The job spec is a `JobSpec` JSON (`app/learning/colab_job.py`). It holds the protocol hash, the config, the local export path and its `content_hash`, the 40-hex code SHA, the seeds, the entrypoint, the model id and version, and `timeout_s`.
+
+```
+uv run python -m app.learning.colab_runner bundle spec.json data/bundles/<job>   # scanned bundle
+uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json \
+    [--db data/orionfx.db] [--artifacts models] [--work data/colab_runs] [--min-cu 20]
+```
+
+- `bundle` writes three files and nothing else:
+  - the export (`dataset.jsonl`);
+  - `job.json`;
+  - `code.tar`, a `git archive` of the code SHA limited to `backend/app`, `pyproject.toml` and `uv.lock`. The SHA must be committed.
+- `run` steps:
+  1. Re-scans the bundle.
+  2. Refuses a model version that is already registered.
+  3. Refuses when `colab usage` cannot be read, or shows less than `--min-cu`. **Exit 3 is the CU-floor stop condition: report it to the owner, do not lower the floor on your own.**
+  4. Starts a CPU high-mem VM. The driver (`colab_vm.py`) installs the locked deps with a pinned uv and runs the entrypoint.
+  5. Downloads the output tar and the run log, then always runs `colab stop`. A `finally` runs it, and SIGINT, SIGTERM and SIGBREAK lead into that `finally`.
+  6. Verifies the return locally, then registers it.
+- **Hard timeout:** `timeout_s` bounds the whole remote run.
+- **Verification:** the return must be exactly `manifest.json`, `card.json` and `weights.json`. Every sha256 must match the manifest. The manifest must echo the job's protocol hash, code SHA, dataset hash and seeds. The card must be a valid `ModelCard` for this job, naming the weights' hash. The weights stay JSON or native text, never pickle.
+- **What happens on success:** the files are copied to `models/<id>/<version>/`. The card's manifest goes into `ArtifactRegistry` last. Any failure before that registers nothing. Registration grants no eligibility.
+- **Recovery after a hard kill** (which cannot be caught): run `colab sessions`, then `colab stop -s <session>`. A `VmStopFailed` error means the VM may still be billing.
+- Point smoke runs at a scratch `--db`: the registry is append-only.
+
+**What never goes onto the VM** (enforced by `scan_bundle`, which is tested on a bundle built from HEAD):
+- `.env` files;
+- keys and certificates (`*.pem`, `*.key`, `id_*`), and anything named like a credential;
+- SQLite stores (by name and by magic bytes);
+- key-like strings (private keys, AWS, GitHub, OpenAI/Anthropic-style, Google, Slack and Telegram tokens);
+- the value of any secret-named local environment variable;
+- config keys that look like secrets;
+- tests, frontend, docs, data, `.claude`, and any path outside the code allow-list.
+
+The VM gets no broker, LLM or GitHub credentials. `--env` is never used, so no local environment is forwarded.
 
 ## 5. Evaluation tiers (always reported separately)
 
