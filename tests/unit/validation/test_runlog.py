@@ -23,12 +23,15 @@ from app.validation.runlog import (
     ConfigIdConflict,
     ErrataState,
     HoldoutConsumed,
+    ImmutableVersion,
     NotCounted,
+    NothingToFix,
     RunLog,
     RunRecord,
     RunStatus,
     SeedsNotChanged,
     UnknownProtocol,
+    WindowClash,
 )
 
 NOW = datetime(2030, 6, 1, tzinfo=UTC)
@@ -87,7 +90,7 @@ def test_register_returns_the_protocol_hash_and_is_idempotent(log: RunLog) -> No
 
 def test_a_version_cannot_be_reregistered_with_other_content(log: RunLog) -> None:
     log.register(make_protocol())
-    with pytest.raises(ValueError, match="immutable"):
+    with pytest.raises(ImmutableVersion, match="immutable"):
         log.register(make_protocol(budget=9))
 
 
@@ -136,9 +139,9 @@ def test_a_bugfix_rerun_is_logged_but_not_counted(log: RunLog, ph: str) -> None:
 
 
 def test_exempt_reruns_still_log_at_full_budget(log: RunLog, ph: str) -> None:
-    for c in ("B0", "A1", "A2"):
-        log.record(run(ph, c))
+    ids = {c: log.record(run(ph, c)) for c in ("B0", "A1", "A2")}
     log.record(run(ph, "A2", RunStatus.AA, seeds=[9]))
+    log.add_erratum(ids["A1"], ErrataState.INVALID, "label off by one")
     log.record(bugfix(ph, "A1"))
     assert log.counted_configs(ph) == 3
 
@@ -154,9 +157,36 @@ def test_an_aa_run_must_change_the_seeds(log: RunLog, ph: str) -> None:
 
 
 def test_a_bugfix_rerun_may_keep_the_seeds(log: RunLog, ph: str) -> None:
-    log.record(run(ph, "B0", seeds=[1, 2, 3]))
+    first = log.record(run(ph, "B0", seeds=[1, 2, 3]))
+    log.add_erratum(first, ErrataState.INVALID, "label off by one")
     log.record(bugfix(ph, "B0"))  # same seeds: the fix, not the seed, is what changed
     assert len(log.runs(ph)) == 2
+
+
+def test_a_bugfix_rerun_needs_the_current_result_marked_first(log: RunLog, ph: str) -> None:
+    """A config has one current result: a rerun replaces it only once it is marked
+    INVALID or CORRECTED, so reruns cannot be shopped for the best one while N stays 1."""
+    first = log.record(run(ph, "B0"))
+    with pytest.raises(NothingToFix):
+        log.record(bugfix(ph, "B0"))
+    log.add_erratum(first, ErrataState.UNCONFIRMED, "below the A/A floor")
+    with pytest.raises(NothingToFix):  # a weak result is not a bug
+        log.record(bugfix(ph, "B0"))
+    log.add_erratum(first, ErrataState.INVALID, "label off by one")
+    rerun = log.record(bugfix(ph, "B0"))
+    with pytest.raises(NothingToFix):  # the rerun is now the current result
+        log.record(bugfix(ph, "B0"))
+    log.add_erratum(rerun, ErrataState.CORRECTED, "the fix missed the embargo")
+    log.record(bugfix(ph, "B0"))
+    assert log.counted_configs(ph) == 1
+
+
+def test_no_bugfix_rerun_after_the_holdout_is_consumed(log: RunLog, ph: str) -> None:
+    first = log.record(run(ph, "B0"))
+    log.open_holdout(ph, "B0")
+    log.add_erratum(first, ErrataState.INVALID, "leak found after the opening")
+    with pytest.raises(HoldoutConsumed):
+        log.record(bugfix(ph, "B0"))
 
 
 def test_an_exempt_status_cannot_smuggle_in_a_new_config(log: RunLog, ph: str) -> None:
@@ -237,13 +267,14 @@ def test_a_failed_config_without_a_rerun_has_no_result(log: RunLog, ph: str) -> 
 
 def test_a_bugfix_rerun_supersedes_a_marked_run_for_the_holdout(log: RunLog, ph: str) -> None:
     first = log.record(run(ph, "B0"))
+    log.add_erratum(first, ErrataState.INVALID, "label bug")
     log.record(bugfix(ph, "B0"))
-    log.add_erratum(first, ErrataState.SUPERSEDED, "label bug fixed in the rerun")
     assert log.open_holdout(ph, "B0").config_id == "B0"
 
 
 def test_an_erratum_on_the_current_result_blocks_the_holdout(log: RunLog, ph: str) -> None:
-    log.record(run(ph, "B0"))
+    first = log.record(run(ph, "B0"))
+    log.add_erratum(first, ErrataState.INVALID, "label bug")
     rerun = log.record(bugfix(ph, "B0"))
     log.add_erratum(rerun, ErrataState.INVALID, "the fix was wrong too")
     with pytest.raises(NotCounted):
@@ -264,9 +295,9 @@ def _window(start: int, end: int) -> ProtocolWindow:
 def test_a_later_version_cannot_reuse_an_opened_holdout(log: RunLog, ph: str) -> None:
     log.record(run(ph, "B0"))
     log.open_holdout(ph, "B0")  # the fixture holdout is [2005, 2006)
-    with pytest.raises(HoldoutConsumed):
+    with pytest.raises(WindowClash):
         log.register(make_protocol(version="v2", holdout=_window(2005, 2007)))
-    with pytest.raises(HoldoutConsumed):  # an opened window cannot be unread either
+    with pytest.raises(WindowClash):  # an opened window cannot be unread either
         log.register(
             make_protocol(
                 version="v3", unread_slice=_window(2005, 2006), holdout=_window(2007, 2008)
@@ -298,7 +329,7 @@ def test_a_debug_window_cannot_read_what_another_version_seals(
     later = make_protocol(
         version="v2", debug_window=_window(*debug), unread_slice=None, holdout=_window(2007, 2008)
     )
-    with pytest.raises(HoldoutConsumed):
+    with pytest.raises(WindowClash):
         log.register(later)
 
 
@@ -310,7 +341,7 @@ def test_a_holdout_cannot_sit_on_another_versions_debug_window(log: RunLog, ph: 
         unread_slice=None,
         holdout=_window(2000, 2001),
     )
-    with pytest.raises(HoldoutConsumed):
+    with pytest.raises(WindowClash):
         log.register(later)
 
 
@@ -332,13 +363,13 @@ def test_a_stored_row_that_does_not_hash_to_its_key_is_refused(
 def test_an_unread_slice_cannot_sit_on_another_versions_holdout(log: RunLog, ph: str) -> None:
     """The fixture v1 holds the holdout [2005, 2006): a later version may not declare it
     unread, since v1 can open it at any time; nor may a holdout cover v1's unread slice."""
-    with pytest.raises(HoldoutConsumed):
+    with pytest.raises(WindowClash):
         log.register(
             make_protocol(
                 version="v2", unread_slice=_window(2005, 2006), holdout=_window(2007, 2008)
             )
         )
-    with pytest.raises(HoldoutConsumed):  # v1's unread slice is [2004-01, 2004-06)
+    with pytest.raises(WindowClash):  # v1's unread slice is [2004-01, 2004-06)
         log.register(make_protocol(version="v3", unread_slice=None, holdout=_window(2004, 2005)))
 
 

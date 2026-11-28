@@ -183,6 +183,14 @@ def test_pbo_averages_ties_in_the_out_of_sample_rank() -> None:
     assert result.pbo == 1.0
 
 
+def test_pbo_ranks_a_zero_variance_config_by_its_sign() -> None:
+    """A constant positive column has an infinite Sharpe on every side: it wins in sample
+    and stays first out of sample, so nothing overfits."""
+    rng = random.Random(11)
+    rows = [[1.0, rng.gauss(0, 1)] for _ in range(8)]
+    assert pbo_cscv(rows, splits=4).pbo == 0.0
+
+
 def test_pbo_refuses_bad_shapes() -> None:
     with pytest.raises(ValueError):
         pbo_cscv([[1.0, 2.0]] * 8, splits=3)  # odd split count
@@ -350,6 +358,8 @@ def test_compare_to_floor() -> None:
     assert compare_to_floor(1.5, 1.0, floor=0.4, higher_is_better=True) is Comparison.BETTER
     assert compare_to_floor(0.5, 1.0, floor=0.4, higher_is_better=True) is Comparison.WORSE
     assert compare_to_floor(1.3, 1.0, floor=0.4, higher_is_better=True) is Comparison.UNCONFIRMED
+    # exactly at the floor is still within it
+    assert compare_to_floor(1.5, 1.0, floor=0.5, higher_is_better=True) is Comparison.UNCONFIRMED
 
 
 def test_compare_to_floor_for_a_lower_is_better_metric() -> None:

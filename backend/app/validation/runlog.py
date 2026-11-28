@@ -16,6 +16,10 @@ single-use holdout, and errata (#132; PRD #120; training-loop.md §6 rules 1, 4,
   - An `aa` run must use a seed set no earlier run of its config used
     (`SeedsNotChanged`): a repeated draw has no seed variance and would shrink the A/A
     floor. A `bugfix-rerun` may keep the seeds.
+  - A config has one current result. A `bugfix-rerun` replaces it only when that result
+    is a `failed` run or is marked INVALID or CORRECTED (`NothingToFix`), and never once
+    the holdout is consumed. So reruns cannot be shopped for the best one while N stays
+    the same: each replaces a result already declared broken.
   - A `config_id` names one `config_hash` within a protocol, and the other way round.
 - **The holdout opens once** per protocol (`open_holdout`), for a counted config whose
   current result (its latest `ok` or `bugfix-rerun` run) carries no erratum. After that it
@@ -23,7 +27,7 @@ single-use holdout, and errata (#132; PRD #120; training-loop.md §6 rules 1, 4,
 - **Windows stay honest across versions** (training-loop.md §6 rules 1-2). For every
   other registered version, a window it has *read* is its debug window plus its holdout
   once opened; a window it *seals* is its unread slice plus its holdout while unopened.
-  `register` refuses a new version when:
+  `register` refuses a new version (`WindowClash`) when:
   - its holdout or unread slice overlaps a window another version read (an opened
     holdout is development data now, so a claim needs fresh forward data);
   - its debug window overlaps a window another version seals;
@@ -37,7 +41,8 @@ single-use holdout, and errata (#132; PRD #120; training-loop.md §6 rules 1, 4,
   written must equal its hash, so a change in how pydantic serializes cannot make a
   registered version unreadable.
 - **Retention:** nothing is updated or deleted (database triggers). Errata mark a run
-  with a state, a reason and a time. They never refund budget: N counts what was tried.
+  with a state, a reason and a time. They never refund budget: N counts every distinct
+  config tried, and a config's reruns only ever replace a result declared broken.
 """
 
 import hashlib
@@ -50,7 +55,7 @@ from typing import Self
 from pydantic import Field, StrictStr, model_validator
 
 from app.core.contracts import ContractModel
-from app.core.time import Clock, utc_now
+from app.core.time import Clock, utc_iso, utc_now
 from app.storage.audit import audit
 from app.storage.db import transaction
 from app.validation.protocol import (
@@ -112,6 +117,21 @@ class HoldoutConsumed(ProtocolRefusal):
 
 class SeedsNotChanged(ProtocolRefusal):
     """An A/A run repeats a seed set its config already ran with."""
+
+
+class NothingToFix(ProtocolRefusal):
+    """A bug-fix rerun names a config whose current result is not declared broken."""
+
+
+class WindowClash(ProtocolRefusal):
+    """A new version's windows would read or seal what another version reads or seals."""
+
+
+class ImmutableVersion(ProtocolRefusal):
+    """A version is already registered with other content: use a new version."""
+
+
+FIXABLE = (ErrataState.INVALID, ErrataState.CORRECTED)
 
 
 class RunRecord(ContractModel):
@@ -205,12 +225,14 @@ class RunLog:
             ).fetchone()
             if row is not None:
                 if row[0] != digest:
-                    raise ValueError(f"protocol {protocol.version} is immutable: use a new version")
+                    raise ImmutableVersion(
+                        f"protocol {protocol.version} is immutable: use a new version"
+                    )
                 return digest
             for other, opened in self._versions():
                 clash = _window_clash(protocol, other, opened=opened)
                 if clash:
-                    raise HoldoutConsumed(f"{protocol.version}: {clash} of {other.version}")
+                    raise WindowClash(f"{protocol.version}: {clash} of {other.version}")
             self._conn.execute(
                 "INSERT INTO claim_protocols (protocol_hash, version, body, registered_at)"
                 " VALUES (?, ?, ?, ?)",
@@ -266,6 +288,13 @@ class RunLog:
                 raise NotCounted(f"a {run.status} run needs a counted config {run.config_id}")
             elif run.status is RunStatus.AA and set(run.seeds) in self._seed_sets(run):
                 raise SeedsNotChanged(f"an A/A run of {run.config_id} must change the seeds")
+            elif run.status is RunStatus.BUGFIX_RERUN:
+                if self.holdout_consumed(run.protocol_hash):
+                    raise HoldoutConsumed("the holdout is consumed: no rerun replaces a result")
+                if not self._current_is_broken(run):
+                    raise NothingToFix(
+                        f"mark the current result of {run.config_id} INVALID or CORRECTED first"
+                    )
             cur = self._conn.execute(
                 "INSERT INTO claim_runs (protocol_hash, config_id, config_hash, status, body,"
                 " recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -291,6 +320,24 @@ class RunLog:
             raise ConfigIdConflict(
                 f"{run.config_id}/{run.config_hash} clashes with {clash[0]}/{clash[1]}"
             )
+
+    def _current_is_broken(self, run: RunRecord) -> bool:
+        """The config's current result (its latest counted or bug-fix run) is a failed run
+        or carries an INVALID or CORRECTED erratum."""
+        row = self._conn.execute(
+            "SELECT run_id, status FROM claim_runs WHERE protocol_hash = ? AND config_hash = ?"
+            " AND status IN (?, ?, ?) ORDER BY run_id DESC LIMIT 1",
+            (run.protocol_hash, run.config_hash, *COUNTED, RunStatus.BUGFIX_RERUN),
+        ).fetchone()
+        if row[1] == RunStatus.FAILED:
+            return True
+        return (
+            self._conn.execute(
+                "SELECT 1 FROM claim_run_errata WHERE run_id = ? AND state IN (?, ?)",
+                (row[0], *FIXABLE),
+            ).fetchone()
+            is not None
+        )
 
     def _seed_sets(self, run: RunRecord) -> list[set[int]]:
         rows = self._conn.execute(
@@ -403,4 +450,4 @@ class RunLog:
             )
 
     def _now(self) -> str:
-        return self._clock().isoformat()
+        return utc_iso(self._clock())
