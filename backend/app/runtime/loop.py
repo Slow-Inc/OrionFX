@@ -237,7 +237,7 @@ class DecisionLoop:
                         registry=self._registry)  # fmt: skip
         ctx = gate.with_allowed(ctx)
         proposals = [p for s in gate.allowed if (p := s.propose(ctx)) is not None]
-        evidence = self._evidence(now)
+        evidence = self._gather_evidence(now, snapshot)
         upd, cycle_id, closed_at = self._cycle()
         if upd is not None and upd.state is CycleState.CLOSING:
             self._health(HealthStatus.OK, "cycle closing: no new decisions", now)
@@ -264,6 +264,13 @@ class DecisionLoop:
         self.experiences.label_due(now=now)
         self._health(HealthStatus.OK, None, now)
         return d
+
+    def _gather_evidence(self, now: datetime, snapshot: FeatureSnapshot) -> Evidence:
+        """The evidence at `now` from the live provider. The one override is the system
+        backtest's evaluation loop (#131, `app.validation.system_backtest`), which hands
+        an evaluation-loaded model the snapshot this tick built; it runs only on its own
+        fresh database and fake broker."""
+        return self._evidence(now)
 
     def _record(self, d: Decision, snapshot: FeatureSnapshot, mode: Mode) -> None:
         self.experiences.record(

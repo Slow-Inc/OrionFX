@@ -76,7 +76,9 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
    - expectancy after costs, PF, max DD and trade count;
    - open positions at fold end and refused trades, reported separately.
 
-   Two costs are measured, not assumed: M06's deal scan and the 30 s staleness rule after a DENY (#121). [planned #131]
+   Two costs are measured, not assumed: M06's deal scan and the 30 s staleness rule after a DENY (#121). [built #131 on `feat/131-system-backtest`, unmerged, independent review pending; see §11]
+
+   **A backtest is not a real-market result.** It is the system's behaviour on stored bars under the simplifications it lists, and never a profit claim.
 3. **Shadow/Demo on the real market.** These are the same metrics on forward data. The only renewable evidence. [blocked #17]
 
 The synthetic scenarios (`validation/scenarios.py`) are behaviour tests. They never count as edge.
@@ -204,3 +206,62 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
   - Measured locally (Windows): recording 2,760 M5 bars (about 10 trading days) with the full library took 42 s for the recorder alone; the tracer takes about 16 s (about 7 s of it is `transform_from_store`, which reads 600 M5 bars per row and per replay step) and the suite grows from about 49 s to about 69 s. CI runs only on pull requests, so no CI time exists yet.
 - **After #129 (merged at `3b10ae3`, `m07.labels.tb.v2`):** EV is priced only from a forecast's class probabilities of the current `LABEL_VERSION`. The evaluation path applies the same rules as the live one (a card on another label is refused at load; a labelled model's forecast carries its class triple), and `EvaluationEvidence` feeds a transform model `transform_from_store`, as the recorder and the export do (train/serve parity). The tracer's ENTER fires under that EV with no threshold or fixture change, and every ENTER has a positive EV.
 - **What the fixture does not exercise:** H1 MACD (not in the cut library), M5 history beyond about 2.5 trading days, and on the negative control only about 4 hours of M5 around the daily break (run both with and without the session on that window).
+
+## 11. System backtest (#131)
+
+**Status:** [built] on `feat/131-system-backtest`. It is unmerged, and the risk path needs an independent review before merge. Module: `app/validation/system_backtest.py`; regime rule: `app/validation/regimes.py`; tests: `tests/integration/test_system_backtest.py`, `tests/unit/validation/test_regimes.py`.
+
+**A backtest is not a real-market result.** Its numbers describe the system on stored bars under the listed simplifications. Only Shadow/Demo on the real market (#17) can confirm them, and none of them is a profit claim.
+
+**Interface.** `run_system_backtest(candles, model=, strategies=, spec=BacktestSpec(...), code_sha=, protocol_hash=None, regimes=protocol_v1_draft, policy=DEFAULT_POLICY) -> SystemBacktestResult`.
+- **Model.** Only an `EvaluationPredictor` is accepted, and a window that starts at or before the card's training cutoff is refused. A `LoadedPredictor` or a raw predictor is refused too.
+- **Evidence seam.** `DecisionLoop` still refuses `EvaluationEvidence`. Its one override point is `_gather_evidence(now, snapshot)`, which the backtest's private `_EvaluationLoop` uses.
+- **Run setup.** Each run gets its own in-memory database and `FakeBroker`. M06 is started in DEMO, and the strategies get DEMO approvals inside that database only. The real registry is never read or written, and no Manual Position exists.
+
+**One step per driving bar**, at the bar's `available_at`:
+1. Set the quote: bid = close, ask = close + spread.
+2. Journal any due control command.
+3. M06 ticks.
+4. The loop decides.
+5. M06 ticks again.
+
+**M06 is used as it is.** That covers the Profit Target, basket trailing, the AI exit (the CLOSE_ALL latch), the drawdown lock and the Emergency Stop. No risk rule, threshold or exit was changed.
+
+**Costs (`BacktestCost`).**
+- **Fills.** A fill is the bar close, worse by the spread on the ask side and by the slippage on every fill. Each deal pays commission.
+- **`STRESSED` (the default).** Its values are read from `app.core.bet.STRESSED_COST`. A narrower bar spread never makes it cheaper: the spread is the larger of the bar's and the stressed one.
+- **`modelled(unit)`.** It uses the bar's spread with a cost the caller supplies. Its values are TBD until Demo.
+- **Ratio-adjusted series.** For a series like FirstRate GC (#128), `PriceScale` f(t) charges the fixed-dollar cost as cost × f(t).
+
+**NO_TRADE bars (#128)** bring no quote. The last quote goes stale, so M05 decides nothing on such a bar and M06 refuses entries on it. Exits still run, at the unchanged price, so a NO_TRADE bar never triggers an entry or an exit by itself.
+
+**Point in time.**
+- Every bar read goes through a guard that fails the run with `LookAhead`.
+- Regime tags see only trading days that have ended.
+- Bars after the window do not change the output.
+
+**Outputs.**
+- The trade list, with the close reason and the regime tags at entry.
+- Open positions at the end and M06's refusals, each reported separately.
+- The daily P&L series on session days, zero days included, as the DSR/PBO input.
+- Equity, max drawdown in USD and in %, and exposure.
+- The summary: expectancy, PF, win rate, the trade-based DD and close-reason counts. `expectancy_ci(estimator)` is the CI hook: it receives the trade nets grouped by trading day.
+- Per-regime buckets with `n` and trading days. A bucket under the floor (300 trades and 60 days, per the protocol draft) is `NOT_COVERED`: it has no verdict and is never listed as evidence.
+- M05 decision counts, the steps on which the loop decided nothing, and the no-trade and seeded random-entry baselines (same exits, the model run's basket rate per flat step).
+- `output_hash` over all of the above. The manifest records the code SHA, the card pin and weights hash, the dataset version, the cost mode and components, the protocol hash and the spec.
+- `validation_run()` produces the evidence record.
+
+**Regime rule.** `protocol_v1_draft` implements protocol v1 §7: volatility and trend from trailing daily bars, NY session and era. The protocol is still a draft, so the classifier is pluggable. A dimension with less than 252 (+20) days of history is `unknown`. Stress windows and news are not bucketed: the draft gives no fixed boundaries, and there is no point-in-time calendar source (#41).
+
+**Simplifications (listed in every result).**
+- Fills happen at bar closes, so M06 checks the target, trailing and drawdown once per bar.
+- The Emergency SL is not exercised: M06 never sets `OpenRequest.emergency_sl`, and the fake broker has no stops.
+- M05's EV prices slippage at `bet.SLIPPAGE` (0.05), while stressed fills pay 0.10. Under a price scale, EV's commission uses the factor at the window start.
+- Under a price scale, the USD results and M06's dollar thresholds (Profit Target, `max_spread`, trailing, drawdown) are in the series' adjusted units, not real dollars.
+- There is no swap, margin call, partial fill, requote or extra latency.
+- There is no news evidence.
+
+**Measured (#121), on this machine.**
+- **DENY staleness.** After a DENY, the next bar's first M06 tick reports positions again, so the 30 s staleness rule does not stall a bar-driven clock. A test pins this: every bar gets a decision.
+- **Deal scan.** The per-tick cost of `deals_since(None)` is reported in `timings`. It is not hashed.
+- **Speed.** The fixture runs reach roughly 100 steps/s on M15 with the default library and no context timeframes. Real runs with H1/M15 context and M04 transforms will be slower; measure them on Colab.
