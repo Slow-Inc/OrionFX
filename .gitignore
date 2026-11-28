@@ -12,6 +12,9 @@ data/**
 !data/**/README.md
 !data/**/*.schema.json
 models/**
+# Raw vendor market data (Dukascopy or any vendor export, #128): never committed,
+# not even a README, whatever the vendor's terms (docs/research/2026-11-28-dukascopy-terms.md)
+data/historical/**
 !models/**/README.md
 !models/**/metadata/
 
