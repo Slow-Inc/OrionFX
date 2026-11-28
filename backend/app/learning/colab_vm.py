@@ -90,7 +90,9 @@ def main() -> None:
                 timeout=timeout, check=True,
             )  # fmt: skip
 
-        print(f"kernel python {sys.version}", file=log, flush=True)
+        meminfo = Path("/proc/meminfo")
+        mem = meminfo.read_text().splitlines()[0] if meminfo.exists() else "unknown"
+        print(f"kernel python {sys.version}; cpus {os.cpu_count()}; {mem}", file=log, flush=True)
         step(sys.executable, "-m", "pip", "install", "--quiet", f"uv=={UV_VERSION}")
         step(*uv, "sync", "--frozen", "--no-dev", "--no-install-project")
         step(*uv, "run", "--frozen", "--no-dev", "--no-sync", "python", "-m", job["entrypoint"],
