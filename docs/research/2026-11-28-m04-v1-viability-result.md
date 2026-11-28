@@ -58,12 +58,27 @@ So the barrier is not the binding constraint. The binding constraint is **cost a
    - in_closed: 6,268 M5 bars, probably holidays and early closes, which the schedule has no calendar for;
    - 30,703 unexpected M5 gaps;
    - 1,431 OUT_OF_ORDER and 1,025 DUPLICATE bars.
-2. **The no-label rate in 2023 is 46.6%, against 8.4% in 2022.** This is **unexplained**, and must be investigated before any rerun. Some candidate causes:
-   - data gaps in the 2023 source files;
-   - a timestamp or DST artefact;
-   - the gap rule interacting with the schedule.
+2. **The no-label rate in 2023 is 46.6%, against 8.4% in 2022.** **Root cause: gaps in the HistData source.**
+   - A normal month holds about 5,800–6,300 M5 bars. These are the M5 bar counts per month in `hd-xau-v2`:
 
-   None of these is verified.
+     | Month | M5 bars |
+     |---|---|
+     | 2023-01 | 5,724 |
+     | 2023-02 | 4,950 |
+     | 2023-03 | 4,583 |
+     | 2023-04 | 3,816 |
+     | 2023-05 | 4,518 |
+     | 2023-06 | 4,332 |
+     | 2023-07 | 4,224 |
+     | 2023-08 | 6,348 |
+     | 2022, every month | 5,490–6,348 |
+
+   - So HistData is missing roughly **20–35% of bars from February to July 2023**.
+   - Under the rule "a missing bar gives no label" (§4), every row whose H1 window touches a missing bar becomes no-label.
+   - **Consequences:**
+     - **2023 is under-sampled in this era.** Its statistics rest on fewer rows, and possibly on a non-random subset of hours.
+     - **Before any rerun**, February–July 2023 must be filled from a complete source: Dukascopy (slow, but complete), or another source.
+   - **Effect on the verdict: none.** 2022 alone has an 8.4% no-label rate, and it fails V2 at every k as well.
 3. **The code is unreviewed** (749d9a7, on a feature branch).
 
 **Do the caveats change the verdict?**
