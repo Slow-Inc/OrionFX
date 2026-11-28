@@ -58,7 +58,7 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Metric baseline | Multiclass Brier against class priors from **that training fold only**. | [planned #130] |
 | Artifact | Native model file (never pickle). The manifest records the commit SHA, dataset version, label and transform versions, seeds and library versions. | [planned #130] |
 | Card | `ModelCard.training_cutoff` and `weights_hash`: `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. Dataset ref, label version and transform version are still to come. | cutoff and weights pin [built] #127; the other fields [planned #130] |
-| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | [built] #127, see §10 |
+| Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | evaluation path [built] #127, see §10; the live `load_model` still calls `build()` with no arguments [planned #133] |
 | Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and no live path accepts it. | [built] #127, see §10 |
 | Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit, the VM holds no secrets, and only the artifact and manifest come back. Locally they are registered only after a hash check. Every VM is stopped after use. | [planned #134] |
 
@@ -199,4 +199,5 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 - **CI-time deviations from "7+ days of M5":**
   - The library is the default one cut to the techniques the chain reads (`tracer.TECHNIQUES`): same ids and values.
   - M5 is stored only from the train split on, while M15/H1 history starts a week earlier.
-  - The full library over the whole week took about 45 s; the tracer takes about 9 s.
+  - Measured locally (Windows): recording 2,760 M5 bars (about 10 trading days) with the full library took 42 s for the recorder alone; the tracer takes about 9 s and the suite grows from about 49 s to about 63 s. CI runs only on pull requests, so no CI time exists yet.
+- **What the fixture does not exercise:** H1 MACD (not in the cut library), M5 history beyond about 2.5 trading days, and on the negative control only about 4 hours of M5 around the daily break (run both with and without the session on that window).

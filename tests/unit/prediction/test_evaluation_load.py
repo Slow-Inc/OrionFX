@@ -19,10 +19,12 @@ from app.learning.bars import Horizon, Provenance
 from app.learning.experience import ExperienceLog
 from app.market_data.store import CandleStore
 from app.prediction.adapters import logistic_json
+from app.prediction.baseline import BASELINE
 from app.prediction.card import ModelCard
 from app.prediction.engine import (
     EvaluationPredictor,
     Refused,
+    load_baseline,
     load_for_evaluation,
     load_model,
     predict,
@@ -162,6 +164,21 @@ def test_a_snapshot_at_or_before_the_training_cutoff_is_refused(
             predict_for_evaluation(ev, _snapshot(as_of), now=as_of + timedelta(seconds=5))
     after = CUTOFF + timedelta(minutes=5)
     assert predict_for_evaluation(ev, _snapshot(after), now=after + timedelta(seconds=5))
+
+
+class _CutBaseline:
+    """The baseline rule under a card with a training cutoff."""
+
+    card = BASELINE.card.model_copy(update={"training_cutoff": CUTOFF})
+    predict = BASELINE.predict
+
+
+def test_the_live_predict_refuses_a_snapshot_at_or_before_the_cutoff() -> None:
+    loaded = load_baseline(_CutBaseline(), mode=Mode.SHADOW)
+    with pytest.raises(Refused, match="cutoff"):
+        predict(loaded, _snapshot(CUTOFF), now=CUTOFF + timedelta(seconds=5))
+    after = CUTOFF + timedelta(minutes=5)
+    assert predict(loaded, _snapshot(after), now=after + timedelta(seconds=5))
 
 
 def test_weights_naming_other_features_than_the_card_are_refused(conn: sqlite3.Connection) -> None:

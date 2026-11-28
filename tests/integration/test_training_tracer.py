@@ -244,13 +244,22 @@ def test_readiness_stays_not_ready_under_the_uncertified_default_policy(chain: C
 def test_without_the_session_the_long_h1_and_m15_features_never_come_back(
     tmp_path: Path,
 ) -> None:
-    """Negative control: the same chain with session=None fails its feature assertion, so
-    the pass-through of `session=` is what makes the features usable."""
+    """Negative control: the same chain with session=None fails its feature assertion,
+    while the same small window with the session passes it, so the pass-through of
+    `session=` alone is what makes the features usable."""
+    window = (TEST.start, BREAK_REOPEN + timedelta(hours=2))
+    with_session = connect(tmp_path / "with-session.db")
+    migrate(with_session)
+    try:
+        _assert_features_usable(_record(with_session, _candles(with_session, window),
+                                        XAUUSD_NY_1700))  # fmt: skip
+    finally:
+        with_session.close()
     conn = connect(tmp_path / "control.db")
     migrate(conn)
     try:
         with pytest.raises(AssertionError, match="H1/M15 features unusable"):
-            _chain(conn, tmp_path, None, m5=(TEST.start, BREAK_REOPEN + timedelta(hours=2)))
+            _chain(conn, tmp_path, None, m5=window)
         values = [r.snapshot.values for r in BarLog(conn).snapshots("XAUUSD", M5, start=TEST.start,
                                                                      end=END)]  # fmt: skip
         assert values and all(v[ADX_H1] is None and v[STRUCT_M15] is None for v in values)
