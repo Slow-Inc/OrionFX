@@ -158,8 +158,15 @@ jobs:
           echo "::add-mask::$GH_TOKEN"
           export GH_TOKEN
           trap 'gh api --method DELETE installation/token > /dev/null || true' EXIT
-          python3 -I _trusted/opencode/post.py review "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA" \
-            || { echo "unavailable: posting the review to GitHub failed" > "$cause_file"; exit 1; }
+          rc=0
+          python3 -I _trusted/opencode/post.py review "$RUNNER_TEMP/answer.md" .git/opencode-ctx/pr.diff "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA" || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "config: GitHub refused the review (401/403); check the OpenCode App's permissions" > "$cause_file"
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "unavailable: posting the review to GitHub failed" > "$cause_file"
+            exit 1
+          fi
       - name: OpenCode unavailable notice
         if: ${{ !cancelled() && (steps.run.outcome == 'failure' || steps.post.outcome == 'failure') }}
         env:

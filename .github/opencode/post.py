@@ -33,6 +33,7 @@ COMPONENTS = {
 # wontfix is a maintainer decision; the bot never applies it.
 ROLES = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human"}
 MAX_INLINE = 15
+AUTH_FAILURE = 2  # review() exit code for HTTP 401/403 (config), vs 1 (transient)
 VERDICT_RE = re.compile(r"^\s*Verdict:.*$", re.M)
 SEVERITY_RE = re.compile(r"^\s*[-*]\s*\[(blocker|major)\]", re.M | re.I)
 
@@ -83,7 +84,9 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
     off_diff: list[str] = []
     over_cap: list[str] = []
     extra = ""
-    match = INLINE_RE.search(answer)
+    # The last block wins: an earlier one is usually an example such as "[]".
+    blocks = list(INLINE_RE.finditer(answer))
+    match = blocks[-1] if blocks else None
     if match:
         try:
             items = json.loads(match.group(1))
@@ -136,7 +139,8 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
     print(verdict)
     if result.returncode != 0:
         print(f"::error::Posting the review failed: {result.stderr.strip()[:500]}")
-        return 1
+        # 401/403 means the App token lacks a permission: a config error, not an outage.
+        return AUTH_FAILURE if re.search(r"HTTP 40[13]", result.stderr) else 1
     print(f"Posted COMMENT review with {len(payload['comments'])} inline comment(s).")
     return 0
 

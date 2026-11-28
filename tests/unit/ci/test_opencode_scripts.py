@@ -6,7 +6,10 @@ is what the merge gate parses, so they are tested through their public functions
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -379,3 +382,114 @@ def test_extract_records_breach_as_security_and_errors_as_unavailable(
     assert post.classify(cause.read_text(encoding="utf-8"))[0] == "unavailable"
     extract.main(_events(tmp_path, [_tool("read")]), out)
     assert "no final answer" in cause.read_text(encoding="utf-8")
+
+
+# --- inline input validation ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "inline",
+    [
+        ["not a dict", 3, None],
+        [{"path": "x.py", "line": 2, "body": 5}],
+        [{"path": "x.py", "line": "2", "body": "line as string"}],
+        [{"path": ["x.py"], "line": [2], "body": "unhashable path and line"}],
+        {"path": "x.py", "line": 2, "body": "object, not an array"},
+    ],
+    ids=["non-dict-items", "non-str-body", "str-line", "unhashable", "not-a-list"],
+)
+def test_malformed_inline_items_never_become_inline_comments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inline: object
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    assert post.review(_answer(tmp_path, inline), _diff(tmp_path), "o/r", "7", "abc") == 0
+    assert rec.calls[0]["comments"] == []
+
+
+def test_multi_file_diff_anchors_each_file_separately() -> None:
+    diff = DIFF + "--- a/y.py\n+++ b/y.py\n@@ -0,0 +1,1 @@\n+new\n"
+    assert post.commentable_lines(diff) == {"x.py": {1, 2, 3, 11, 12}, "y.py": {1}}
+
+
+def test_the_last_inline_block_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    real = json.dumps([{"path": "x.py", "line": 2, "body": "[major] real"}])
+    text = (
+        f"summary\n```json opencode-inline\n[]\n```\nmore\n```json opencode-inline\n{real}\n```\n"
+    )
+    path = tmp_path / "answer.md"
+    path.write_text(text, encoding="utf-8")
+    post.review(str(path), _diff(tmp_path), "o/r", "7", "abc")
+    assert [c["body"] for c in rec.calls[0]["comments"]] == ["[major] real"]
+
+
+def test_auth_refusal_is_reported_as_a_config_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(endpoint: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 1, "", "gh: Resource not accessible (HTTP 403)")
+
+    monkeypatch.setattr(post, "gh_api", refuse)
+    assert post.review(_answer(tmp_path, []), _diff(tmp_path), "o/r", "7", "abc") == 2
+
+
+# --- app-token.sh (stubbed curl/gh; needs bash and jq) -------------------------------------
+
+STUB_CURL = """#!/usr/bin/env bash
+case "$*" in
+  *audience=opencode-github-action*) echo '{"value": "oidc"}' ;;
+  *exchange_github_app_token*) printf '%s\\n%s' "$STUB_EXCHANGE_BODY" "$STUB_EXCHANGE_STATUS" ;;
+  *) exit 22 ;;
+esac
+"""
+STUB_GH = """#!/usr/bin/env bash
+case "$*" in
+  *DELETE*) echo deleted >> "$STUB_LOG" ;;
+  *installation/repositories*) printf '%s' "$STUB_REPOS" ;;
+esac
+"""
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("jq") is None, reason="needs POSIX bash and jq"
+)
+@pytest.mark.parametrize(
+    ("body", "status", "repos", "rc", "revoked"),
+    [
+        ('{"token": "ghs_x"}', "200", "o/r", 0, False),
+        ('{"token": "ghs_x"}', "200", "o/r,o/other", 3, True),
+        ('{"error": "not installed"}', "404", "o/r", 1, False),
+    ],
+    ids=["exact-repo", "wrong-scope-is-security", "exchange-refused"],
+)
+def test_app_token_script_classifies_scope_and_failures(
+    tmp_path: Path, body: str, status: str, repos: str, rc: int, revoked: bool
+) -> None:
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    for name, text in (("curl", STUB_CURL), ("gh", STUB_GH)):
+        (stubs / name).write_text(text, encoding="utf-8")
+        (stubs / name).chmod(0o755)
+    log = tmp_path / "log"
+    env = {
+        **os.environ,
+        "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        "ACTIONS_ID_TOKEN_REQUEST_URL": "https://example.invalid/token?x=1",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "req",
+        "GITHUB_REPOSITORY": "o/r",
+        "STUB_EXCHANGE_BODY": body,
+        "STUB_EXCHANGE_STATUS": status,
+        "STUB_REPOS": repos,
+        "STUB_LOG": str(log),
+    }
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/opencode/app-token.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == rc, result.stderr
+    assert (result.stdout == "ghs_x") is (rc == 0)
+    assert log.exists() is revoked

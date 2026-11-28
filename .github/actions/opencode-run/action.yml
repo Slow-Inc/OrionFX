@@ -32,13 +32,16 @@ inputs:
 runs:
   using: composite
   steps:
-    # Install first, with no OpenCode key anywhere in the job yet, so npm
-    # lifecycle scripts never see it.
+    # Install first, with no OpenCode key anywhere in the job yet. npm lifecycle
+    # scripts also run without the OIDC request credentials or the runtime token,
+    # so they cannot mint an OIDC token (and so an App token) or touch the cache.
     - name: Install OpenCode
       shell: bash
       run: |
         set -euo pipefail
-        npm install -g --no-fund --no-audit opencode-ai@1.19.6 || {
+        env -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+          -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RESULTS_URL -u ACTIONS_CACHE_URL \
+          npm install -g --no-fund --no-audit opencode-ai@1.19.6 || {
           echo "unavailable: installing opencode-ai@1.19.6 from npm failed" > "$RUNNER_TEMP/opencode-cause"
           exit 1
         }
@@ -103,10 +106,14 @@ runs:
           fi
           break
         done
-        # extract.py writes its own cause (policy breach, model error, no answer).
-        [ "$extract" -eq 0 ] || exit 1
-        if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+        # Cause precedence: a policy breach (security) beats a timeout, which beats
+        # extract.py's own cause (model error, no answer), which beats an exit status.
+        if grep -q "^security:" "$OPENCODE_CAUSE_FILE" 2> /dev/null; then
+          exit 1
+        elif [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
           cause "unavailable: OpenCode timed out after ${TIMEOUT_MINUTES}m"
+        elif [ "$extract" -ne 0 ]; then
+          exit 1
         elif [ "$status" -ne 0 ]; then
           cause "unavailable: OpenCode exited with status $status"
         fi
