@@ -135,6 +135,9 @@ probe "hash -p ...; merge (passing review)"     "hash -p /tmp/evil/gh gh; gh pr 
 probe "alias gh=...; merge (passing review)"    "alias gh=/tmp/evil/gh; gh pr merge 7 --squash $MHC"
 probe "cd /x && merge (passing review)"         "cd /x && gh pr merge 7 --squash $MHC"
 probe "merge | cat (passing review)"            "gh pr merge 7 --squash $MHC | cat"
+probe "gh\${IFS}pr\${IFS}merge (passing review)" 'gh${IFS}pr${IFS}merge${IFS}7'
+probe "gh\$IFS\"pr\"\$IFS\"merge\" (passing review)" 'gh$IFS"pr"$IFS"merge" 7'
+probe "gh \$x merge (passing review)"           'gh $x merge 7'
 probe "absolute gh path (passing review)"      "/usr/bin/gh pr merge 7 --squash $MHC"
 probe "CONTROL: trailing # comment"            "gh pr merge 7 --squash $MHC # note" Bash ALLOW
 probe "CONTROL: quoted 'merge' (gated, passes)" "gh pr 'merge' 7 --squash $MHC" Bash ALLOW

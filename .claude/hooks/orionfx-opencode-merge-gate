@@ -35,7 +35,10 @@
 # iex, Invoke-Expression, pwsh, ...): then the bodies are scanned too.
 # `--auto` / `--auto=<anything>` and `--admin` are refused; only known `gh pr merge`
 # flags pass, and outside quotes the merge command may not use shell expansion
-# ($ ` { } * ? [ ] ( ), PowerShell @splat) or a word-changing line continuation.
+# ($ ` { } * ? [ ] ( ), PowerShell @splat) or a word-changing line continuation. Any
+# merge-like text (a `merge` word with `pr`/`gh`, or a merge keyword) with an unquoted
+# $NAME, ${...}, $(...) or backtick is refused before the keyword count, because such
+# words can be built by the shell (`gh${IFS}pr${IFS}merge`). Comments are not code.
 # NOT CLOSABLE BY A TEXT HOOK: indirect forms such as `$(...)`, variables holding the
 # command, encoded commands, scripts written in one tool call and run in another. The
 # GitHub ruleset on main is the server-side backstop.
@@ -273,7 +276,7 @@ sub strip_bodies {
         }
         if ($c eq '#' && ($i == 0 || substr($s, $i - 1, 1) =~ /[\s;&|()]/)) {   # comment to end of line
             my $j = index($s, "\n", $i); $j = $n if $j < 0;
-            $out .= substr($s, $i, $j - $i); $i = $j; next;
+            $i = $j; next;   # dropped: a comment is not code, and mentioning a merge in one is fine
         }
         if (!$ps && substr($s, $i) =~ /^<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([^\s;&|<>()'"]+))/) {
             push @pending, $2 // $3 // $4;
@@ -349,6 +352,23 @@ for my $v (@variants) {
                 unless $sub =~ /^[a-z][a-z-]*$/ || $sub eq '--help' || $sub eq '-h';
         }
     }
+}
+# Words can be BUILT from unquoted expansions: `gh${IFS}pr${IFS}merge` is a merge to bash
+# (an unquoted ${IFS} splits into spaces) but one word to the lexer, and `gh $x merge`
+# hides the subcommand. So in merge-like text (a `merge` word together with `pr` or
+# `gh`, or a merge keyword), any unquoted `$NAME`, `${...}`, `$(...)` or backtick is
+# refused -- before the keyword count can wave it through. `git merge $BRANCH` is not
+# merge-like and is not touched.
+for my $v (@variants) {
+    my $u = unquoted($v);
+    # Merge-likeness is judged on the text with quotes removed (`gh$IFS"pr"$IFS"merge"`),
+    # each expansion standing for a space.
+    my $loose = decode_ansi_c($v) =~ s/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\{[^}]*\}/ /gr =~ s/['"]//gr;
+    next unless $n_kw || ($loose =~ /\bmerge\b/i && $loose =~ /\b(?:pr|gh)\b/i)
+        || $loose =~ /mergePullRequest|enablePullRequestAutoMerge|\/merge\b/i;
+    block("this merge-like command uses an unquoted shell expansion (`\$NAME`, `\${...}`, `\$(...)` or a backtick), "
+        . "so the gate cannot see the words the shell will run (for example `gh\${IFS}pr\${IFS}merge`). $UNCHECKABLE")
+        if $u =~ /\$[{(A-Za-z_0-9@*#?!\$-]/ || (!$ps && $u =~ /`/);
 }
 exit 0 unless $n_kw;
 

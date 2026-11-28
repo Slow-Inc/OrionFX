@@ -419,6 +419,14 @@ reset; run block "PowerShell expression argument" "gh pr merge 7 --squash $MHC (
 reset; run block "PowerShell splatting" "gh pr merge 7 --squash $MHC @a" "cannot check" PowerShell
 reset; run block "unknown flag" "gh pr merge 7 --squash $MHC --frobnicate" "unknown"
 reset; run block "--admin is refused" "gh pr merge 7 --squash $MHC --admin" "--admin"
+# OpenCode round 5 on PR #150: words built from unquoted expansions (`${IFS}` splits into
+# spaces) hide the keywords; a comment that mentions a merge is not a merge.
+reset; run block "\${IFS}-split merge" 'gh${IFS}pr${IFS}merge${IFS}7${IFS}--squash' "expansion"
+reset; run block "\$IFS-split merge with quoted words" 'gh$IFS"pr"$IFS"merge" 7' "expansion"
+reset; run block "variable gh with \${IFS}" '$G${IFS}pr${IFS}merge${IFS}7' "expansion"
+reset; run block "variable between gh and merge" 'gh $x merge 7' "expansion"
+reset; run allow "git merge with a variable is not touched" 'git merge --ff-only $BRANCH'; called "git merge \$BRANCH: gh never called" ""
+reset; run allow "trailing comment that mentions pr merge" "$M # see pr merge in the docs"
 # OpenCode round 4 on PR #150: heredoc bodies are code unless EVERY command is a known
 # data sink; `gh api --input -` is not one; the fallback needs a finished review check.
 P "heredoc into \$SHELL"         $'$SHELL <<EOF\ngh pr merge 7\nEOF'
@@ -437,7 +445,7 @@ reset; run block "PATH changed before the merge" "export PATH=/tmp/evil:/usr/bin
 reset; run block "hash -p before the merge" "hash -p /tmp/evil/gh gh; gh pr merge 7 --squash $MHC" "only command"
 reset; run block "alias before the merge" "alias gh=/tmp/evil/gh; gh pr merge 7 --squash $MHC" "only command"
 reset; run block "merge piped onward" "gh pr merge 7 --squash $MHC | cat" "only command"
-reset; run block "PowerShell env change before the merge" "\$env:Path='C:\\evil'; gh pr merge 7 --squash $MHC" "only command" PowerShell
+reset; run block "PowerShell env change before the merge" "\$env:Path='C:\\evil'; gh pr merge 7 --squash $MHC" "only command|cannot check" PowerShell
 reset; run allow "trailing comment with expansion characters" "$M # after review (round 3) {ok} \$x *"
 reset; files '[{"filename":".claude/hooks/x"}]'; comments "[$(comment "
 $IND")]"
