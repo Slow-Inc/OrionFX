@@ -1114,6 +1114,23 @@ def test_watchdog_passes_the_command_status_through(tmp_path: Path) -> None:
     assert result.returncode == 3 and stats["outcome"] == "exited" and stats["status"] == 3
 
 
+@pytest.mark.parametrize(
+    "budget",
+    [
+        ["--idle-seconds", "0", "--hard-seconds", "5"],
+        ["--idle-seconds", "5", "--hard-seconds", "-1"],
+    ],
+)
+def test_watchdog_refuses_bad_budgets_or_no_command(tmp_path: Path, budget: list[str]) -> None:
+    base = [sys.executable, "-I", str(WATCHDOG), "--events", str(tmp_path / "e")]
+    base += ["--stats", str(tmp_path / "s")]
+    no_command = [*base, "--idle-seconds", "5", "--hard-seconds", "5"]
+    for argv in ([*base, *budget, "--", "true"], no_command):
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 2 and "needs a command" in result.stderr
+        assert not (tmp_path / "e").exists()  # nothing was started
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX signals")
 def test_a_command_killed_from_outside_reports_status_137(tmp_path: Path) -> None:
     result, stats, _ = _watch(tmp_path, _fake("os.kill(os.getpid(), signal.SIGKILL)"))
@@ -1172,14 +1189,16 @@ def test_cancelling_the_step_stops_opencode_too(tmp_path: Path) -> None:
         (124, {"hard_seconds": 1200}, "unavailable: OpenCode hit the hard cap (20 min)"),
         (124, {"hard_seconds": 450}, "unavailable: OpenCode hit the hard cap (7m30s)"),
         (125, None, "unavailable: OpenCode stalled (no progress for ?)"),
+        (125, "{not json", "unavailable: OpenCode stalled (no progress for ?)"),
+        (124, [1, 2], "unavailable: OpenCode hit the hard cap (?)"),
     ],
-    ids=["stall", "hard-cap", "partial-minutes", "no-stats"],
+    ids=["stall", "hard-cap", "partial-minutes", "no-stats", "corrupt-stats", "non-dict-stats"],
 )
 def test_watchdog_causes_name_their_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     status: int,
-    stats: dict[str, Any] | None,
+    stats: object,
     cause: str,
 ) -> None:
     cause_file = tmp_path / "cause"
@@ -1187,7 +1206,8 @@ def test_watchdog_causes_name_their_budget(
     stats_path = None
     if stats is not None:
         stats_path = tmp_path / "stats.json"
-        stats_path.write_text(json.dumps(stats), encoding="utf-8")
+        text = stats if isinstance(stats, str) else json.dumps(stats)  # str: raw, maybe corrupt
+        stats_path.write_text(text, encoding="utf-8")
     events = _events(tmp_path, [_tool("read")])
     out = str(tmp_path / "out.md")
     assert extract.main(events, out, status, str(stats_path) if stats_path else None) == 1
@@ -1259,7 +1279,7 @@ echo call >> "$RUNNER_TEMP/calls"
 calls=$(wc -l < "$RUNNER_TEMP/calls")
 echo '{"type": "tool_use", "part": {"tool": "read", "state": {"status": "completed"}}}'
 case "$STUB_MODE" in
-  retry) [ "$calls" -ge 2 ] || exit 0 ;;  # the first attempt ends with no answer
+  retry) [ "$calls" -ge 2 ] || { sleep 1.1; exit 0; } ;;  # attempt 1: no answer
   slow-no-answer) sleep 1.2; exit 0 ;;
 esac
 echo '{"type": "text", "part": {"messageID": "m", "text": "the review"}}'
@@ -1316,6 +1336,14 @@ def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
     assert f"OpenCode budgets: idle 1 min, hard cap {hard} min for the step." in result.stdout
     assert (tmp_path / "calls").read_text(encoding="utf-8").count("call") == attempts
     assert summary.read_text(encoding="utf-8").count("- OpenCode attempt: exited") == attempts
+    # The budgets reach the watchdog: idle in seconds, and the step's remaining hard cap.
+    last = json.loads((tmp_path / "opencode-watchdog.json").read_text(encoding="utf-8"))
+    assert last["idle_seconds"] == 60
+    budget = int(hard) * 60
+    if attempts == 1:
+        assert budget - 2 <= last["hard_seconds"] <= budget
+    else:  # the retry gets only what is left of the same cap
+        assert last["hard_seconds"] < budget
     if rc == 0:
         assert (tmp_path / "answer.md").read_text(encoding="utf-8") == "the review\n"
     else:
@@ -1376,8 +1404,9 @@ def test_a_malformed_review_ends_in_a_posted_notice(
         ("gh: Resource not accessible by integration (HTTP 403)", 1),
         ("gh: Bad credentials (HTTP 401)", 1),
         ("gh: Server Error (HTTP 502)", 0),
+        ("gh: You have exceeded a secondary rate limit (HTTP 403)", 0),
     ],
-    ids=["403-red", "401-red", "outage-green"],
+    ids=["403-red", "401-red", "outage-green", "rate-limit-403-green"],
 )
 def test_a_refused_notice_fails_red_instead_of_leaving_the_pr_silent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stderr: str, rc: int

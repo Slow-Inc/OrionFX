@@ -90,7 +90,7 @@ Why 4 minutes idle: OpenCode 1.19.6 in `--format json` emits a `step_start` when
 | `opencode-dispatch.yml` | 4 | 12 | 17 |
 | `opencode-triage.yml` | 4 | 7 | 12 |
 
-Each job timeout must exceed the hard cap plus setup (a test checks at least 5 minutes of headroom). Otherwise GitHub cancels the job before the notice step runs. `timeout-minutes` on the action is a deprecated alias of `hard-minutes`, kept for workflow files that predate it. On a PR the workflow file comes from the PR, but the action from the base revision, so a PR that changes these inputs is reviewed with the base action's budgets.
+Each job timeout must exceed the hard cap plus setup (a test checks at least 5 minutes of headroom). Otherwise GitHub cancels the job before the notice step runs. `timeout-minutes` on the action is a deprecated alias of `hard-minutes`, kept for workflow files that predate it. Its meaning changed: it was per attempt and is now the whole step, so an old caller with `retries: 1` gets one budget, not two. On a PR the workflow file comes from the PR, but the action from the base revision, so a PR that changes these inputs is reviewed with the base action's budgets.
 
 ### When OpenCode is unavailable
 

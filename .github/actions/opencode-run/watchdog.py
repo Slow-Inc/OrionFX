@@ -34,7 +34,10 @@ STALLED = 125  # no progress for the idle budget
 
 
 def decide(now: float, start: float, last_progress: float, idle_s: float, hard_s: float) -> str:
-    """The watchdog's whole policy: "hard_cap", "stalled", or "" (keep running)."""
+    """The watchdog's whole policy: "hard_cap", "stalled", or "" (keep running).
+
+    When both budgets run out at the same moment, the hard cap is reported.
+    """
     if now - start >= hard_s:
         return "hard_cap"
     if now - last_progress >= idle_s:
@@ -43,6 +46,8 @@ def decide(now: float, start: float, last_progress: float, idle_s: float, hard_s
 
 
 def _clock(seconds: float) -> str:
+    # Each script runs under `python3 -I` from its own path, so extract.py keeps its own
+    # formatter (`_minutes`) rather than importing this one.
     whole = int(seconds)
     return f"{whole // 60}m{whole % 60:02d}s"
 
@@ -52,6 +57,10 @@ def _kill_group(proc: "subprocess.Popen[bytes]", grace_s: float) -> None:
 
     On POSIX the group is KILLed even when the leader has already exited: what it
     started (and left behind) would otherwise keep running and hold stderr open.
+    Linux does not hand out a PID that is still some group's PGID, so while
+    leftovers exist the PGID is ours; once the group is empty killpg gets ESRCH.
+    The one accepted race is a new process taking the freed PID and making itself
+    a group leader between the leader's reap and this call.
     """
     if os.name == "posix":
         if proc.poll() is None:
@@ -147,7 +156,8 @@ def run(
             )
             next_beat += heartbeat_s
         time.sleep(poll_s)
-    _kill_group(proc, grace_s)  # leftovers of a clean exit, too (POSIX)
+    if outcome == "exited":
+        _kill_group(proc, grace_s)  # what a clean exit left behind (POSIX)
     reader.join(timeout=5)
     elapsed = time.monotonic() - start
     status = proc.returncode
