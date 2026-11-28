@@ -87,6 +87,17 @@ def test_features_do_not_depend_on_the_price_level(
             assert abs(a - b) <= D("1e-9"), key
 
 
+def test_every_transform_reads_trailing_bars_only() -> None:
+    """A day of bars that became available after the snapshot changes no feature (#130 leak
+    test): no centred window, back-fill or full-sample statistic reaches the future."""
+    bars = {tf: _series(tf, AS_OF) for tf in (M5, M15)}
+    snap = build_feature_snapshot("XAUUSD", bars, AS_OF)
+    future = {tf: _series(tf, AS_OF + timedelta(days=1), price=lambda x: x * 3)
+              [len(bars[tf]):] for tf in (M5, M15)}  # fmt: skip
+    with_future = {tf: [*bars[tf], *future[tf]] for tf in (M5, M15)}
+    assert transform(snap, with_future).values == transform(snap, bars).values
+
+
 def test_level_relative_features_are_the_only_ones_exempt_from_a_shift() -> None:
     assert {f"{tf}.{k}" for tf in Timeframe for k in ("atr_close", "log_return")} == LEVEL_RELATIVE
 

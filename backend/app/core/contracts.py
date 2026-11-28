@@ -5,6 +5,7 @@ derives the expected set from the master plan table and compares.
 """
 
 import hashlib
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Literal, Self
@@ -414,6 +415,11 @@ CatalogId = Annotated[str, Field(pattern=r"^CAT-[A-Z]\d{2}-\d{2}$")]
 Sha256Ref = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 """Prefixed hash for V1.1 artifacts (ModelCandidate predates it and stores bare hex)."""
 SubjectKind = Literal["strategy", "technique", "composition", "model"]
+
+
+def canonical_json(value: object) -> bytes:
+    """Sorted keys, no whitespace: the bytes a hashed JSON artifact is written as."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
 def sha256_ref(data: bytes) -> str:

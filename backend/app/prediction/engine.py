@@ -54,7 +54,7 @@ from app.core.time import TIMEFRAME_DURATION
 from app.market_data.features import snapshot_problem
 from app.prediction.card import ModelCard, Predictor, unique_leader, verified_weights
 from app.storage.artifacts import ArtifactLoader, UntrustedArtifact
-from app.storage.registry import ArtifactRegistry
+from app.storage.registry import ArtifactRegistry, subject_ref
 
 _GATE = object()
 
@@ -111,14 +111,26 @@ def load_model(
     module: str,
     mode: Mode,
     now: datetime,
+    card: ModelCard | None = None,
+    weights: bytes | None = None,
 ) -> LoadedPredictor:
-    """The module must define `build() -> Predictor`; its bytes are hash-verified."""
+    """The module must define `build() -> Predictor`; its bytes are hash-verified. For a
+    trained model (#130), `module` is a reviewed adapter defining `build(card, weights)`:
+    pass the registered `card` and its `weights`, checked as `load_for_evaluation` checks
+    them, and the approval is still required."""
+    adapter: tuple[ModelCard, bytes] | None = None
+    if card is not None or weights is not None:
+        if card is None or weights is None or card.ref != subject_ref(model_id, version):
+            raise Refused(f"{model_id}@{version}: an adapter model loads with its own card"
+                          " and its weights")  # fmt: skip
+        _check_registered(registry, card)
+        adapter = (card, weights)
     try:
         code: types.ModuleType = loader.load("model", model_id, version, module, mode=mode,
                                              at=now)  # fmt: skip
     except UntrustedArtifact as exc:
         raise Refused(str(exc)) from None
-    built: Predictor = code.build()
+    built = code.build() if adapter is None else _build(code, *adapter, module)
     manifest = registry.get("model", model_id, version)
     if manifest is None or (built.card.model_id, built.card.model_version) != (model_id, version):
         raise Refused(f"{module} built a card for another model")
@@ -158,21 +170,31 @@ def load_for_evaluation(
     weights already checked against the card, and checks them again before parsing."""
     if card.training_cutoff is None:
         raise Refused(f"{card.ref} states no training cutoff: history cannot be scored")
-    _check_label(card)
-    manifest = registry.get("model", card.model_id, card.model_version)
-    if card.artifact_hash is None or manifest != card.manifest():
-        raise Refused(f"{card.ref}: this card is not the registered one")
+    _check_registered(registry, card)
     try:
         code = loader.load_for_research("model", card.model_id, card.model_version, module)
     except UntrustedArtifact as exc:
         raise Refused(str(exc)) from None
+    return EvaluationPredictor(_build(code, card, weights, module), _GATE)
+
+
+def _check_registered(registry: ArtifactRegistry, card: ModelCard) -> None:
+    _check_label(card)
+    manifest = registry.get("model", card.model_id, card.model_version)
+    if card.artifact_hash is None or manifest != card.manifest():
+        raise Refused(f"{card.ref}: this card is not the registered one")
+
+
+def _build(code: types.ModuleType, card: ModelCard, weights: bytes, module: str) -> Predictor:
+    """An adapter's model: the weights are checked against the card before the adapter
+    sees them (and the adapter checks again before parsing)."""
     try:
         built: Predictor = code.build(card, verified_weights(card, weights))
     except Exception as exc:
         raise Refused(f"{module} refused {card.ref}: {exc}") from None
     if built.card != card:
         raise Refused(f"{module} built another card than {card.ref}")
-    return EvaluationPredictor(built, _GATE)
+    return built
 
 
 def _features(card: ModelCard, values: Mapping[str, Decimal | None]) -> dict[str, Decimal]:

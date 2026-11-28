@@ -13,8 +13,12 @@ Stubs and shortcuts, each deliberate:
   history starts a week earlier, so H1 ADX (85 bars) is warm. Recording every M5 bar of
   that week with the full library cost ~45 s.
 - The negative control runs the same chain on a few hours of M5 around the daily break.
-- The trainer is a three-class softmax on two M04 transforms, fitted to the
-  triple-barrier label (`tracer.train`); #130 brings the real one behind the same adapter.
+- Two models run the same chain on the same recorded and exported data: the tracer's
+  three-class softmax on two M04 transforms (`tracer.train`, adapter `barrier_softmax`),
+  and the M04 LightGBM trainer (#130, adapter `lightgbm_native`) with a tiny config, so
+  the fixture's few hundred train rows can split.
+- The train split runs from a falling trend leg into the first hours of a rising one
+  (#130): trees cannot score a regime they never saw, so one leg is not enough for them.
 """
 
 import functools
@@ -38,6 +42,8 @@ from app.decision.strategies import ADX_H1, STRATEGIES, STRUCT_M15
 from app.learning.bars import BarLog, Horizon, Provenance
 from app.learning.export import export_dataset, horizon_key
 from app.learning.lifecycle import DatasetStore, ModelLifecycle, Split
+from app.learning.trainer import ADAPTER_MODULE, LightGBMConfig
+from app.learning.trainer import train as train_lightgbm
 from app.market_data.session import XAUUSD_NY_1700, SessionSchedule
 from app.market_data.store import CandleStore
 from app.prediction.card import ModelCard
@@ -55,7 +61,7 @@ D = Decimal
 U = UTC
 HISTORY_FROM = datetime(2026, 1, 4, 23, tzinfo=U)  # Sunday 18:00 New York: the week opens
 TRAIN = Split(name="train", start=datetime(2026, 1, 9, 8, tzinfo=U),
-              end=datetime(2026, 1, 12, 6, tzinfo=U))  # spans the weekend  # fmt: skip
+              end=datetime(2026, 1, 12, 14, tzinfo=U))  # spans the weekend  # fmt: skip
 VALIDATION = Split(name="validation", start=TRAIN.end, end=datetime(2026, 1, 12, 21, tzinfo=U))
 TEST = Split(name="holdout", start=VALIDATION.end, end=datetime(2026, 1, 13, 14, tzinfo=U))
 """The test fold: it spans the daily break of Monday 17:00-18:00 New York."""
@@ -67,6 +73,12 @@ LABEL = Horizon(H1, 1)
 """The model's horizon: `trend_following` proposes on H1, and EV needs the two to match."""
 STRATEGY = STRATEGIES["trend_following"]
 STRATEGY_REF = subject_ref(STRATEGY.manifest.strategy_id, STRATEGY.manifest.version)
+LIGHTGBM = LightGBMConfig(features=tracer.MODEL_FEATURES, horizon=LABEL.timeframe,
+                          horizon_bars=LABEL.bars, num_leaves=4, max_depth=3,
+                          min_data_in_leaf=20, learning_rate=0.1, num_boost_round=100,
+                          early_stopping_rounds=10, lambda_l2=1.0)  # fmt: skip
+"""Tiny trees and few rounds: the fixture's train split has a few hundred rows."""
+ADAPTERS = {"barrier_softmax": tracer.ADAPTER, "lightgbm_native": ADAPTER_MODULE}
 COST = CostModel(contract_size=D(100), commission_per_lot=D("3.5"), slippage=D("0.05"),
                  default_spread=D("0.20"))  # fmt: skip
 
@@ -124,24 +136,31 @@ def _export(conn: sqlite3.Connection, out: Path, session: SessionSchedule | None
     return [json.loads(line) for line in data.decode("utf-8").splitlines()]
 
 
-def _artifact(rows: list[dict[str, Any]], folder: Path) -> None:
-    """Train, then write the native artifact: a card and a JSON weights file."""
-    weights, stated = tracer.train(rows, horizon_key(LABEL))
-    card = ModelCard(
-        model_id="tracer-softmax", model_version="1",
-        artifact_hash=tracer.ADAPTER_HASH,
-        lineage=ForecastLineage.CHART_ONLY, feature_schema=TRANSFORM_SCHEMA,
-        required_features=tracer.MODEL_FEATURES,
-        feature_ranges={k: ParameterBound(low=D(-20), high=D(20)) for k in tracer.MODEL_FEATURES},
-        horizon=LABEL.timeframe, horizon_bars=LABEL.bars,
-        semantics="P(UP, DOWN, FLAT) of the triple-barrier label over 1 H1 bar,"
-                  " temperature-scaled on the validation split",
-        calibrated=True, validation=stated["validation"],
-        evidence_refs=["dataset:tracer@1#validation"], label_version=LABEL_VERSION,
-        training_cutoff=stated["training_cutoff"], weights_hash=sha256_ref(weights),
-    )  # fmt: skip
-    (folder / "card.json").write_text(card.model_dump_json(), encoding="utf-8")
-    (folder / "weights.json").write_bytes(weights)
+def _artifact(rows: list[dict[str, Any]], folder: Path, adapter: str) -> None:
+    """Train, then write the native artifact: a card and its weights file."""
+    if adapter == "lightgbm_native":
+        model = train_lightgbm(rows, LIGHTGBM, dataset_ref="tracer@1", code_commit="tracer")
+        weights = model.weights
+        card = model.card(model_id="tracer-lightgbm", model_version="1",
+                          evidence_refs=["dataset:tracer@1#validation"])  # fmt: skip
+    else:
+        weights, stated = tracer.train(rows, horizon_key(LABEL))
+        card = ModelCard(
+            model_id="tracer-softmax", model_version="1",
+            artifact_hash=tracer.ADAPTER_HASH,
+            lineage=ForecastLineage.CHART_ONLY, feature_schema=TRANSFORM_SCHEMA,
+            required_features=tracer.MODEL_FEATURES,
+            feature_ranges={k: ParameterBound(low=D(-20), high=D(20))
+                            for k in tracer.MODEL_FEATURES},
+            horizon=LABEL.timeframe, horizon_bars=LABEL.bars,
+            semantics="P(UP, DOWN, FLAT) of the triple-barrier label over 1 H1 bar,"
+                      " temperature-scaled on the validation split",
+            calibrated=True, validation=stated["validation"],
+            evidence_refs=["dataset:tracer@1#validation"], label_version=LABEL_VERSION,
+            training_cutoff=stated["training_cutoff"], weights_hash=sha256_ref(weights),
+        )  # fmt: skip
+    (folder / f"{adapter}.card.json").write_text(card.model_dump_json(), encoding="utf-8")
+    (folder / f"{adapter}.weights").write_bytes(weights)
 
 
 def _approve_strategy(conn: sqlite3.Connection) -> ArtifactRegistry:
@@ -159,6 +178,16 @@ def _approve_strategy(conn: sqlite3.Connection) -> ArtifactRegistry:
 
 
 @dataclass
+class Data:
+    conn: sqlite3.Connection
+    folder: Path
+    candles: CandleStore
+    log: BarLog
+    rows: list[dict[str, Any]]
+    session: SessionSchedule | None
+
+
+@dataclass
 class Chain:
     log: BarLog
     rows: list[dict[str, Any]]
@@ -169,29 +198,37 @@ class Chain:
     model: EvaluationPredictor
 
 
-def _chain(conn: sqlite3.Connection, folder: Path, session: SessionSchedule | None,
-           m5: tuple[datetime, datetime] = (TRAIN.start, END)) -> Chain:  # fmt: skip
+def _data(conn: sqlite3.Connection, folder: Path, session: SessionSchedule | None,
+          m5: tuple[datetime, datetime] = (TRAIN.start, END)) -> Data:  # fmt: skip
+    """Record, label and export: what every model of the chain shares."""
     candles = _candles(conn, m5)
     log = _record(conn, candles, session)
     _assert_features_usable(log)
-    rows = _export(conn, folder / "dataset.jsonl", session)
-    _artifact(rows, folder)
+    return Data(conn, folder, candles, log, _export(conn, folder / "dataset.jsonl", session),
+                session)  # fmt: skip
+
+
+def _chain(data: Data, adapter: str) -> Chain:
+    """Train, register, evaluation-load, replay the holdout and judge readiness."""
+    conn, folder, session = data.conn, data.folder, data.session
+    _artifact(data.rows, folder, adapter)
     strategies = _approve_strategy(conn)
     # Registered today (the real clock), long after the fixture: only an evaluation load
     # can score it on that history.
     registry = ArtifactRegistry(conn)
-    card = ModelCard.model_validate_json((folder / "card.json").read_text(encoding="utf-8"))
+    card = ModelCard.model_validate_json((folder / f"{adapter}.card.json").read_text(
+        encoding="utf-8"))  # fmt: skip
     lifecycle = ModelLifecycle(conn, registry, DatasetStore(conn))
     lifecycle.propose_candidate(card, dataset_refs=["tracer@1"])
     model = load_for_evaluation(
         ArtifactLoader(registry, allowed_packages=("app.prediction.adapters",)), registry,
-        card=card, weights=(folder / "weights.json").read_bytes(),
-        module=tracer.ADAPTER)  # fmt: skip
-    result = replay(candles, symbol="XAUUSD", timeframe=M5, context_timeframes=[M15, H1],
+        card=card, weights=(folder / f"{adapter}.weights").read_bytes(),
+        module=ADAPTERS[adapter])  # fmt: skip
+    result = replay(data.candles, symbol="XAUUSD", timeframe=M5, context_timeframes=[M15, H1],
                     start=TEST.start, end=TEST.end, strategies=[STRATEGY],
                     enabled=[STRATEGY.manifest.strategy_id], registry=strategies,
                     initial_lot=D("0.01"), cost=COST,
-                    evidence=EvaluationEvidence(model, candles, session),
+                    evidence=EvaluationEvidence(model, data.candles, session),
                     session=session, techniques=tracer.TECHNIQUES)  # fmt: skip
     store = EvidenceStore(conn)
     store.save_policy(DEFAULT_POLICY)
@@ -201,16 +238,21 @@ def _chain(conn: sqlite3.Connection, folder: Path, session: SessionSchedule | No
         regimes=["TREND"], window_start=TEST.start, window_end=TEST.end,
         trades=len(result.trades), metrics=result.metrics,
     ))  # fmt: skip
-    return Chain(log, rows, card, result, store.evaluate([ref]), candles, model)
+    return Chain(data.log, data.rows, card, result, store.evaluate([ref]), data.candles, model)
 
 
 @pytest.fixture(scope="module")
-def chain(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Chain]:
+def data(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Data]:
     folder = tmp_path_factory.mktemp("tracer")
     conn = connect(folder / "tracer.db")
     migrate(conn)
-    yield _chain(conn, folder, XAUUSD_NY_1700)
+    yield _data(conn, folder, XAUUSD_NY_1700)
     conn.close()
+
+
+@pytest.fixture(scope="module", params=sorted(ADAPTERS))
+def chain(data: Data, request: pytest.FixtureRequest) -> Chain:
+    return _chain(data, request.param)
 
 
 def test_every_bar_is_labelled_or_marked_unlabellable_at_a_closure(chain: Chain) -> None:
@@ -276,7 +318,7 @@ def test_without_the_session_the_long_h1_and_m15_features_never_come_back(
     migrate(conn)
     try:
         with pytest.raises(AssertionError, match="H1/M15 features unusable"):
-            _chain(conn, tmp_path, None, m5=window)
+            _data(conn, tmp_path, None, m5=window)
         values = [r.snapshot.values for r in BarLog(conn).snapshots("XAUUSD", M5, start=TEST.start,
                                                                      end=END)]  # fmt: skip
         assert values and all(v[ADX_H1] is None and v[STRUCT_M15] is None for v in values)
