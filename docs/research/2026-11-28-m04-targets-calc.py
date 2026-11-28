@@ -1,3 +1,4 @@
+# ruff: noqa
 from statistics import NormalDist
 import math
 N=NormalDist()
