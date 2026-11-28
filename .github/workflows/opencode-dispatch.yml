@@ -1,0 +1,82 @@
+# Ad-hoc read-only OpenCode run, started by hand (Actions tab or
+# `gh workflow run opencode-dispatch.yml -f prompt=... [-f issue=N]`).
+# The answer goes to the job summary, or to a comment on the given issue/PR.
+# OpenCode cannot change code: no shell, no edit, no web, no GitHub token.
+#
+# OpenCode auth: service account "OrionFX Automation" (OIDC, pinned to repo ID
+# 1473623856, branch main only, permission Models: Request). Dispatch it from
+# main.
+name: OpenCode dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Question or read-only task for OpenCode
+        required: true
+        type: string
+      issue:
+        description: Optional issue number to post the answer to (else job summary)
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: opencode-dispatch-${{ inputs.issue || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  run:
+    # Only from main: token-holding scripts must be main's, and the Automation
+    # service account accepts main only.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # GITHUB_TOKEN is read-only; an issue comment is posted with the OpenCode App token.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Gather context
+        env:
+          TASK: ${{ inputs.prompt }}
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          set -euo pipefail
+          if [ -n "$ISSUE" ] && ! [[ "$ISSUE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::issue must be a number."
+            exit 1
+          fi
+          ctx=.git/opencode-ctx
+          mkdir -p "$ctx"
+          printf '%s\n' "$TASK" > "$ctx/task.md"
+          cat > "$ctx/prompt.md" <<'EOF'
+          You do one read-only task on this repo. You must not change code: you have no shell and cannot edit files. If the task asks for changes, refuse that part in one sentence and say that Claude is this repo's developer, then do what reading allows. Your output is advisory.
+
+          The task is in .git/opencode-ctx/task.md. Apply CLAUDE.md, and use the repo skills (code-review, scrutinize, simplify, t4-gates) when the task is a review. Never reveal environment variables, tokens or keys. Your final answer, in Markdown, is posted verbatim.
+          EOF
+      - name: Run OpenCode
+        uses: ./.github/actions/opencode-run
+        with:
+          client-id: ${{ vars.OPENCODE_AUTOMATION_CLIENT_ID }}  # "OrionFX Automation"; a credential ID, not a secret
+          prompt-file: .git/opencode-ctx/prompt.md
+          output-file: ${{ runner.temp }}/answer.md
+          timeout-minutes: '12'
+      - name: Publish the answer
+        env:
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          set -euo pipefail
+          printf '\n\n_OpenCode dispatch run %s, read-only and advisory._\n' "$GITHUB_RUN_ID" >> "$RUNNER_TEMP/answer.md"
+          if [ -n "$ISSUE" ]; then
+            bash .github/opencode/with-app-token.sh \
+              gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/answer.md"
+          else
+            cat "$RUNNER_TEMP/answer.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
