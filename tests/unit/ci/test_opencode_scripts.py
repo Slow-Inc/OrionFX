@@ -1215,6 +1215,19 @@ def test_watchdog_causes_name_their_budget(
     assert post.classify(cause)[0] == "unavailable"
 
 
+def test_an_unwritable_summary_never_hides_a_breach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path))  # a directory: open() fails
+    cause = tmp_path / "cause"
+    monkeypatch.setenv("OPENCODE_CAUSE_FILE", str(cause))
+    stats = tmp_path / "stats.json"
+    stats.write_text(json.dumps({"outcome": "exited", "status": 0}), encoding="utf-8")
+    events = _events(tmp_path, [_tool("bash"), _text("m", "answer")])
+    assert extract.main(events, str(tmp_path / "out.md"), 0, str(stats)) == 1
+    assert cause.read_text(encoding="utf-8").startswith("security: tool policy breach")
+
+
 def test_each_attempt_records_duration_and_events_in_the_job_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1286,21 +1299,8 @@ echo '{"type": "text", "part": {"messageID": "m", "text": "the review"}}'
 """
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32" or shutil.which("jq") is None, reason="needs POSIX bash and jq"
-)
-@pytest.mark.parametrize(
-    ("mode", "hard", "rc", "attempts", "said"),
-    [
-        ("answer", "2", 0, 1, "watchdog: exited (status 0)"),
-        ("retry", "2", 0, 2, "OpenCode gave no final answer; retrying once."),
-        ("slow-no-answer", "1", 1, 1, "No time left in the hard cap for a retry."),
-    ],
-    ids=["answer", "no-answer-then-retry", "no-budget-left-for-a-retry"],
-)
-def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
-    tmp_path: Path, mode: str, hard: str, rc: int, attempts: int, said: str
-) -> None:
+def _run_action(tmp_path: Path, **overrides: str) -> subprocess.CompletedProcess[str]:
+    """The action's run step with stubbed `curl` and `opencode`; env overrides on top."""
     stubs = tmp_path / "bin"
     stubs.mkdir()
     shim = f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n'
@@ -1321,16 +1321,39 @@ def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
         "PROMPT_FILE": str(tmp_path / "prompt.md"),
         "OUTPUT_FILE": str(tmp_path / "answer.md"),
         "IDLE_MINUTES": "1",
-        "HARD_MINUTES": hard,
+        "HARD_MINUTES": "2",
         "RETRIES": "1",
         "RUNNER_TEMP": str(tmp_path),
         "GITHUB_ACTION_PATH": str(WATCHDOG.parent),
         "GITHUB_STEP_SUMMARY": str(summary),
-        "STUB_MODE": mode,
+        "STUB_MODE": "answer",
+        **overrides,
     }
-    result = subprocess.run(
+    return subprocess.run(
         ["bash", "-c", _action_run_script()], env=env, capture_output=True, text=True, timeout=60
     )
+
+
+POSIX_BASH_JQ = pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("jq") is None, reason="needs POSIX bash and jq"
+)
+
+
+@POSIX_BASH_JQ
+@pytest.mark.parametrize(
+    ("mode", "hard", "rc", "attempts", "said"),
+    [
+        ("answer", "2", 0, 1, "watchdog: exited (status 0)"),
+        ("retry", "2", 0, 2, "OpenCode gave no final answer; retrying once."),
+        ("slow-no-answer", "1", 1, 1, "No time left in the hard cap for a retry."),
+    ],
+    ids=["answer", "no-answer-then-retry", "no-budget-left-for-a-retry"],
+)
+def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
+    tmp_path: Path, mode: str, hard: str, rc: int, attempts: int, said: str
+) -> None:
+    result = _run_action(tmp_path, STUB_MODE=mode, HARD_MINUTES=hard)
+    summary = tmp_path / "summary.md"
     assert result.returncode == rc, result.stdout + result.stderr
     assert said in result.stdout
     assert f"OpenCode budgets: idle 1 min, hard cap {hard} min for the step." in result.stdout
@@ -1349,6 +1372,27 @@ def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
     else:
         cause = (tmp_path / "opencode-cause").read_text(encoding="utf-8")
         assert cause.strip() == "unavailable: OpenCode produced no final answer"
+
+
+@POSIX_BASH_JQ
+@pytest.mark.parametrize(
+    ("override", "cause"),
+    [
+        ({"IDLE_MINUTES": "0"}, "config: idle-minutes must be 1-99"),
+        ({"HARD_MINUTES": "abc"}, "config: hard-minutes must be 1-99"),
+        ({"HARD_MINUTES": "100"}, "config: hard-minutes must be 1-99"),
+        ({"RETRIES": "2"}, "config: retries must be 0 or 1"),
+    ],
+    ids=["idle-zero", "hard-not-a-number", "hard-too-big", "retries-two"],
+)
+def test_bad_budgets_fail_red_before_opencode_runs(
+    tmp_path: Path, override: dict[str, str], cause: str
+) -> None:
+    result = _run_action(tmp_path, **override)
+    assert result.returncode == 1
+    assert (tmp_path / "opencode-cause").read_text(encoding="utf-8").strip() == cause
+    assert post.classify(cause)[0] == "config"
+    assert not (tmp_path / "calls").exists()  # OpenCode never started
 
 
 def test_every_job_timeout_covers_the_hard_cap_plus_setup() -> None:

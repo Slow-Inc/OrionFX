@@ -395,10 +395,10 @@ def notice(cause_path: str, repo: str, pr: str, head_sha: str) -> int:
     print(f"::warning::{line}")
     if result.returncode != 0:
         reason = result.stderr.strip()[:300]
-        if NOTICE_REFUSED_RE.search(result.stderr) and "rate limit" not in result.stderr.lower():
+        if NOTICE_REFUSED_RE.search(result.stderr):
             # A refused notice is a broken setup (the job token lacks pull-requests: write):
             # fail red, or the PR would get neither a review nor a notice behind a green check.
-            # A rate-limit 403 is an outage, not a refusal, and stays green.
+            # Any other failure, a rate-limit 403 included, is an outage and stays green.
             print(f"::error::OpenCode config error: GitHub refused the notice: {reason}")
             if summary_path:
                 with open(summary_path, "a", encoding="utf-8") as fh:

@@ -64,8 +64,13 @@ def _summarise(stats: dict[str, object], usage: str) -> None:
         f"{_minutes(stats.get('idle_seconds'))}, hard {_minutes(stats.get('hard_seconds'))}; "
         f"{usage}\n"
     )
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(line)
+    # Best effort: an unwritable summary must never stop the cause (or a breach) from
+    # being recorded below.
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(line)
+    except OSError as exc:
+        print(f"::warning::Could not write the job summary: {exc}")
 
 
 def main(
@@ -115,8 +120,8 @@ def main(
     _summarise(stats, usage)
     for err in errors:
         print(f"::error::OpenCode error: {err}")
-    # Cause precedence: policy breach (security, red) > stall > hard cap > model error >
-    # no answer (the only retryable case) > non-zero exit status.
+    # Cause precedence: policy breach (security, red) > stall > hard cap > killed (137) >
+    # model error > no answer (the only retryable case) > non-zero exit status.
     if breaches:
         print(f"::error::Tool policy breach: {sorted(set(breaches))} completed; nothing is posted.")
         return _cause(f"security: tool policy breach, {sorted(set(breaches))} completed")
