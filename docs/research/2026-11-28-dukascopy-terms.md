@@ -34,7 +34,7 @@ Status: **SNAPSHOT** (2026-11-28). This reads Dukascopy's published terms for #1
   - whether trading for one's own profit counts as "non-commercial";
   - whether a stored multi-year M1 set breaks "construct a database of any kind" / "stored ... in databases";
   - whether bulk download with tools (dukascopy-node, duka, Tickstory) needs the written consent the automated-access clause requires.
-- **Redistribution: the text points to no.** The download licence is "ONLY" for personal use, and §3 forbids distributing and publishing. Committing raw data to this repo (private today) would be "storing ... in databases for access by ... any third party" as soon as anyone else has access. The terms do not address derived artefacts (features, model weights).
+- **Redistribution: the text points to no.** The download licence is "ONLY" for personal use, and §3 forbids distributing and publishing. Committing raw data to this repo (private today) looks like what §3 forbids ("Nor may the WEBSITE be stored (in its entirety or in any part) in databases for access by you or any third party") as soon as anyone else has access. The terms do not address derived artefacts (features, model weights).
 - **Main ambiguity:** these are website terms. They cover the data feed only through "any service accessible via this website". The JForex prompt may hold more specific terms. Only written clarification from Dukascopy settles the commercial-use, database and automated-download questions.
 
 ## Consequences already in the code (#128)

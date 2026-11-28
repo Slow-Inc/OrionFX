@@ -33,13 +33,14 @@ LATER = datetime(2030, 1, 1, tzinfo=UTC)
 class ListSource:
     """A historical source over a fixed list, in the order given."""
 
-    def __init__(self, bars: list[M1Bar]) -> None:
+    def __init__(self, bars: list[M1Bar], *, honest: bool = True) -> None:
         self.bars = bars
+        self.honest = honest  # a dishonest source ignores the requested range
         self.calls: list[tuple[datetime, datetime]] = []
 
     def m1_bars(self, start: datetime, end: datetime) -> Iterator[M1Bar]:
         self.calls.append((start, end))
-        return iter([b for b in self.bars if start <= b.open_time < end])
+        return iter([b for b in self.bars if not self.honest or start <= b.open_time < end])
 
 
 def _bar(t: datetime, price: str = "2000", spread: str | None = "0.20") -> M1Bar:
@@ -141,9 +142,9 @@ def test_bad_rows_are_dropped_and_counted_like_live_ticks(conn: sqlite3.Connecti
     bars = _minutes(t, t + timedelta(minutes=10))
     crossed = M1Bar(open_time=t + 3 * M1, open=D(1), high=D(0), low=D(2), close=D(1),
                     volume=None, spread=None)  # fmt: skip
-    future = _bar(LATER + H1)
-    source = ListSource([*bars[:5], bars[4], bars[2], crossed, *bars[5:], future])
-    report = _import(conn, source, end=LATER + 2 * H1, chunk=timedelta(days=4000))
+    future = _bar(LATER + H1)  # past the clock: only a source ignoring the range sends it
+    source = ListSource([*bars[:5], bars[4], bars[2], crossed, *bars[5:], future], honest=False)
+    report = _import(conn, source, end=LATER, chunk=timedelta(days=4000))
     issues = report.issues
     assert issues[Issue.DUPLICATE] == 1 and issues[Issue.OUT_OF_ORDER] == 1
     assert issues[Issue.INVALID_QUOTE] == 1 and issues[Issue.FUTURE_TICK] == 1
@@ -194,6 +195,16 @@ def test_chunks_must_line_up_with_h1_bars(conn: sqlite3.Connection) -> None:
         _import(conn, ListSource([]), chunk=timedelta(minutes=30))
     with pytest.raises(ValueError, match="H1"):
         _import(conn, ListSource([]), start=WED.replace(hour=20, minute=5))
+
+
+def test_the_range_must_end_on_an_h1_bar_already_closed(conn: sqlite3.Connection) -> None:
+    """Otherwise the last bars would be stored complete from partial data, and extending
+    the range later would conflict with them."""
+    with pytest.raises(ValueError, match="H1"):
+        _import(conn, ListSource([]), end=WED.replace(hour=20, minute=30))
+    with pytest.raises(ValueError, match="clock"):
+        _import(conn, ListSource([]), clock=lambda: WED.replace(hour=21, minute=30))
+    assert conn.execute("SELECT COUNT(*) FROM candle_sources").fetchone()[0] == 0
 
 
 def test_a_dataset_version_belongs_to_one_data_source(conn: sqlite3.Connection) -> None:

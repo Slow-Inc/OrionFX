@@ -7,8 +7,12 @@ says only whether the bot saw a bar as it happened.
 Mechanism: one candle dataset version holds the bars of exactly one data source. The
 `candle_sources` table (migration 0014) maps each version to its source, append-only, and
 refuses a second source for the same version. Stored bars and learning snapshot rows are
-keyed by dataset version, so each has exactly one source without a new column, and two
-feeds can never be mixed under one version. Export writes the source on every row.
+keyed by dataset version, so each has one source without a new column. The binding is
+enforced where it is made and read: `import_history` registers and checks it, and export
+refuses a version with no source. `CandleStore.save` itself does not check it, so a
+caller that writes another feed's bars into a bound version directly is not stopped. The
+live recorder's versions are not registered yet (they wait on the MT5 wiring, #17).
+Export writes the source on every row.
 
 Each source has its own session schedule (`SOURCE_SCHEDULES`), stored with the mapping so
 a later change of the code's mapping is caught rather than silently applied to old bars.

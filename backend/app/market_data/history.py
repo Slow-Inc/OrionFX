@@ -102,9 +102,14 @@ def import_history(
     chunk: timedelta = timedelta(days=1),
     clock: Clock = utc_now,
 ) -> ImportReport:
-    """Import [start, end) chunk by chunk, resuming after the newest stored bar."""
+    """Import [start, end) chunk by chunk, resuming after the newest stored bar. Both ends
+    lie on H1 boundaries and `end` is not after the clock, so no stored bar is cut short."""
     if chunk <= timedelta(0) or chunk % H1 or floor_time(start, H1) != start:
         raise ValueError("chunks must start on and span whole H1 bars")
+    if floor_time(end, H1) != end:
+        raise ValueError("the range must end on an H1 bar boundary")
+    if end > clock():
+        raise ValueError("the range must end by the clock: only closed bars are imported")
     schedule = SourceRegistry(conn, clock=clock).register(dataset_version, data_source)
     store = CandleStore(conn, dataset_version=dataset_version)
     newest = store.latest_open(symbol, Timeframe.M5, as_of=end)
