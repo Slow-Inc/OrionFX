@@ -82,10 +82,10 @@ uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json --db 
 ```
 
 - `bundle` writes three files and nothing else:
-  - the export (`dataset.jsonl`). It must resolve inside `--exports` and must not have a secret-shaped name. It must be UTF-8 JSONL, with one JSON object on every line;
+  - the export (`dataset.jsonl`). It must resolve inside `--exports` (a relative `dataset_path` is relative to `--exports`) and must not have a secret-shaped name. It must be UTF-8 JSONL, with one JSON object on every line;
   - `job.json`;
   - `code.tar`, a `git archive` of the code SHA limited to `backend/app`, `pyproject.toml` and `uv.lock`. The SHA must be committed.
-- **Known local secrets.** Both commands load the secret-named environment variables, plus **every value** in `<repo>/.env`. Account data such as a login or a server name is not secret-named, so all `.env` values count. Any value of 4 or more characters, raw or JSON-escaped, found anywhere in the bundle is a refusal. The refusal names the variable, never the value.
+- **Known local secrets.** Both commands load the secret-named environment variables, plus **every value** in `<repo>/.env`. Account data such as a login or a server name is not secret-named, so all `.env` values count. `.env` is parsed the way python-dotenv parses it: inline comments are stripped, and its escapes are decoded inside quotes. When the decoded value differs from the raw text inside the quotes, both are searched; the raw one is named `KEY (raw)`. Any value of 4 or more characters, raw or JSON-escaped, found anywhere in the bundle is a refusal. The refusal names the variable, never the value.
   - Expect false refusals when a `.env` holds a short or common value (for example `true`, a port or a host) that also occurs in the code or the data. Lengthen or rename the value; do not weaken the scan.
 - `run` steps:
   1. Re-scans the bundle with the known local secrets, then uploads exactly the scanned bytes.
@@ -93,6 +93,7 @@ uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json --db 
   3. Refuses a model version that is already registered, or whose `models/<id>/<version>/` directory already exists.
   4. Refuses when `colab usage` cannot be read, or shows less than `--min-cu`. `--min-cu` cannot be set below 20 or to a non-finite value. **Exit 3 is the CU-floor stop condition: report it to the owner, do not lower the floor on your own.** Any other refusal (a bundle refused at steps 1–3, or a return refused at step 7) exits 2 with `REFUSED: ...`.
   5. Starts a CPU high-mem VM. The driver (`colab_vm.py`) installs the locked deps with a pinned uv and runs the entrypoint.
+     - The driver is uploaded from the **local checkout** that runs the runner. It is trusted, reviewed local code, not the pinned `code_sha`. Only `code.tar`, which holds the trainer and its deps, is pinned. Whatever the VM returns, including the manifest, is still verified as untrusted.
   6. Downloads the output tar and the run log, then always runs `colab stop`:
      - A `finally` runs it, and SIGINT, SIGTERM and SIGBREAK lead into that `finally`.
      - The stop runs in its own process group, so a second Ctrl-C does not kill it. It is retried once.
@@ -107,12 +108,12 @@ uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json --db 
   - **The binding.** The manifest must echo these job fields: job id, protocol hash, code SHA, `code_hash`, dataset hash, seeds, config, entrypoint, and model id and version.
     - A bundle without `code_hash` is refused by the scan, before any VM starts. Re-bundle older jobs.
     - A job whose `code_sha` pins a commit from before this binding was extended is refused only after the VM has run. The VM-side binding comes from the pinned commit's `colab_vm.py`, so the mismatch shows up only in the returned manifest. Pin a commit that has this change.
-  - **The card.** It must be a valid `ModelCard` for this job and must name the weights' hash. It may not claim anything the VM cannot prove: no LIVE mode, `calibrated` false, no `evidence_refs`, and no `validation` metrics. Validation is recomputed locally, by trusted code (#130, #132). The kept card is forced to SHADOW only.
+  - **The card.** It must be a valid `ModelCard` for this job and must name the weights' hash. It may not claim anything the VM cannot prove: `supported_modes` must be exactly SHADOW (DEMO and LIVE are refused, and so is an omitted field, because the default is SHADOW+DEMO); `calibrated` must be false; there must be no `evidence_refs` and no `validation` metrics. Validation is recomputed locally, by trusted code (#159, with #130 and #132).
   - **The weights.** They must be JSON (a native model file is not accepted yet), and are never unpickled.
 - **What happens on success:**
   - The verified files are copied to `models/<id>/<version>/`.
   - A local `run.json` record is written beside them. It holds the job, the file hashes, the session, the forced `supported_modes`, `registered: false`, and the time.
-  - **Nothing is registered.** The registry's `artifact_hash` must be what the trusted adapter loads (#130), so registration belongs to #130's `lightgbm_native` card and weights path. `RunResult` and `run.json` are its inputs. Never register from the copied `card.json`: it is the VM's bytes (hash-pinned by the manifest), so it may still list DEMO, while the forced SHADOW-only value lives in `RunResult` and `run.json`.
+  - **Nothing is registered.** The registry's `artifact_hash` must be what the trusted adapter loads (#130), so registration belongs to #130's `lightgbm_native` card and weights path. `RunResult` and `run.json` are its inputs (tracked in #159). The copied `card.json` is the VM's bytes, hash-pinned by the manifest, and passed the checks above (SHADOW only, no claims).
   - Any failure during the copy removes the directory.
   - `--db` is required. It is read only to refuse a version that is already registered; point smoke runs at a scratch DB.
 - **Recovery after a hard kill** (which cannot be caught): run `colab sessions`, then `colab --config <work>/colab-state.json stop -s <session>`. The runner records its sessions in that state file, not in the default one. A `VmStopFailed` error means the VM may still be billing.

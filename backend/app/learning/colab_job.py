@@ -110,30 +110,46 @@ class JobSpec(ContractModel):
         return self
 
 
-def _dotenv_value(raw: str) -> str:
-    """One value as dotenv reads it: a quoted value ends at its closing quote (`\\` escapes
-    inside double quotes); a bare value ends at a ` #` comment."""
+# python-dotenv's escapes: inside double quotes `\\[\\'"abfnrtv]`, inside single `\\[\\']`;
+# a backslash before any other character is kept.
+_DOUBLE_ESCAPES = dict(zip("\\'\"abfnrtv", "\\'\"\a\b\f\n\r\t\v", strict=True))
+_SINGLE_ESCAPES = {"\\": "\\", "'": "'"}
+
+
+def _dotenv_forms(raw: str) -> list[str]:
+    """The forms of one `.env` value a program might hold: the value as python-dotenv
+    decodes it and, when it differs, the raw text inside the quotes (what a loader that
+    does not decode sees). A bare value ends at a ` #` comment."""
     value = raw.strip()
     if value[:1] not in ("'", '"'):
-        return re.split(r"\s#", value, maxsplit=1)[0].rstrip()
-    quote, out, i = value[0], [], 1
+        return [re.split(r"\s#", value, maxsplit=1)[0].rstrip()]
+    quote = value[0]
+    escapes = _DOUBLE_ESCAPES if quote == '"' else _SINGLE_ESCAPES
+    out, i = [], 1
     while i < len(value) and value[i] != quote:
-        if quote == '"' and value[i] == "\\" and i + 1 < len(value):
+        if value[i] == "\\" and value[i + 1 : i + 2] in escapes:
+            out.append(escapes[value[i + 1]])
+            i += 2
+        else:
+            out.append(value[i])
             i += 1
-        out.append(value[i])
-        i += 1
-    return "".join(out)
+    decoded, inner = "".join(out), value[1:i]
+    return [decoded] if decoded == inner else [decoded, inner]
 
 
 def _dotenv_values(path: Path) -> dict[str, str]:
-    """`KEY=VALUE` lines of a `.env` file (optional `export `, quotes, inline comments)."""
+    """`KEY=VALUE` lines of a `.env` file (optional `export `, quotes, inline comments). A
+    raw form that differs from the decoded one is kept as `KEY (raw)`."""
     values: dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.removeprefix("export ").split("=", 1)
-        values[key.strip()] = _dotenv_value(value)
+        forms = _dotenv_forms(value)
+        values[key.strip()] = forms[0]
+        if len(forms) > 1:
+            values[f"{key.strip()} (raw)"] = forms[1]
     return values
 
 
@@ -284,7 +300,7 @@ def git_archive(repo: Path, code_sha: str) -> bytes:
 
 def _export_source(job: JobSpec, exports: Path) -> Path:
     root = exports.resolve()
-    source = Path(job.dataset_path).resolve()
+    source = (root / job.dataset_path).resolve()  # a relative path is relative to `exports`
     if not source.is_relative_to(root):
         raise BundleRefused(f"dataset_path must be inside the export directory {exports}")
     rel = source.relative_to(root).as_posix()
@@ -310,7 +326,7 @@ def build_bundle(
         (out / CODE).write_bytes(code)
         bundled = job.model_copy(update={"dataset_path": DATASET, "code_hash": sha256_ref(code)})
         (out / JOB).write_text(bundled.model_dump_json(indent=2), encoding="utf-8")
-        scan_files(out, known_secrets=known_secrets)
+        scan_bundle(out, known_secrets=known_secrets)
     except BaseException:
         shutil.rmtree(out, ignore_errors=True)
         raise

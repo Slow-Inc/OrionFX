@@ -56,6 +56,8 @@ from pathlib import Path
 from types import FrameType
 from typing import Any, Protocol
 
+from pydantic import ValidationError
+
 from app.core.contracts import sha256_ref
 from app.core.enums import Mode
 from app.core.secrets import SECRET_KEY
@@ -260,8 +262,9 @@ def verify_return(out_tar: Path, job: JobSpec, staging: Path) -> ModelCard:
     if card.artifact_hash != listed[vm.WEIGHTS]:
         raise ReturnRefused("the card's artifact_hash is not the returned weights' hash")
     # The VM is untrusted: it may not claim what only local, trusted code can establish.
-    if Mode.LIVE in card.supported_modes:
-        raise ReturnRefused("the card claims LIVE; a returned model is SHADOW only")
+    extra_modes = sorted(set(card.supported_modes) - {Mode.SHADOW})
+    if extra_modes:  # an omitted field defaults to SHADOW+DEMO, so it is refused too
+        raise ReturnRefused(f"the card claims {extra_modes}; a returned model is SHADOW only")
     if card.calibrated:
         raise ReturnRefused("the card claims calibrated; calibration is established locally")
     if card.evidence_refs:
@@ -445,7 +448,11 @@ def main(argv: list[str] | None = None) -> int:
     known = known_secret_values(dotenv=args.repo / ".env")
 
     if args.cmd == "bundle":
-        job = JobSpec.model_validate_json(args.spec.read_bytes())
+        try:
+            job = JobSpec.model_validate_json(args.spec.read_bytes())
+        except ValidationError as exc:
+            print(f"REFUSED: {args.spec} is not a valid job spec: {exc}", file=sys.stderr)
+            return 2
         try:
             print(build_bundle(job, repo=args.repo, out=args.out, exports=args.exports,
                                known_secrets=known))  # fmt: skip

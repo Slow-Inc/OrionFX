@@ -352,7 +352,10 @@ def test_known_secret_values_come_from_secret_named_variables_and_every_dotenv_v
         "MT5_SERVER": "Demo-Server",
         "QUOTED": "q-value",
     }
-    assert known_secret_values({}, dotenv=_dotenv(tmp_path, 'A="x\\"y z"\n')) == {"A": 'x"y z'}
+    assert known_secret_values({}, dotenv=_dotenv(tmp_path, 'A="x\\"y z"\n')) == {
+        "A": 'x"y z',
+        "A (raw)": 'x\\"y z',
+    }
     assert known_secret_values(env, dotenv=tmp_path / "missing.env") == {
         "MT5_PASSWORD": "pw-1",
         "TELEGRAM_BOT_TOKEN": "tok-123456789",
@@ -381,6 +384,73 @@ def test_the_dotenv_parser_strips_comments_and_quotes_like_dotenv(
     tmp_path: Path, line: str, value: str
 ) -> None:
     assert known_secret_values({}, dotenv=_dotenv(tmp_path, line + "\n")) == {"MT5_PASSWORD": value}
+
+
+def test_the_dotenv_parser_decodes_escapes_like_python_dotenv_and_keeps_the_raw_form(
+    tmp_path: Path,
+) -> None:
+    text = 'A="l1\\nl2\\t\\\\x\\"y"\nB=\'raw\\n\'\n'
+    assert known_secret_values({}, dotenv=_dotenv(tmp_path, text)) == {
+        "A": 'l1\nl2\t\\x"y',
+        "A (raw)": 'l1\\nl2\\t\\\\x\\"y',  # a loader that does not decode sees this
+        "B": "raw\\n",  # `\n` is not an escape inside single quotes
+    }
+
+
+@pytest.mark.parametrize(
+    ("line", "forms"),
+    [
+        ('MT5_PASSWORD="Pa55\\word!"', {"MT5_PASSWORD": "Pa55\\word!"}),  # unknown escape kept
+        (
+            "MT5_PASSWORD='ab\\'cdefg'",
+            {"MT5_PASSWORD": "ab'cdefg", "MT5_PASSWORD (raw)": "ab\\'cdefg"},
+        ),
+    ],
+    ids=["unknown-escape-kept", "escaped-single-quote"],
+)
+def test_a_backslash_in_a_quoted_dotenv_secret_does_not_hide_it(
+    tmp_path: Path, line: str, forms: dict[str, str]
+) -> None:
+    known = known_secret_values({}, dotenv=_dotenv(tmp_path, line + "\n"))
+    assert known == forms
+    for value in forms.values():
+        data = json.dumps({"x": value}) + "\n"
+        with pytest.raises(BundleRefused, match="MT5_PASSWORD"):
+            _build(tmp_path, _job(_dataset(tmp_path, data)), known_secrets=known)
+
+
+def test_the_bundle_command_exits_2_on_a_malformed_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    monkeypatch.setattr(colab_runner, "known_secret_values", lambda **kw: {})
+    spec = tmp_path / "spec.json"
+    spec.write_text('{"job_id": "Bad Id"}', encoding="utf-8")
+    assert colab_runner.main(["bundle", str(spec), str(tmp_path / "b")]) == 2
+    assert "REFUSED" in capsys.readouterr().err
+
+
+def test_a_relative_dataset_path_resolves_against_the_export_directory(tmp_path: Path) -> None:
+    _dataset(tmp_path)
+    job = _job(_exports(tmp_path) / "export.jsonl").model_copy(
+        update={"dataset_path": "export.jsonl"}
+    )
+    assert scan_bundle(_build(tmp_path, job)).dataset_path == DATASET
+
+
+def test_a_code_archive_that_is_not_a_plain_tar_is_refused(tmp_path: Path) -> None:
+    bundle = _build(tmp_path, _job(_dataset(tmp_path)))
+    (bundle / CODE).write_bytes(gzip.compress((bundle / CODE).read_bytes()))
+    with pytest.raises(BundleRefused, match="not a plain tar"):
+        scan_bundle(bundle)
+
+
+def test_a_bundled_job_naming_another_dataset_path_is_refused(tmp_path: Path) -> None:
+    bundle = _build(tmp_path, _job(_dataset(tmp_path)))
+    data = json.loads((bundle / JOB).read_text(encoding="utf-8"))
+    data["dataset_path"] = "../elsewhere.jsonl"
+    (bundle / JOB).write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(BundleRefused, match="dataset_path must be"):
+        scan_bundle(bundle)
 
 
 def test_a_dotenv_secret_with_an_inline_comment_is_still_found_in_the_bundle(

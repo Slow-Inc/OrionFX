@@ -119,6 +119,8 @@ def test_happy_path_keeps_the_verified_files_and_a_run_record_but_registers_noth
     assert record["job"]["code_hash"] == json.loads(job_path.read_text())["code_hash"]
     assert record["session"] == result.session
     assert result.card.supported_modes == [Mode.SHADOW]
+    on_disk = json.loads((target / vm.CARD).read_text(encoding="utf-8"))
+    assert on_disk["supported_modes"] == ["SHADOW"]  # the kept card.json claims SHADOW only
     assert (result.run_dir / "run.log").read_bytes() == b"fake driver log\n"
 
 
@@ -411,6 +413,14 @@ def _rehash_card(out: Path, **changes: Any) -> None:
     (out / vm.MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def _drop_card_field(out: Path, field: str) -> None:
+    """Remove a card field (its model default then applies) and fix up the manifest."""
+    card = json.loads((out / vm.CARD).read_text(encoding="utf-8"))
+    del card[field]
+    (out / vm.CARD).write_text(json.dumps(card), encoding="utf-8")
+    _rehash_card(out)
+
+
 def _manifest_files(out: Path, **extra: str) -> None:
     manifest = json.loads((out / vm.MANIFEST).read_text(encoding="utf-8"))
     manifest["files"].update(extra)
@@ -442,6 +452,8 @@ TAMPERS = {
         "artifact_hash",
     ),
     "card-claims-live": (lambda out: _rehash_card(out, supported_modes=["SHADOW", "LIVE"]), "LIVE"),
+    "card-claims-demo": (lambda out: _rehash_card(out, supported_modes=["SHADOW", "DEMO"]), "DEMO"),
+    "card-omits-modes": (lambda out: _drop_card_field(out, "supported_modes"), "DEMO"),
     "card-claims-calibrated": (
         lambda out: _rehash_card(out, calibrated=True, evidence_refs=["x"]),
         "calibrated",
