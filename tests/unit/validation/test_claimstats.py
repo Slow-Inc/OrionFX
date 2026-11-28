@@ -372,6 +372,11 @@ def test_best_of_n_below_the_floor_is_unconfirmed_and_n_cannot_be_understated() 
         lambda: simulated_power(lambda rng: rng.random(), lambda x: x > 0.5, sims=0, seed=1),
         lambda: pbo_cscv([[1.0, 2.0], [1.0]] * 4, splits=2),  # not rectangular
         lambda: pbo_cscv([[1.0, 2.0]] * 8, splits=0),
+        lambda: mean_ci([1.0, 2.0], block=1, resamples=0, seed=1),
+        lambda: best_of_n({}, baseline=0.0, n_trials=0, noise_floor=0.0),
+        lambda: ece_noise_floor([], n_eff=100, bins=10, seed=1),
+        lambda: ece_noise_floor([0.5, 1.5], n_eff=100, bins=10, seed=1),
+        lambda: ece_noise_floor([0.5], n_eff=10, bins=10, seed=1),  # fewer than 2 per bin
     ],
 )
 def test_guards_refuse_bad_parameters(call: Callable[[], object]) -> None:

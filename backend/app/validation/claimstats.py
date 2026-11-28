@@ -423,8 +423,8 @@ def ece_noise_floor_consistency(
 ) -> ConsistencyFloor:
     """The distribution of class-wise `ece_sweep` when the model is calibrated by
     construction: at the same rows, each label is redrawn from that row's own
-    probabilities (consistency resampling; Bröcker & Smith 2007). Cost grows as
-    n_resamples x rows."""
+    probabilities (consistency resampling; Bröcker & Smith 2007). Cost is n_resamples
+    full `ece_sweep` calls, each a sort plus a bin-count sweep per class: offline only."""
     if n_resamples < 1:
         raise ValueError("n_resamples must be positive")
     k = _class_rows(probabilities, [0] * len(probabilities))
@@ -463,6 +463,8 @@ def ece_noise_floor(
 ) -> NoiseFloor:
     """The ECE a perfectly calibrated model shows at `n_eff` samples: forecasts drawn
     from `probabilities`, outcomes drawn from the forecasts themselves."""
+    if not probabilities or any(not 0 <= p <= 1 for p in probabilities):
+        raise ValueError("need at least one probability, each in [0, 1]")
     rng = random.Random(seed)
     values = []
     for _ in range(sims):
@@ -551,8 +553,9 @@ def best_of_n(
     scores: Mapping[str, float], *, baseline: float, n_trials: int, noise_floor: float
 ) -> BestOfN:
     """The best config (higher is better) against a baseline rerun on the same folds and
-    seeds, reported with N. `n_trials` is the run log's counter and may exceed the
-    scores shown (failed configs count), never fall below them."""
+    seeds, reported with N. The caller must pass the run log's counter,
+    `RunLog.counted_configs(protocol_hash)`: this function cannot see the log, so it
+    checks only that N does not fall below the scores shown (failed configs count too)."""
     if not scores:
         raise ValueError("no scores")
     if n_trials < len(scores):

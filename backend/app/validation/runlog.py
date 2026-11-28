@@ -24,10 +24,16 @@ single-use holdout, and errata (#132; PRD #120; training-loop.md §6 rules 1, 4,
   protocol whose holdout or unread slice overlaps a holdout already opened under any
   version is refused at `register`, and a holdout that overlaps one another version
   opened cannot be opened. It may still serve a later version as debug data.
+  - Nor may a new version's unread slice overlap another version's holdout (that
+    version may open it at any time), or its holdout another version's unread slice.
+- **Stored protocols are verified by their stored bytes**: the sha256 of the body as
+  written must equal its hash, so a change in how pydantic serializes cannot make a
+  registered version unreadable.
 - **Retention:** nothing is updated or deleted (database triggers). Errata mark a run
   with a state, a reason and a time. They never refund budget: N counts what was tried.
 """
 
+import hashlib
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -42,9 +48,9 @@ from app.storage.audit import audit
 from app.storage.db import transaction
 from app.validation.protocol import (
     Protocol,
+    ProtocolHashMismatch,
     ProtocolWindow,
     canonical_json,
-    load_protocol,
     protocol_hash,
 )
 
@@ -149,6 +155,15 @@ class HoldoutOpening:
     opened_at: datetime
 
 
+def _stored(digest: str, body: str) -> Protocol:
+    """A stored protocol: its bytes as written must hash to `digest`. A row that fails
+    refuses loudly rather than being skipped (refusal when uncertain)."""
+    actual = hashlib.sha256(body.encode()).hexdigest()
+    if actual != digest:
+        raise ProtocolHashMismatch(f"stored protocol hashes to {actual}, expected {digest}")
+    return Protocol.model_validate_json(body)
+
+
 class RunLog:
     def __init__(self, conn: sqlite3.Connection, *, clock: Clock = utc_now) -> None:
         self._conn = conn
@@ -174,6 +189,16 @@ class RunLog:
                         f"{protocol.version} reuses the holdout {version} opened: it is"
                         " development data now, so the claim needs fresh forward data"
                     )
+            for other in self._registered():
+                crossed = [
+                    (protocol.unread_slice, other.holdout),
+                    (protocol.holdout, other.unread_slice),
+                ]
+                if any(a and b and a.overlaps(b) for a, b in crossed):
+                    raise HoldoutConsumed(
+                        f"{protocol.version}'s unread slice and holdout must not cross"
+                        f" those of {other.version}"
+                    )
             self._conn.execute(
                 "INSERT INTO claim_protocols (protocol_hash, version, body, registered_at)"
                 " VALUES (?, ?, ?, ?)",
@@ -188,11 +213,15 @@ class RunLog:
         return digest
 
     def protocol(self, digest: str) -> Protocol | None:
-        """The registered protocol, re-verified against its hash."""
+        """The registered protocol, verified by the sha256 of its stored bytes."""
         row = self._conn.execute(
             "SELECT body FROM claim_protocols WHERE protocol_hash = ?", (digest,)
         ).fetchone()
-        return None if row is None else load_protocol(row[0], digest)
+        return None if row is None else _stored(digest, row[0])
+
+    def _registered(self) -> list[Protocol]:
+        rows = self._conn.execute("SELECT protocol_hash, body FROM claim_protocols").fetchall()
+        return [_stored(digest, body) for digest, body in rows]
 
     def _require(self, digest: str) -> Protocol:
         protocol = self.protocol(digest)
@@ -335,7 +364,7 @@ class RunLog:
             "SELECT p.protocol_hash, p.body FROM claim_holdout_openings o"
             " JOIN claim_protocols p USING (protocol_hash)"
         ).fetchall()
-        opened = [load_protocol(body, digest) for digest, body in rows]
+        opened = [_stored(digest, body) for digest, body in rows]
         return [(p.version, p.holdout) for p in opened]
 
     def holdout_consumed(self, digest: str) -> bool:

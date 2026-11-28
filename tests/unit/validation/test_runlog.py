@@ -1,6 +1,7 @@
 """The claim run log (#132; training-loop.md §6): append-only runs under a registered
 protocol hash, a budget counter of distinct configs, a single-use holdout, and errata."""
 
+import hashlib
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -277,6 +278,27 @@ def test_an_opened_holdout_may_become_a_later_debug_window(log: RunLog, ph: str)
     )
     assert log.register(later) == protocol_hash(later)
     assert log.register(make_protocol(budget=3)) == ph  # re-registering v1 stays idempotent
+
+
+def test_an_unread_slice_cannot_sit_on_another_versions_holdout(log: RunLog, ph: str) -> None:
+    """The fixture v1 holds the holdout [2005, 2006): a later version may not declare it
+    unread, since v1 can open it at any time; nor may a holdout cover v1's unread slice."""
+    with pytest.raises(HoldoutConsumed):
+        log.register(
+            make_protocol(
+                version="v2", unread_slice=_window(2005, 2006), holdout=_window(2007, 2008)
+            )
+        )
+    with pytest.raises(HoldoutConsumed):  # v1's unread slice is [2004-01, 2004-06)
+        log.register(make_protocol(version="v3", unread_slice=None, holdout=_window(2004, 2005)))
+
+
+def test_a_stored_protocol_is_verified_by_its_stored_bytes(
+    log: RunLog, ph: str, conn: sqlite3.Connection
+) -> None:
+    (body,) = conn.execute("SELECT body FROM claim_protocols").fetchone()
+    assert hashlib.sha256(body.encode()).hexdigest() == ph
+    assert log.protocol(ph) == make_protocol(budget=3)
 
 
 def test_two_versions_registered_on_one_window_open_it_once(log: RunLog, ph: str) -> None:
