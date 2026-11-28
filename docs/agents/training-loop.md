@@ -170,7 +170,7 @@ The synthetic scenarios (`validation/scenarios.py`) are behaviour tests. They ne
 
 ## 6. The claim protocol (anti-overfitting)
 
-A **protocol version** is a hashed record saved before the first run of a claim [planned #132]. It holds:
+A **protocol version** is a hashed record saved before the first run of a claim [built #132 machinery: `validation/protocol.py`, a full sha256 of canonical JSON; the certified values themselves live in the protocol document, not in code]. It holds:
 - the targets [PROPOSED; certified by the owner];
 - the configuration space and the iteration budget (20);
 - the regime rule;
@@ -190,6 +190,28 @@ Rules, adopted from mip-research (PRD #120):
 8. **Keep errata.** Evidence can be marked withdrawn, corrected, unconfirmed or superseded.
 9. **Say who verified.** Every report states what was verified and by whom.
 10. **Stop rule.** If the budget runs out before the targets are met, stop and report. Never lower the targets.
+
+**What the #132 machinery builds** (built #132 machinery, not yet wired into a trainer or the system backtest):
+
+| Rule | Mechanism | Status |
+|---|---|---|
+| Protocol record | `protocol.Protocol`, `protocol_hash`, `load_protocol(text, expected_hash)` refuses a document whose content does not hash to the expected value. | [built #132] |
+| 1, 10 | `runlog.RunLog` (migration `0016_claim_protocol`). A run counts only under a registered protocol hash. N is the number of distinct config hashes with an `ok` or `failed` run. A new counted config past the budget is refused. `aa` and `bugfix-rerun` (with a bug note and fix SHA) are logged but never counted, and only for a config already counted. A config has one current result: a `bugfix-rerun` replaces it only when that result failed or is marked INVALID or CORRECTED, and never after the holdout is consumed, so reruns cannot be shopped for the best one. `open_holdout` records the single opening, for a counted config whose current result (its latest `ok` or `bugfix-rerun` run) carries no erratum; after it, no new config counts. Windows stay honest across versions: `register` refuses a new version whose holdout or unread slice overlaps a window another version has read (its debug window, or its holdout once opened), whose debug window overlaps a window another version seals (its unread slice, or its holdout while unopened), or whose unread slice and holdout cross another version's holdout and unread slice; `open_holdout` refuses a holdout another version already opened. An `aa` run must use a seed set its config has not run. | [built #132] |
+| 2 | `claimstats.mean_ci`, `brier_skill_ci`: stationary or circular block bootstrap over days, one- or two-sided. | [built #132] |
+| 3 | `claimstats.simulated_power`, `mean_lb_power`, `min_track_record_length`; `ece_sweep` with `ece_noise_floor_consistency` for the ECE gate (`ece_noise_floor`, `expected_binned_ece` for the binned estimator). | [built #132] |
+| 4 | `claimstats.best_of_n` (the caller passes N as `RunLog.counted_configs`; the function checks only that N is not below the configs shown, and the wiring that passes it is planned), `deflated_sharpe`, `pbo_cscv`, `sign_test`, `holm`. | [built #132] |
+| 5 | `claimstats.aa_noise_floor`, `compare_to_floor`. The caller states each metric's direction (`higher_is_better`), for `best_of_n` too, because the gates mix Brier skill with ECE and log loss. | [built #132] |
+| 6 | `recompute.recheck`: a second implementation recomputes `brier_multiclass`, `top_label_accuracy`, `log_loss` and `brier_skill_multiclass` from per-prediction outputs and flags each mismatch. A metric logged under another name (the card's binary `brier`, `direction_accuracy`) is reported as unchecked, never compared. The train/serve skew check is not built. | recompute [built #132]; skew [planned] |
+| 7 | The retention benchmark against the previous version is not built. Runs are never deleted (database triggers). | [planned] |
+| 8 | `RunLog.add_erratum`: INVALID, WITHDRAWN, CORRECTED, UNCONFIRMED or SUPERSEDED, with a reason and a time. The run stays, and its budget is never refunded. | [built #132] |
+
+The ECE estimators are stated in `claimstats`:
+- `ece_sweep` is class-wise ECE_sweep (Roelofs et al. 2022), **L1**: one-vs-rest per class on equal-mass bins, using the largest bin count that keeps the observed frequency monotone, averaged over the classes.
+- `ece_noise_floor_consistency` gives its noise floor by consistency resampling: labels are redrawn from the model's own probabilities, and the result is a set of quantiles (for example q50).
+- `ece_binned` is the plug-in L1 at a fixed bin count.
+- `ece_debiased` is Kumar, Liang & Ma 2019, the debiased **L2** calibration error. It is a secondary diagnostic only, because L2 is not on the L1 scale.
+
+Which estimator a gate uses, and on which sample, is a protocol value.
 
 **Readiness** is judged per subject: `EvidenceStore` qualifies only subjects common to every run [built #126]. `DEFAULT_POLICY` is uncertified, so the verdict is NOT_READY until the owner certifies thresholds.
 
