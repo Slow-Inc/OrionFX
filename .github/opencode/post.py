@@ -352,6 +352,8 @@ def cause_for_post(rc: int) -> str:
 # else is OpenCode being unavailable: degrade to a notice and keep the check green.
 RED_CATEGORIES = {"config", "security"}
 UNKNOWN_CAUSE = "unavailable: an OpenCode step failed without a recorded cause (see the job log)"
+# A permission refusal of the notice itself (bad token, or a missing pull-requests: write).
+NOTICE_REFUSED_RE = re.compile(r"HTTP 401|Resource not accessible by integration")
 
 
 def classify(cause: str) -> tuple[str, str]:
@@ -390,9 +392,19 @@ def notice(cause_path: str, repo: str, pr: str, head_sha: str) -> int:
         "developer จะรันรีวิวสำรองแทน และนี่เป็นคอมเมนต์ธรรมดาโดยตั้งใจ ไม่ใช่ PR review"
     )
     result = gh_api(f"repos/{repo}/issues/{pr}/comments", {"body": body})
-    if result.returncode != 0:
-        print(f"::warning::Could not post the notice: {result.stderr.strip()[:300]}")
     print(f"::warning::{line}")
+    if result.returncode != 0:
+        reason = result.stderr.strip()[:300]
+        if NOTICE_REFUSED_RE.search(result.stderr):
+            # A refused notice is a broken setup (the job token lacks pull-requests: write):
+            # fail red, or the PR would get neither a review nor a notice behind a green check.
+            # Any other failure, a rate-limit 403 included, is an outage and stays green.
+            print(f"::error::OpenCode config error: GitHub refused the notice: {reason}")
+            if summary_path:
+                with open(summary_path, "a", encoding="utf-8") as fh:
+                    fh.write("### OpenCode config error: GitHub refused the unavailable notice\n")
+            return 1
+        print(f"::warning::Could not post the notice: {reason}")
     return 0
 
 

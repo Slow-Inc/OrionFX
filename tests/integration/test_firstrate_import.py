@@ -314,7 +314,7 @@ def test_filled_bars_are_labelled_and_keep_technique_windows_whole(
         MarketRecorder(conn, candles=candles, symbol="XAUUSD", timeframe=Timeframe.M5,
                        context_timeframes=[], horizons=[Horizon(Timeframe.M5, 1)],
                        provenance=Provenance.BACKFILL, clock=lambda: WED + timedelta(days=1),
-                       opening=OPENED).tick()  # fmt: skip  # 2026 is in the sealed holdout
+                       session=None, opening=OPENED).tick()  # fmt: skip  # sealed holdout
         sql = "SELECT COUNT(*) FROM learning_unlabellable WHERE dataset_version = ?"
         unlabellable = conn.execute(sql, (version,)).fetchone()[0]
         bars = [b for b in candles.bars("XAUUSD", Timeframe.M5, as_of=LATER)

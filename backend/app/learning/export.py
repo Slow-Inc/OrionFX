@@ -11,27 +11,39 @@ plan, data sources, SHA-256 of the exact bytes). Each row is point in time:
   same refusal-first rule as `journal_evidence`). Joining at the close, not at when the
   snapshot was taken, keeps news that arrived after the close (e.g. over a weekend) out
   of a row whose label is measured from that close.
-- `labelled`: true only if every horizon has a label (a trainer must not read a missing
-  label as zero).
+- `labelled`: true only if every horizon has a raw `move` label (a trainer must not read
+  a missing label as zero). `barrier_labelled` is the same for `barrier_labels`: a
+  three-class trainer filters on it, never on `labelled`.
+- `barrier_labels`: the bar's triple-barrier label per horizon (#129; `label_version`,
+  UP/DOWN/FLAT, its bid move, the timeframe it was read on and `ends_at`), measured from
+  bars known by `window_end` on the version's session schedule, else null. A row with an
+  AMBIGUOUS (dual-touch) label is left out; the manifest's `label_stats` count them per
+  era (each split, and "all"). The raw `move` labels are unchanged beside them.
 - `data_source`: the feed the bar came from (`SourceRegistry`). A dataset version with
   no registered source is refused (`UnknownSource`, fail-closed). `import_history`
   registers its versions. A version recorded otherwise must be bound with
   `SourceRegistry.register` before it can be exported. That covers versions recorded
   before #128 and the live recorder's versions, which are not registered yet (#17).
-Only one feature schema is exported.
+Only one feature schema is exported. With `transforms`, `features` are the M04 transforms
+of the recorded snapshot (`transform_from_store`, the function the live recorder feeds a
+transform model with), under TRANSFORM_SCHEMA.
+
+Each version is read on its source's session schedule (`SourceRegistry.resolve_schedule`,
+the one the recorder uses); the manifest records each schedule as `session:<id>`.
 
 Folds come from X02 `walk_forward` over [window_start, window_end). The last `holdout` is
 sealed, and each fold trains, waits an embargo, then tests. A row belongs to a window (a
-fold's train or test, or the holdout) only if `start <= as_of`, its longest label ends by
-the window's end (`as_of + longest <= end`: the purge by label end), and its snapshot was
-available by then (`available_at <= end`). Each row is written once, with the folds it
-trains and tests in. Development rows in no fold (embargo gaps, purged edges) are left
-out. The PR #147 review constraints hold:
+fold's train or test, or the holdout) only if `start <= as_of`, its labels end by the
+window's end, and its snapshot was available by then (`available_at <= end`). A label
+ends at `as_of + longest` for the raw moves and at its `ends_at` for a barrier label
+(the close of its last slot, which a scheduled closure pushes later): the purge by label
+end. Each row is written once, with the folds it trains and tests in. Development rows in
+no fold (embargo gaps, purged edges) are left out. The PR #147 review constraints hold:
 - (a) every fold, train and test, is purged by label end, and the embargo must also be
   at least the longest horizon;
-- (b) labels are wall-clock horizons, so `as_of + longest` is the end bar's close. A
-  session-aware horizon that counts bars across a break must purge on that bar's real
-  close time instead;
+- (b) raw labels are wall-clock horizons, so `as_of + longest` is the end bar's close.
+  A session-aware barrier label, which counts bars across a break, is purged on its
+  real end (`ends_at`) instead;
 - (c) no fold trains on or after its test (the manifest refuses such a plan);
 - (d) holdout rows are purged too, and the embargo separates the last test window from
   the holdout.
@@ -53,15 +65,27 @@ import sqlite3
 from collections.abc import Collection, Iterable
 from dataclasses import asdict
 from datetime import datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from app.core.contracts import FeatureSnapshot, NewsAssessment
 from app.core.enums import Timeframe
 from app.core.time import live
 from app.learning.bars import BarLog, BarOutcome, Horizon, Provenance, SnapshotRow
-from app.learning.lifecycle import DatasetManifest, DatasetStore, FoldWindow, Split
-from app.market_data.features import FEATURE_SCHEMA
+from app.learning.labels import LABEL_VERSION, LabelStats, TripleBarrierLabel, label_at
+from app.learning.lifecycle import (
+    RATE_Q,
+    DatasetManifest,
+    DatasetStore,
+    FoldWindow,
+    LabelEraStats,
+    Split,
+)
+from app.market_data.features import ATR_M15, FEATURE_SCHEMA
+from app.market_data.session import SessionSchedule
 from app.market_data.sources import HoldoutToken, SourceRegistry, require_unsealed
+from app.market_data.store import CandleStore
+from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
 from app.storage.journal import Journal, payload_as
 from app.validation.splits import WalkForward, walk_forward
 
@@ -94,11 +118,38 @@ class _News:
         return newest if live(newest.available_at, newest.valid_until, t) else None
 
 
+def _barrier(lab: TripleBarrierLabel | None) -> dict[str, object] | None:
+    if lab is None:
+        return None
+    return {
+        "label_version": lab.label_version,
+        "outcome": lab.outcome.value,
+        "distance": _num(lab.distance),
+        "move": _num(lab.move),
+        "timeframe": lab.timeframe.value,
+        "available_at": lab.available_at.isoformat(),
+        "ends_at": lab.ends_at.isoformat(),
+    }
+
+
+def _era(era: str, labels: list[TripleBarrierLabel | None]) -> LabelEraStats:
+    s = LabelStats.of(labels)
+
+    def q(x: Decimal | None) -> Decimal | None:
+        return None if x is None else x.quantize(RATE_Q)
+
+    return LabelEraStats(era=era, rows=s.rows, missing=s.missing,
+                         dual_touch_count=s.ambiguous, dual_touch_rate=q(s.dual_touch_rate),
+                         flat_share=q(s.flat_share))  # fmt: skip
+
+
 def _row(
     snap: SnapshotRow,
     split: str,
     labels: dict[str, BarOutcome | None],
+    barriers: dict[str, TripleBarrierLabel | None],
     news: NewsAssessment | None,
+    features: FeatureSnapshot,
 ) -> dict[str, object]:
     s = snap.snapshot
     return {
@@ -110,9 +161,9 @@ def _row(
         "provenance": snap.provenance.value,
         "mode": None if snap.mode is None else snap.mode.value,
         "dataset_version": snap.dataset_version,
-        "feature_schema": s.feature_schema,
-        "quality": s.quality.value,
-        "features": {k: _num(v) for k, v in sorted(s.values.items())},
+        "feature_schema": features.feature_schema,
+        "quality": features.quality.value,
+        "features": {k: _num(v) for k, v in sorted(features.values.items())},
         "labelled": all(o is not None for o in labels.values()),
         "labels": {
             k: None
@@ -124,6 +175,8 @@ def _row(
             }
             for k, o in sorted(labels.items())
         },
+        "barrier_labels": {k: _barrier(b) for k, b in sorted(barriers.items())},
+        "barrier_labelled": all(b is not None for b in barriers.values()),
         "news": None
         if news is None
         else {
@@ -154,10 +207,15 @@ def export_dataset(
     out: Path,
     provenance: set[Provenance] | None = None,
     feature_schema: str = FEATURE_SCHEMA,
+    transforms: bool = False,
+    session: SessionSchedule | None,
     opening: HoldoutToken | None = None,
 ) -> DatasetManifest:
-    """Write the dataset to `out`, register its manifest, and return it. A real source's
-    window must end by its seal (`require_unsealed`) unless the holdout was opened."""
+    """Write the dataset to `out`, register its manifest, and return it. `session` (no
+    default, so a caller always states it): the schedule the caller expects the barrier
+    labels and transforms to be read on. Each version is read on its registered source's
+    schedule (as the recorder is); a different `session` is refused, and None accepts the
+    source's."""
     hs = sorted(horizons, key=horizon_key)
     longest = max(h.length for h in hs)
     if embargo < longest:
@@ -168,6 +226,8 @@ def export_dataset(
     sources = {v: registry.require(v)[0] for v in sorted(dataset_versions)}
     for source in sorted(set(sources.values())):
         require_unsealed(source, window_end, start=window_start, opening=opening)
+    schedules = {v: registry.resolve_schedule(v, session) for v in sources}
+    stores = {v: CandleStore(conn, dataset_version=v) for v in sources}
     plan = walk_forward(window_start, window_end, train=train, test=test, embargo=embargo,
                         holdout=holdout)  # fmt: skip
     log = BarLog(conn)
@@ -178,21 +238,34 @@ def export_dataset(
     }  # fmt: skip
     news = _News(conn, before=window_end)
     lines: list[str] = []
+    kept: dict[str, list[TripleBarrierLabel | None]] = {"development": [], "holdout": []}
     for snap in log.snapshots(symbol, timeframe, start=window_start, end=window_end):
         s = snap.snapshot
         if snap.dataset_version not in sources or s.feature_schema != feature_schema:
             continue
         if provenance is not None and snap.provenance not in provenance:
             continue
-        member = _membership(s, plan, longest)
+        atr = s.values.get(ATR_M15)
+        barriers = {horizon_key(h): label_at(stores[snap.dataset_version], symbol, s.as_of,
+                                             atr, h, now=window_end,
+                                             session=schedules[snap.dataset_version])
+                    for h in hs}  # fmt: skip
+        ends = [b.ends_at for b in barriers.values() if b is not None]
+        member = _membership(s, plan, longest, ends)
         if member is None:
             continue  # purged, in an embargo gap, or outside every window
         split, folds = member
+        kept[split].extend(barriers.values())
+        if any(b is not None and not b.labelled for b in barriers.values()):
+            continue  # a dual touch: no class label
         labels = {}
         for key, by_bar in outcomes.items():
             o = by_bar.get((s.as_of, snap.dataset_version))
             labels[key] = o if o is not None and o.available_at <= window_end else None
-        row = _row(snap, split, labels, news.at(s.as_of))
+        features = (transform_from_store(stores[snap.dataset_version], s,
+                                         session=schedules[snap.dataset_version])
+                    if transforms else s)  # fmt: skip
+        row = _row(snap, split, labels, barriers, news.at(s.as_of), features)
         row["folds"] = folds
         row["data_source"] = sources[snap.dataset_version]
         lines.append(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
@@ -203,6 +276,10 @@ def export_dataset(
         source_refs=[*(f"learning_snapshots:{symbol}:{timeframe.value}:{v}:{feature_schema}:{tag}"
                        for v in sources),
                      *(f"learning_outcomes:{horizon_key(h)}" for h in hs),
+                     f"labels:{LABEL_VERSION}",
+                     *(f"session:{sid}" for sid in sorted({_schedule_id(x)
+                                                          for x in schedules.values()})),
+                     *([f"transforms:{TRANSFORM_SCHEMA}"] if transforms else []),
                      "journal:news.assessment"],
         window_start=window_start, window_end=window_end,
         splits=[Split(name="development", start=window_start, end=plan.holdout.start),
@@ -210,6 +287,8 @@ def export_dataset(
         folds=[FoldWindow(**asdict(f)) for f in plan.folds],
         embargo=embargo, data_sources=sources,
         content_hash=f"sha256:{hashlib.sha256(data).hexdigest()}",
+        label_stats=[_era("all", [lab for labs in kept.values() for lab in labs]),
+                     *(_era(name, labs) for name, labs in kept.items())],
     )  # fmt: skip
     DatasetStore(conn).save(manifest)  # validated and registered before any write
     tmp = out.with_name(out.name + ".tmp")
@@ -218,14 +297,19 @@ def export_dataset(
     return manifest
 
 
+def _schedule_id(schedule: SessionSchedule | None) -> str:
+    return "24x7" if schedule is None else schedule.schedule_id
+
+
 def _membership(
-    s: FeatureSnapshot, plan: WalkForward, longest: timedelta
+    s: FeatureSnapshot, plan: WalkForward, longest: timedelta, ends: Collection[datetime]
 ) -> tuple[str, dict[str, list[int]]] | None:
     """The row's split and the folds it trains and tests in (none for a holdout row), or
     None if it belongs to no window. A row is inside [start, end) only if its longest label ends and
     its snapshot was available by `end`: the purge by label end, per window."""
 
-    need = max(s.as_of + longest, s.available_at)  # what must be known by a window's end
+    # what must be known by a window's end: every label's end and the snapshot
+    need = max(s.as_of + longest, s.available_at, *ends)
 
     def inside(start: datetime, end: datetime) -> bool:
         return start <= s.as_of and need <= end

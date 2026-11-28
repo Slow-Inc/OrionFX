@@ -26,13 +26,26 @@ inputs:
   model:
     description: The one place the OpenCode Go model is set for every workflow.
     default: opencode-go/deepseek-v4.1-flash
+  idle-minutes:
+    description: >-
+      Liveness budget: stop OpenCode only after it wrote nothing (no event on
+      stdout, no byte on stderr) for this long. A model turn emits nothing
+      until it finishes, so this must exceed the longest healthy turn.
+    default: '4'
+  hard-minutes:
+    description: >-
+      Hard cap for the whole OpenCode run (all attempts, the retry included),
+      however chatty it is. Install, sign-in and posting come on top, so the
+      caller's job timeout must exceed it plus setup. Empty means
+      timeout-minutes, then 20.
+    default: ''
   timeout-minutes:
-    description: Hard cap on each OpenCode attempt.
-    default: '10'
+    description: Deprecated alias of hard-minutes, for workflow files that predate it.
+    default: ''
   retries:
     description: >-
-      Extra attempts when the model ends cleanly with no answer text (0 or 1).
-      The caller's job timeout must cover (retries + 1) x timeout-minutes.
+      Extra attempts when the model ends cleanly with no answer text (0 or 1),
+      inside the same hard cap. Never after a stall, the hard cap or a breach.
     default: '0'
 runs:
   using: composite
@@ -60,7 +73,10 @@ runs:
         MODEL: ${{ inputs.model }}
         PROMPT_FILE: ${{ inputs.prompt-file }}
         OUTPUT_FILE: ${{ inputs.output-file }}
-        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        IDLE_MINUTES: ${{ inputs.idle-minutes }}
+        HARD_MINUTES: ${{ inputs.hard-minutes || inputs.timeout-minutes || '20' }}
+        HARD_INPUT: ${{ inputs.hard-minutes }}
+        TIMEOUT_ALIAS: ${{ inputs.timeout-minutes }}
         RETRIES: ${{ inputs.retries }}
         OPENCODE_CONFIG_CONTENT: >-
           {"permission": {"*": "deny", "read": "allow", "glob": "allow",
@@ -100,19 +116,38 @@ runs:
           || cause "security: OIDC or runtime tokens would reach OpenCode"
         events="$RUNNER_TEMP/opencode-events.jsonl"
         # Up to RETRIES extra attempts, only when the model ended cleanly without
-        # any answer text (seen on e5d1606). Never after a breach or a timeout.
+        # any answer text (seen on e5d1606). Never after a breach, a stall or the cap.
+        stats="$RUNNER_TEMP/opencode-watchdog.json"
         [[ "$RETRIES" =~ ^[01]$ ]] || cause "config: retries must be 0 or 1"
+        [[ "$IDLE_MINUTES" =~ ^[1-9][0-9]?$ ]] || cause "config: idle-minutes must be 1-99"
+        [[ "$HARD_MINUTES" =~ ^[1-9][0-9]?$ ]] || cause "config: hard-minutes must be 1-99"
+        if [ -z "${HARD_INPUT:-}" ] && [ -n "${TIMEOUT_ALIAS:-}" ]; then
+          echo "::warning::timeout-minutes is deprecated: use hard-minutes. It now caps all attempts together, not each one."
+        fi
+        echo "OpenCode budgets: idle ${IDLE_MINUTES} min, hard cap ${HARD_MINUTES} min for all attempts."
+        # No fixed per-attempt timeout. watchdog.py (tested) stops OpenCode only when
+        # it writes nothing for IDLE_MINUTES or the run's HARD_MINUTES run out, and
+        # logs a heartbeat every minute. It runs inside the scrubbed env as well.
+        deadline=$((SECONDS + HARD_MINUTES * 60))
         for attempt in $(seq 0 "$RETRIES"); do
+          remaining=$((deadline - SECONDS))
+          if [ "$attempt" -gt 0 ] && [ "$remaining" -lt 60 ]; then
+            echo "::warning::No time left in the hard cap for a retry."
+            break
+          fi
           status=0
-          timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
+          rm -f "$stats"  # extract.py must never read a previous attempt's stats
+          "${scrub[@]}" python3 -I "$GITHUB_ACTION_PATH/watchdog.py" \
+            --events "$events" --stats "$stats" \
+            --idle-seconds "$((IDLE_MINUTES * 60))" --hard-seconds "$remaining" -- \
             "${scrub[@]}" opencode run --model "$MODEL" --format json "$(cat "$PROMPT_FILE")" \
-            < /dev/null > "$events" || status=$?
+            || status=$?
           # extract.py owns the outcome (tested): 0 = answer written, 75 = no
           # answer after a clean exit (retry once), else a cause was recorded with
-          # the precedence breach > timeout > model error > no answer > status.
+          # the precedence breach > stall > hard cap > model error > no answer > status.
           extract=0
           env -u OPENCODE_API_KEY python3 -I "$GITHUB_ACTION_PATH/extract.py" \
-            "$events" "$OUTPUT_FILE" "$status" || extract=$?
+            "$events" "$OUTPUT_FILE" "$status" "$stats" || extract=$?
           if [ "$extract" -eq 75 ] && [ "$attempt" -lt "$RETRIES" ]; then
             echo "::warning::OpenCode gave no final answer; retrying once."
             continue

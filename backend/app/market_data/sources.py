@@ -193,6 +193,20 @@ class SourceRegistry:
             raise SourceConflict(f"dataset {dataset_version!r} was validated against {row[1]}")
         return schedule
 
+    def resolve_schedule(
+        self, dataset_version: str, given: SessionSchedule | None
+    ) -> SessionSchedule | None:
+        """The schedule to read a version's bars on: its source's when it is bound (a
+        different one given is refused), else `given` (None means 24/7). The recorder and
+        the export both resolve it here, so they read a version on one schedule."""
+        try:
+            schedule = self.schedule_of(dataset_version)
+        except UnknownSource:
+            return given
+        if given is not None and given != schedule:
+            raise ValueError(f"{dataset_version} is validated against {schedule.schedule_id}")
+        return schedule
+
     def _row(self, dataset_version: str) -> tuple[str, str] | None:
         row = self._conn.execute(
             "SELECT data_source, schedule_id FROM candle_sources WHERE dataset_version = ?",

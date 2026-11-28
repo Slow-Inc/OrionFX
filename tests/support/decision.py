@@ -6,7 +6,9 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from app.core.bet import LABEL_VERSION
 from app.core.contracts import (
+    ClassProbabilities,
     Confidence,
     FeatureSnapshot,
     LlmReasoning,
@@ -17,7 +19,7 @@ from app.core.contracts import (
 from app.core.enums import DataQuality, Direction, ForecastLineage, IntentAction, Mode, Timeframe
 from app.decision.context import DecisionContext
 from app.decision.fusion import Costs, CycleView
-from app.decision.strategies import ATR_M15
+from app.market_data.features import ATR_M15
 
 D = Decimal
 T0 = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
@@ -60,14 +62,22 @@ def _forecast(
     calibrated: bool = True,
     valid_until: datetime = LATER,
     lineage: ForecastLineage = ForecastLineage.CHART_ONLY,
+    flat: str = "0",
+    classes: bool = True,
 ) -> PredictionGenerated:
+    """A calibrated forecast carries class probabilities (as `predict` emits them): the
+    forecast direction's barrier p, FLAT `flat`, the rest on the other barrier."""
+    side, opposite = D(p), 1 - D(p) - D(flat)
+    up, down = (side, opposite) if direction is Direction.UP else (opposite, side)
+    cp = (ClassProbabilities(label_version=LABEL_VERSION, up=up, down=down, flat=D(flat))
+          if classes and calibrated and direction is not Direction.NEUTRAL else None)  # fmt: skip
     return PredictionGenerated(
         prediction_id="pred_1", model_id="m", model_version="1", lineage=lineage,
         horizon=Timeframe.H1, horizon_bars=1, direction=direction,
         probability=Confidence(value=D(p), semantics="calibrated P(dir) 1 H1 bar",
                                calibrated=calibrated),
         data_quality=DataQuality.OK, input_refs=["snap"], generated_at=T0,
-        valid_until=valid_until,
+        valid_until=valid_until, class_probabilities=cp,
     )  # fmt: skip
 
 

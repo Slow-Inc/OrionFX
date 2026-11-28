@@ -7,9 +7,10 @@
 # APPROVE or REQUEST_CHANGES) on the head SHA, with inline comments on the exact
 # diff lines. The step posts with an OpenCode GitHub App installation token,
 # so the review shows as the OpenCode app bot. The job's own GITHUB_TOKEN is
-# read-only except `issues: write`, which is used only for the "OpenCode
-# unavailable" notice (posted as github-actions[bot]). Every script that holds a token runs from the PR's BASE revision
-# (_trusted), never from the PR head, because the repo is public.
+# read-only except `pull-requests: write`, which is used only for the "OpenCode
+# unavailable" notice (an issue comment on the PR, posted as github-actions[bot]).
+# Every script that holds a token runs from the PR's BASE revision (_trusted),
+# never from the PR head, because the repo is public.
 #
 # Model auth: Console service account "OrionFX PR Review" (OIDC, pinned to repo
 # ID 1473623856, pull_request runs only, permission Models: Request). No repo
@@ -35,13 +36,17 @@ jobs:
       && !github.event.pull_request.draft
       && github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
-    timeout-minutes: 25  # two OpenCode attempts of at most 10 minutes each, plus setup
-    # issues: write only for the "OpenCode unavailable" notice (an issue comment);
-    # the review itself is posted with the OpenCode App token.
+    timeout-minutes: 30  # the OpenCode step's 20-minute hard cap, plus setup and posting
+    # pull-requests: write only for the "OpenCode unavailable" notice. It is an issue
+    # comment, but on a PR GitHub checks pull-requests, not issues: with issues: write
+    # and pull-requests: read it got HTTP 403 (runs 46131122474, 46131996298). The
+    # review itself is posted with the OpenCode App token; the merge gate counts only
+    # the App bot's reviews, so this token cannot forge one that passes. issues: read
+    # keeps the linked-issue context readable (Gather context).
     permissions:
       contents: read
-      pull-requests: read
-      issues: write
+      pull-requests: write
+      issues: read
       id-token: write
     steps:
       - name: Checkout PR head
@@ -134,7 +139,8 @@ jobs:
           client-id: ${{ vars.OPENCODE_PR_CLIENT_ID }}  # "OrionFX PR Review"; a credential ID, not a secret
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
-          timeout-minutes: '10'
+          idle-minutes: '4'  # stop only after 4 minutes with no event or output
+          hard-minutes: '20'  # for all attempts together, the retry included
           retries: '1'
       - name: Submit COMMENT review as the OpenCode app
         id: post
@@ -158,5 +164,6 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # Never a PR review: a bot review at the head with no threads could pass the gate.
-        # Exits 1 (red) only for config or security causes; otherwise 0 (green).
+        # Exits 1 (red) only for config or security causes, or when GitHub refuses the
+        # notice (401/403), so a PR is never left with neither review nor notice; else 0.
         run: python3 -I _trusted/opencode/post.py notice "$RUNNER_TEMP/opencode-cause" "$GITHUB_REPOSITORY" "$PR" "$HEAD_SHA"

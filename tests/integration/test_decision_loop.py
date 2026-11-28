@@ -9,8 +9,11 @@ from decimal import Decimal
 from tests.integration.conftest import T0
 from tests.support.engine import Clock, _bot_positions, _running
 
+from app.core.bet import LABEL_VERSION
+from app.core.config import ProtectedPolicy
 from app.core.contracts import (
     CandleClosed,
+    ClassProbabilities,
     Confidence,
     DecisionCreated,
     EligibilityRecord,
@@ -79,6 +82,8 @@ def _calibrated(now: datetime) -> Evidence:
                                calibrated=True),
         data_quality=DataQuality.OK, input_refs=[], generated_at=now,
         valid_until=now + timedelta(minutes=15),
+        class_probabilities=ClassProbabilities(label_version=LABEL_VERSION, up=D("0.8"),
+                                               down=D("0.2"), flat=D(0)),
     ))  # fmt: skip
 
 
@@ -151,6 +156,20 @@ def test_a_tick_decides_journals_an_intent_and_m06_executes_it(
     assert _bot_positions(broker) == []  # the loop never trades: only M06 does
     eng.tick()
     assert len(_bot_positions(broker)) == 1
+
+
+def test_a_decision_and_its_experience_carry_the_decision_policy_version(
+    conn: sqlite3.Connection, broker: FakeBroker, clock: Clock
+) -> None:
+    """M05 behaviour is versioned by `ProtectedPolicy.policy_version` (#129): a decision
+    records which EV and label rules produced it. M06's verdicts carry the risk policy."""
+    bars, loop, eng = _setup(conn, broker, clock)
+    _at(broker, eng, bars[100])
+    loop.tick()
+    (dec,) = Journal(conn).recent(["decision.created"], limit=1)
+    assert payload_as(dec, DecisionCreated).policy_version == ProtectedPolicy().policy_version
+    (exp,) = loop.experiences.experiences()
+    assert exp.policy_version == ProtectedPolicy().policy_version
 
 
 def test_every_tick_is_recorded_as_experience_and_a_repeat_is_idempotent(

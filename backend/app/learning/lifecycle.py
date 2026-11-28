@@ -61,6 +61,8 @@ PSI_FLOOR = D("0.0001")
 """Empty-bin proportion floor, so ln() stays finite."""
 OWNER_ACTOR = "owner"
 SPLIT_ORDER = ("train", "validation", "holdout")
+RATE_Q = D("0.000001")
+"""The precision a manifest records label rates at."""
 FOLD_SPLITS = ("development", "holdout")
 
 
@@ -72,6 +74,22 @@ class Split(ContractModel):
     name: str
     start: UtcDatetime
     end: UtcDatetime
+
+
+class LabelEraStats(ContractModel):
+    """How an era's triple-barrier labels came out (#129): one per split and one "all".
+    Counted over every row a split kept before dual touches were dropped, one label per
+    row and horizon."""
+
+    era: str
+    rows: int
+    missing: int
+    """No label: a missing bar, a missing ATR, or not yet known."""
+    dual_touch_count: int
+    dual_touch_rate: Decimal | None
+    """Dual touches over every label whose bars were known (RATE_Q precision)."""
+    flat_share: Decimal | None
+    """FLAT over every class label (RATE_Q precision)."""
 
 
 class FoldWindow(ContractModel):
@@ -91,6 +109,9 @@ class DatasetManifest(ContractModel):
     window_end: UtcDatetime
     splits: list[Split]
     content_hash: Sha256Ref
+    label_stats: list[LabelEraStats] = Field(default_factory=list)
+    """The barrier labels' dual-touch rate and FLAT share per era (#129); empty for a
+    manifest saved before them."""
     folds: list[FoldWindow] = Field(default_factory=list)
     """A walk-forward fold plan (#128). With folds, the splits are `development` (which
     holds every fold) and the sealed `holdout`."""
