@@ -7,7 +7,7 @@ The OpenCode workflows (`.github/workflows/opencode-*.yml`, via `.github/actions
 | `code-review` | Every PR review |
 | `scrutinize` | Every PR review |
 | `simplify` (applies `karpathy-guidelines`) | Every PR review |
-| `security-review` | When the diff touches `.env*`, `backend/app/core/{secrets,config}.py`, `backend/app/api/auth.py`, `.github/`, `.claude/` or `.githooks/` |
+| `security-review` | When the diff touches `.env*`, `backend/app/core/{secrets,config}.py`, `backend/app/api/auth.py`, `.github/`, `.claude/`, `.githooks/` or `.opencode/` |
 | `test-quality` | When the diff changes code |
 | `ui-audit` | When the diff changes `frontend/` |
 | `t4-gates` | Every PR review (last) |

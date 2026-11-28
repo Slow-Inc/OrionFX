@@ -91,7 +91,7 @@ jobs:
           gh pr diff "$PR" --repo "$GITHUB_REPOSITORY" --name-only > "$ctx/files.txt"
           run_skills="code-review, scrutinize, simplify"
           skipped=""
-          if grep -qE '^(\.env|backend/app/core/(secrets|config)\.py|backend/app/api/auth\.py|\.github/|\.claude/|\.githooks/)' "$ctx/files.txt"; then
+          if grep -qE '^(\.env|backend/app/core/(secrets|config)\.py|backend/app/api/auth\.py|\.github/|\.claude/|\.githooks/|\.opencode/)' "$ctx/files.txt"; then
             run_skills="$run_skills, security-review"
           else
             skipped="$skipped; security-review — no security paths touched"

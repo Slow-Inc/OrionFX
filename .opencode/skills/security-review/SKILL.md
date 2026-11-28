@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: OrionFX security review of a PR diff. Run only when the diff touches security paths (secrets/config, API auth, .github/, .claude/, .githooks/). Reports high-confidence, exploitable issues only.
+description: OrionFX security review of a PR diff. Run only when the diff touches security paths (secrets/config, API auth, .github/, .claude/, .githooks/, .opencode/). Reports high-confidence, exploitable issues only.
 ---
 
 # security-review (OrionFX)
@@ -11,6 +11,7 @@ Run this skill only when the diff touches at least one of these paths:
 - `.env*`, `backend/app/core/secrets.py`, `backend/app/core/config.py`
 - `backend/app/api/auth.py`
 - `.github/**`, `.claude/**`, `.githooks/**`
+- `.opencode/**`: the reviewer's own skills. A PR that weakens them can hide its own defects, so check that no skill was loosened to suppress findings.
 
 Otherwise skip it with the reason "no security paths touched".
 
