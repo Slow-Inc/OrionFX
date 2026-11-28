@@ -43,6 +43,7 @@ from app.market_data.features import DEFAULT_TECHNIQUES, FEATURE_SCHEMA, build_f
 from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
 from app.prediction.engine import LoadedPredictor, Refused, predict
+from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
 from app.storage.config_store import ConfigStore
 from app.storage.db import transaction
 from app.storage.journal import Journal
@@ -140,12 +141,20 @@ class MarketRecorder:
 
     def _predict(self, snapshot: FeatureSnapshot, provenance: Provenance, version: str) -> None:
         """Each model in its own savepoint: one failing model never stops the snapshot or
-        the other models from being recorded."""
+        the other models from being recorded. A model that reads the M04 transforms gets
+        them from `transform_from_store`, the function the dataset export uses (#129)."""
+        transformed: FeatureSnapshot | None = None
         for loaded in self._predictors:
             try:
                 with transaction(self._conn):
-                    p = predict(loaded, snapshot, now=snapshot.available_at)
-                    self._log.record_prediction(p, snapshot, provenance=provenance,
+                    inputs = snapshot
+                    if loaded.card.feature_schema == TRANSFORM_SCHEMA:
+                        if transformed is None:
+                            transformed = transform_from_store(self._candles, snapshot,
+                                                               session=self._session)  # fmt: skip
+                        inputs = transformed
+                    p = predict(loaded, inputs, now=snapshot.available_at)
+                    self._log.record_prediction(p, inputs, provenance=provenance,
                                                 dataset_version=version)  # fmt: skip
             except Refused:
                 continue  # this model cannot speak to this bar: nothing to record

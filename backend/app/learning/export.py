@@ -13,13 +13,20 @@ splits, SHA-256 of the exact bytes). Each row is point in time:
   of a row whose label is measured from that close.
 - `labelled`: true only if every horizon has a label (a trainer must not read a missing
   label as zero).
-Only one candle dataset version and one feature schema are exported.
+- `barrier_labels`: the bar's triple-barrier label per horizon (#129; `label_version`,
+  the outcome per side and its realised P&L), measured from bars known by `window_end`,
+  else null. The raw `move` labels are unchanged beside them.
+Only one candle dataset version and one feature schema are exported. With `transforms`,
+`features` are the M04 transforms of the recorded snapshot (`transform_from_store`, the
+function the live recorder feeds a transform model with), under TRANSFORM_SCHEMA.
 
 A row belongs to the split whose [start, end) holds its `as_of`. A row whose longest
-label horizon would end after its split's end is purged, so no label is built from
-prices of the next split. With splits in time order (train, validation, holdout, which
-the manifest enforces) this purge is enough; an embargo would be needed only for k-fold
-or walk-forward schemes that train on data after the test split. Rows outside every
+label horizon would end after its split's end is purged (for a barrier label: the close
+of its last slot, which a scheduled closure can push past the horizon's wall-clock end),
+so no label is built from prices of the next split. With splits in time order (train,
+validation, holdout, which the manifest enforces) this purge is enough; an embargo would
+be needed only for k-fold or walk-forward schemes that train on data after the test
+split. Rows outside every
 split are left out.
 
 The manifest is validated and registered before any byte is written, and the file is
@@ -38,12 +45,16 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from app.core.contracts import NewsAssessment
+from app.core.contracts import FeatureSnapshot, NewsAssessment
 from app.core.enums import Timeframe
 from app.core.time import live
 from app.learning.bars import BarLog, BarOutcome, Horizon, Provenance, SnapshotRow
+from app.learning.labels import LABEL_VERSION, TripleBarrierLabel, label_at
 from app.learning.lifecycle import DatasetManifest, DatasetStore, Split
-from app.market_data.features import FEATURE_SCHEMA
+from app.market_data.features import ATR_M15, FEATURE_SCHEMA
+from app.market_data.session import SessionSchedule
+from app.market_data.store import CandleStore
+from app.prediction.transforms import TRANSFORM_SCHEMA, transform_from_store
 from app.storage.journal import Journal, payload_as
 
 __all__ = ["export_dataset", "horizon_key"]
@@ -75,11 +86,27 @@ class _News:
         return newest if live(newest.available_at, newest.valid_until, t) else None
 
 
+def _barrier(lab: TripleBarrierLabel | None) -> dict[str, object] | None:
+    if lab is None:
+        return None
+    return {
+        "label_version": lab.label_version,
+        "distance": _num(lab.distance),
+        "long": lab.long.outcome.value,
+        "long_pnl": _num(lab.long.pnl),
+        "short": lab.short.outcome.value,
+        "short_pnl": _num(lab.short.pnl),
+        "available_at": lab.available_at.isoformat(),
+    }
+
+
 def _row(
     snap: SnapshotRow,
     split: str,
     labels: dict[str, BarOutcome | None],
+    barriers: dict[str, TripleBarrierLabel | None],
     news: NewsAssessment | None,
+    features: FeatureSnapshot,
 ) -> dict[str, object]:
     s = snap.snapshot
     return {
@@ -91,9 +118,9 @@ def _row(
         "provenance": snap.provenance.value,
         "mode": None if snap.mode is None else snap.mode.value,
         "dataset_version": snap.dataset_version,
-        "feature_schema": s.feature_schema,
-        "quality": s.quality.value,
-        "features": {k: _num(v) for k, v in sorted(s.values.items())},
+        "feature_schema": features.feature_schema,
+        "quality": features.quality.value,
+        "features": {k: _num(v) for k, v in sorted(features.values.items())},
         "labelled": all(o is not None for o in labels.values()),
         "labels": {
             k: None
@@ -105,6 +132,7 @@ def _row(
             }
             for k, o in sorted(labels.items())
         },
+        "barrier_labels": {k: _barrier(b) for k, b in sorted(barriers.items())},
         "news": None
         if news is None
         else {
@@ -132,11 +160,15 @@ def export_dataset(
     out: Path,
     provenance: set[Provenance] | None = None,
     feature_schema: str = FEATURE_SCHEMA,
+    transforms: bool = False,
+    session: SessionSchedule | None = None,
 ) -> DatasetManifest:
-    """Write the dataset to `out`, register its manifest, and return it."""
+    """Write the dataset to `out`, register its manifest, and return it. `session`: the
+    market's schedule, for the barrier labels' and the transforms' bar windows."""
     hs = sorted(horizons, key=horizon_key)
     longest = max(h.length for h in hs)
     log = BarLog(conn)
+    candles = CandleStore(conn, dataset_version=dataset_version)
     outcomes = {
         horizon_key(h): {(o.as_of, o.dataset_version): o
                          for o in log.outcomes(symbol, h, start=window_start, end=window_end)}
@@ -154,11 +186,19 @@ def export_dataset(
         split = next((s for s in splits if s.start <= as_of < s.end), None)
         if split is None or as_of + longest > split.end:
             continue  # outside every split, or its label would reach into the next one
+        atr = snap.snapshot.values.get(ATR_M15)
+        barriers = {horizon_key(h): label_at(candles, symbol, timeframe, as_of, atr, h,
+                                             now=window_end, session=session)
+                    for h in hs}  # fmt: skip
+        if any(b is not None and b.ends_at > split.end for b in barriers.values()):
+            continue  # a barrier window that a closure stretched into the next split
         labels = {}
         for key, by_bar in outcomes.items():
             o = by_bar.get((as_of, dataset_version))
             labels[key] = o if o is not None and o.available_at <= window_end else None
-        row = _row(snap, split.name, labels, news.at(as_of))
+        features = (transform_from_store(candles, snap.snapshot, session=session)
+                    if transforms else snap.snapshot)  # fmt: skip
+        row = _row(snap, split.name, labels, barriers, news.at(as_of), features)
         lines.append(json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
     data = "".join(line + "\n" for line in lines).encode("utf-8")
     tag = "all" if provenance is None else "+".join(sorted(p.value for p in provenance))
@@ -167,6 +207,8 @@ def export_dataset(
         source_refs=[f"learning_snapshots:{symbol}:{timeframe.value}:{dataset_version}:"
                      f"{feature_schema}:{tag}",
                      *(f"learning_outcomes:{horizon_key(h)}" for h in hs),
+                     f"labels:{LABEL_VERSION}",
+                     *([f"transforms:{TRANSFORM_SCHEMA}"] if transforms else []),
                      "journal:news.assessment"],
         window_start=window_start, window_end=window_end, splits=splits,
         content_hash=f"sha256:{hashlib.sha256(data).hexdigest()}",

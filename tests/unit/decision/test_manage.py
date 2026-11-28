@@ -85,7 +85,7 @@ def test_adding_with_the_trend_uses_the_initial_lot_with_positive_ev() -> None:
 
 def test_no_add_beyond_the_position_cap_or_without_positive_ev() -> None:
     assert "CAP_REACHED" in _reasons(_manage(held=replace(HELD, positions=3)))
-    assert "EV_NOT_POSITIVE" in _reasons(_manage(evidence=Evidence(forecast=_forecast(p="0.53"))))
+    assert "EV_NOT_POSITIVE" in _reasons(_manage(evidence=Evidence(forecast=_forecast(p="0.505"))))
     assert "EV_UNKNOWN" in _reasons(_manage(evidence=Evidence()))
 
 
@@ -147,7 +147,7 @@ def test_a_managed_decision_replays_too() -> None:
 
 
 def test_add_rules_mirror_entry_rules() -> None:
-    break_even = _manage(evidence=Evidence(forecast=_forecast(p="0.53375")))
+    break_even = _manage(evidence=Evidence(forecast=_forecast(p="0.50875")))
     assert "EV_NOT_POSITIVE" in _reasons(break_even)
     # chart agrees with the position but a forecast opposes it: 1 vs 1 -> no exit, no add
     split = _manage(evidence=Evidence(forecast=_forecast(direction=Direction.DOWN)))
