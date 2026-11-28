@@ -8,7 +8,8 @@ recording-timeframe bars after it. It prices the same event as M05's `expected_v
   at bid and exits at ask (bid + that bar's spread). Every fill is worse by SLIPPAGE. A
   bar with no spread costs MISSING_SPREAD, never zero. So the spread and the slippage
   sit inside the trigger: a side that resolves at a barrier realises exactly +/- the
-  distance, and EV charges only the commission on top (see `fusion.expected_value`).
+  distance, so EV adds only the commission there and the fills only on FLAT mass
+  (see `fusion.expected_value`).
 - A bar touching both barriers counts as SL first (the order inside a bar is unknown).
 - The time barrier is N recording bars, N being the forecast horizon's span, counted in
   expected slots of the session schedule (a scheduled closure is not a gap). A side that
