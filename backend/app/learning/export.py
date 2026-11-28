@@ -58,7 +58,7 @@ from app.core.time import live
 from app.learning.bars import BarLog, BarOutcome, Horizon, Provenance, SnapshotRow
 from app.learning.lifecycle import DatasetManifest, DatasetStore, FoldWindow, Split
 from app.market_data.features import FEATURE_SCHEMA
-from app.market_data.sources import SourceRegistry, UnknownSource
+from app.market_data.sources import SourceRegistry
 from app.storage.journal import Journal, payload_as
 from app.validation.splits import WalkForward, walk_forward
 
@@ -160,12 +160,7 @@ def export_dataset(
     if holdout <= timedelta(0):
         raise ValueError("a dataset needs a sealed holdout")
     registry = SourceRegistry(conn)
-    sources: dict[str, str] = {}
-    for v in sorted(dataset_versions):
-        source = registry.source_of(v)
-        if source is None:
-            raise UnknownSource(f"candle dataset {v!r} has no data source")
-        sources[v] = source
+    sources = {v: registry.require(v)[0] for v in sorted(dataset_versions)}
     plan = walk_forward(window_start, window_end, train=train, test=test, embargo=embargo,
                         holdout=holdout)  # fmt: skip
     log = BarLog(conn)
@@ -223,8 +218,10 @@ def _membership(
     None if it belongs to no window. A row is inside [start, end) only if its longest label ends and
     its snapshot was available by `end`: the purge by label end, per window."""
 
+    need = max(s.as_of + longest, s.available_at)  # what must be known by a window's end
+
     def inside(start: datetime, end: datetime) -> bool:
-        return start <= s.as_of and s.as_of + longest <= end and s.available_at <= end
+        return start <= s.as_of and need <= end
 
     if inside(plan.holdout.start, plan.holdout.end):
         return "holdout", {"train": [], "test": []}

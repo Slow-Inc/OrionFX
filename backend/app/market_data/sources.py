@@ -93,12 +93,17 @@ class SourceRegistry:
         row = self._row(dataset_version)
         return None if row is None else row[0]
 
-    def schedule_of(self, dataset_version: str) -> SessionSchedule:
-        """The schedule a dataset version's bars were validated against; refused if the
-        version has no source or the code now maps its source to another schedule."""
+    def require(self, dataset_version: str) -> tuple[str, str]:
+        """A bound version's (data source, schedule id); refused if it has no source."""
         row = self._row(dataset_version)
         if row is None:
             raise UnknownSource(f"dataset {dataset_version!r} has no data source")
+        return row
+
+    def schedule_of(self, dataset_version: str) -> SessionSchedule:
+        """The schedule a dataset version's bars were validated against; refused if the
+        version has no source or the code now maps its source to another schedule."""
+        row = self.require(dataset_version)
         schedule = SOURCE_SCHEDULES.get(row[0])
         if schedule is None or schedule.schedule_id != row[1]:
             raise SourceConflict(f"dataset {dataset_version!r} was validated against {row[1]}")

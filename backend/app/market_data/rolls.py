@@ -24,7 +24,7 @@ from pathlib import Path
 
 from app.core.time import utc_iso
 from app.market_data.history import open_text
-from app.market_data.sources import SourceRegistry, UnknownSource
+from app.market_data.sources import SourceRegistry
 from app.storage.db import transaction
 
 __all__ = ["Roll", "RollConflict", "RollLog", "read_rolls"]
@@ -59,8 +59,7 @@ class RollLog:
     def record(self, dataset_version: str, rolls: Iterable[Roll]) -> None:
         """Record rolls for a version that has a data source; a roll already recorded
         identically is a no-op, a different one at the same instant is refused."""
-        if SourceRegistry(self._conn).source_of(dataset_version) is None:
-            raise UnknownSource(f"dataset {dataset_version!r} has no data source")
+        SourceRegistry(self._conn).require(dataset_version)
         with transaction(self._conn):
             for r in rolls:
                 at = utc_iso(r.roll_at)

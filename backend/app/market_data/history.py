@@ -168,7 +168,8 @@ def _import_chunk(
     end: datetime,
 ) -> ChunkReport:
     prev = {tf: store.bars(symbol, tf, as_of=start, limit=1) for tf in Timeframe}
-    built = _resample(symbol, bars, schedule, prev=prev[Timeframe.M5], end=end)
+    seed = prev[Timeframe.M5][-1].open_time if prev[Timeframe.M5] else None
+    built = _resample(symbol, bars, schedule, seed=seed, end=end)
     for b in built:
         store.save(b)
     audits = {}
@@ -258,12 +259,12 @@ def _resample(
     bars: list[M1Bar],
     schedule: SessionSchedule,
     *,
-    prev: list[CandleClosed],
+    seed: datetime | None,
     end: datetime,
 ) -> list[CandleClosed]:
-    """M5/M15/H1 bars from one chunk's validated M1 bars, with live GAP semantics."""
+    """M5/M15/H1 bars from one chunk's validated M1 bars, with live GAP semantics. `seed`
+    is the open time of the last M5 bar stored before the chunk."""
     present = {floor_time(b.open_time, M5) for b in bars}
-    seed = prev[-1].open_time if prev else None
     first = seed if seed is not None else min(present, default=None)
     missed = _missed_slots(schedule, present, first, end)
     out: list[CandleClosed] = []
