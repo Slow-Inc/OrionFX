@@ -46,7 +46,7 @@ Each job's context is pre-fetched into `.git/opencode-ctx/`. The model is set in
 
 | Workflow | Trigger | Can | Cannot |
 |---|---|---|---|
-| `opencode-review.yml` | `pull_request` from same-repo branches (forks skipped), collaborator authors, non-draft, non-bot | Load the repo skills (`code-review`, `scrutinize`, `simplify`, `t4-gates`) and submit ONE pull request review (`event: COMMENT`, `commit_id` = head) with a summary that keeps each skill section, plus inline comments on the exact diff lines (at most 15). Findings that cannot be tied to a diff line stay in the summary | Approve, request changes, push, merge |
+| `opencode-review.yml` | `pull_request` from same-repo branches (forks skipped), collaborator authors, non-draft, non-bot | Run the review skills (always `code-review`, `scrutinize`, `simplify`, `t4-gates`; `security-review`, `test-quality` and `ui-audit` when their trigger holds; see `.opencode/README.md`) and submit ONE pull request review (`event: COMMENT`, `commit_id` = head) with a summary that keeps each skill section, plus inline comments on the exact diff lines (at most 15). Findings that cannot be tied to a diff line stay in the summary | Approve, request changes, push, merge |
 | `opencode-ask.yml` | A comment starting `/oc ` or `/opencode ` (followed by the question) by OWNER/MEMBER/COLLABORATOR, on `issue_comment` or `pull_request_review_comment` | Read the repo and reply once | Change code. It refuses and says Claude is the developer |
 | `opencode-audit.yml` | `schedule` (Mon 02:00 UTC) + `workflow_dispatch` | Review the last week of `main` and check that the ledger and catalog are honest; open ONE bilingual issue labelled `needs-triage` + `repo-ops`, or comment on the open one; post nothing if there are no findings | Close or edit issues |
 | `opencode-triage.yml` | `issues: opened` by a trusted author | Add one Component label and one triage role when the issue has none (never `wontfix`); ask for a missing EN/TH part | Close issues, edit the body |
@@ -64,6 +64,8 @@ The client IDs are credential IDs, not secrets: each works only with an OIDC tok
 1. Wait for the `review` check (`gh pr checks <n> --watch`).
 2. Read the OpenCode review (`gh api repos/Slow-Inc/OrionFX/pulls/<n>/reviews`, author `opencode-agent[bot]`, body starting `OpenCode review of <sha>`) and its inline comments. Its `commit_id` must be the current head. After a push, wait for the new review.
 3. For each finding: fix it if it is valid, or reply on the PR saying why not.
+
+The review summary has one section per skill that ran, a `Skipped: - <skill> — <reason>` list, and a final line in this exact format: **`Verdict: <n> blocker, <n> major`**. `post.py` computes that line from the summary's `[blocker]` and `[major]` finding bullets, and the merge gate (xeno-skills #441) parses it. Do not change the format without changing the gate. The skill set and its triggers follow the owner's map in xeno-skills #440. On risk paths (money or risk code, secrets, workflows, `.claude/`), one independent subagent review is still needed on top of OpenCode.
 
 The review is advisory evidence. It does not replace `/code-review`, `/scrutinize`, `/security-review` or `/verify`. Issues filed by the audit enter the normal triage flow through `needs-triage`. `opencode-triage` skips bot-authored issues, so audit issues are triaged by hand.
 

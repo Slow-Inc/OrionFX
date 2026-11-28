@@ -31,6 +31,18 @@ COMPONENTS = {
 # wontfix is a maintainer decision; the bot never applies it.
 ROLES = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human"}
 MAX_INLINE = 15
+VERDICT_RE = re.compile(r"^\s*Verdict:.*$", re.M)
+SEVERITY_RE = re.compile(r"^\s*[-*]\s*\[(blocker|major)\]", re.M | re.I)
+
+
+def verdict_line(summary: str) -> str:
+    """The merge gate parses this exact last line: `Verdict: <n> blocker, <n> major`.
+
+    It counts the summary's finding bullets tagged [blocker] / [major]; each finding is
+    reported once in the summary (the prompt says so), so inline copies are not counted.
+    """
+    tags = [m.lower() for m in SEVERITY_RE.findall(summary)]
+    return f"Verdict: {tags.count('blocker')} blocker, {tags.count('major')} major"
 
 
 def gh_api(endpoint: str, payload: dict) -> subprocess.CompletedProcess:
@@ -86,18 +98,28 @@ def review(answer_path: str, diff_path: str, repo: str, pr: str, head_sha: str) 
             else:
                 unanchored.append(f"- `{path}:{line}` {body[:500]}")
         answer = INLINE_RE.sub("", answer).strip()
+    summary = VERDICT_RE.sub("", answer).strip()
+    verdict = verdict_line(summary)
+    extra = ""
     if unanchored:
-        answer += "\n\n#### Not anchored to a diff line\n" + "\n".join(unanchored)
-    payload = {"commit_id": head_sha, "event": "COMMENT", "body": answer, "comments": comments}
+        extra = "\n\n#### Not anchored to a diff line\n" + "\n".join(unanchored)
+    payload = {
+        "commit_id": head_sha,
+        "event": "COMMENT",
+        "body": f"{summary}{extra}\n\n{verdict}",
+        "comments": comments,
+    }
     endpoint = f"repos/{repo}/pulls/{pr}/reviews"
     result = gh_api(endpoint, payload)
     if result.returncode != 0 and comments:
         reason = result.stderr.strip()[:300]
         print(f"::warning::Inline comments rejected ({reason}); moving them to the summary.")
         moved = "\n".join(f"- `{c['path']}:{c['line']}` {c['body'][:500]}" for c in comments)
-        payload["body"] = answer + "\n\n#### Inline comments GitHub rejected\n" + moved
+        extra += "\n\n#### Inline comments GitHub rejected\n" + moved
+        payload["body"] = f"{summary}{extra}\n\n{verdict}"
         payload["comments"] = []
         result = gh_api(endpoint, payload)
+    print(verdict)
     if result.returncode != 0:
         print(f"::error::Posting the review failed: {result.stderr.strip()[:500]}")
         return 1

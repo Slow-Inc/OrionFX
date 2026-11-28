@@ -68,7 +68,7 @@ Enable the git guards once per clone: `git config core.hooksPath .githooks`.
 - **git pre-push** (`.githooks/`): issue reference, tree budget, `T4-Gates:` trailer. Binds anyone who enabled `core.hooksPath`.
 - **CI** (`t4-verify.yml`): `guards`, `lint`, `typecheck`, `test`, `frontend`; plus the OpenCode workflows (below). **Not required checks (yet)** — the repo is **public** (verified 2026-11-28), so rulesets and required status checks *are* enforceable; none is configured today, which is an owner decision (ledger). `requireGreenCI: true` makes the agent's `gh pr merge` wait for green CI; **a human merging on the web is not blocked by anything.**
 - **OpenCode (advisory, read-only; full table in `docs/agents/workflow.md` → OpenCode):** five workflows share `.github/actions/opencode-run`:
-  - `opencode-review` (every collaborator PR) posts ONE `COMMENT` review plus inline comments, using the repo skills in `.opencode/skills/`;
+  - `opencode-review` (every collaborator PR) posts ONE `COMMENT` review plus inline comments, using the repo skills in `.opencode/skills/` (the review half of `t4-dev-workflow`; conditional skills are listed as skipped with a reason). The last line is `Verdict: <n> blocker, <n> major`, which the merge gate parses;
   - `opencode-ask` handles `/oc <question>` and `/opencode <question>` comments by collaborators, answer-only;
   - `opencode-audit` runs weekly on `main` and opens one bilingual `needs-triage`+`repo-ops` issue, which enters normal triage;
   - `opencode-triage` labels new trusted issues and asks for a missing EN/TH part;

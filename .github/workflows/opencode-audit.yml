@@ -58,7 +58,7 @@ jobs:
           cat > "$ctx/prompt.md" <<'EOF'
           You run the weekly read-only audit of this repo's main branch. You must not change code: you have no shell and cannot edit files. Claude is this repo's developer; your findings are advisory and go to a maintainer for triage.
 
-          Context: the last week's commits are in .git/opencode-ctx/week-log.txt and their diff (possibly truncated) in .git/opencode-ctx/week.diff. Apply CLAUDE.md. Use the skill tool to load and follow scrutinize, then code-review (standards axis only), then t4-gates, over that week's changes. Then check docs honesty: compare docs/OPEN-WORK-LEDGER.md and docs/catalog/coverage.json against the code. Flag rows that claim done or delivered with no backing code or tests, stale [PROPOSED] or TODO items, and claims the code contradicts. Report only findings you can cite as path:line. Be brief.
+          Context: the last week's commits are in .git/opencode-ctx/week-log.txt and their diff (possibly truncated) in .git/opencode-ctx/week.diff. Apply CLAUDE.md. Use the skill tool to load and follow scrutinize, then code-review (standards axis only), then t4-gates, over that week's changes. Then load and follow architecture-audit over main: deepening opportunities, duplication across modules, and docs/ledger/catalog drift (docs/OPEN-WORK-LEDGER.md and docs/catalog/coverage.json against the code, stale [PROPOSED] or TODO items, and claims the code contradicts). Report only findings you can cite as path:line. Be brief.
 
           If you have no findings, your final answer is exactly: NO_FINDINGS
 
