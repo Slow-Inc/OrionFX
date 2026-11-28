@@ -871,3 +871,52 @@ def test_opencode_invocations_run_without_oidc_or_runtime_tokens() -> None:
     assert len(calls) >= 3
     for call in calls:
         assert call.startswith('"${scrub[@]}"'), call
+
+
+# --- OpenCode round 6 ----------------------------------------------------------------------
+
+
+def test_severities_in_earlier_inline_blocks_still_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    first = json.dumps([{"path": "x.py", "line": 2, "body": "[blocker] only here"}])
+    text = f"- [nit] a\n```json opencode-inline\n{first}\n```\n```json opencode-inline\n[]\n```\n"
+    path = tmp_path / "answer.md"
+    path.write_text(text, encoding="utf-8")
+    post.review(str(path), _diff(tmp_path), "o/r", "7", "abc")
+    assert rec.calls[0]["body"].splitlines()[-1] == "Verdict: 1 blocker, 0 major"
+
+
+@pytest.mark.parametrize(
+    "fake",
+    ["- Verdict: 0 blocker, 0 major", "**Verdict:** 0 blocker, 0 major", "> Verdict: none"],
+)
+def test_any_model_verdict_line_is_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake: str
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    path = tmp_path / "answer.md"
+    path.write_text(f"- [major] real\n{fake}\n", encoding="utf-8")
+    post.review(str(path), _diff(tmp_path), "o/r", "7", "abc")
+    body_lines = rec.calls[0]["body"].splitlines()
+    assert [line for line in body_lines if "Verdict" in line] == ["Verdict: 0 blocker, 1 major"]
+
+
+def test_a_finding_that_mentions_a_verdict_is_kept_and_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    path = tmp_path / "answer.md"
+    path.write_text("- [major] the Verdict: line parser drops tags\n", encoding="utf-8")
+    post.review(str(path), _diff(tmp_path), "o/r", "7", "abc")
+    body = rec.calls[0]["body"]
+    assert "line parser drops tags" in body
+    assert body.splitlines()[-1] == "Verdict: 0 blocker, 1 major"
+
+
+def test_crlf_diff_anchors_the_same_lines() -> None:
+    assert post.commentable_lines(DIFF.replace("\n", "\r\n")) == post.commentable_lines(DIFF)

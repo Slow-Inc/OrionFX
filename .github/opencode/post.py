@@ -37,7 +37,9 @@ COMPONENTS = {
 ROLES = {"needs-triage", "needs-info", "ready-for-agent", "ready-for-human"}
 MAX_INLINE = 15
 AUTH_FAILURE = 2  # review() exit code for HTTP 401/403 (config), vs 1 (transient)
-VERDICT_RE = re.compile(r"^\s*Verdict:.*$", re.M)
+# Only post.py writes a verdict: any model "Verdict:" (bulleted, bold, quoted...) is
+# renamed rather than deleted, so a finding line that mentions it is kept and counted.
+VERDICT_RE = re.compile(r"\bVerdict(\W*:)", re.I)
 FIRST_LINE_RE = re.compile(r"\A\s*\**OpenCode review of[^\n]*\n?", re.I)
 SEVERITY_RE = re.compile(r"\[(blocker|major)\]", re.I)
 FAIL_ROW_RE = re.compile(r"^\s*\|\s*(\d+)\s*\|.*\|\s*fail\s*\|", re.I)
@@ -139,7 +141,7 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
 
 def _one_line(text: str) -> str:
     """Flatten model text placed in our own sections, so it cannot fake a `Verdict:` line."""
-    return re.sub(r"\s*[\r\n]+\s*", " ", text)
+    return VERDICT_RE.sub(r"Model-verdict\1", re.sub(r"\s*[\r\n]+\s*", " ", text))
 
 
 def review(
@@ -160,6 +162,8 @@ def review(
     # The last block wins: an earlier one is usually an example such as "[]".
     blocks = list(INLINE_RE.finditer(answer))
     match = blocks[-1] if blocks else None
+    # Earlier blocks are not posted, but their severities still count (never undercount).
+    inline_bodies.extend(block.group(1) for block in blocks[:-1])
     if match:
         try:
             items = json.loads(match.group(1))
@@ -189,7 +193,7 @@ def review(
             else:
                 comments.append({"path": path, "line": line, "side": "RIGHT", "body": body[:2000]})
         answer = INLINE_RE.sub("", answer).strip()
-    summary = VERDICT_RE.sub("", answer).strip()
+    summary = VERDICT_RE.sub(r"Model-verdict\1", answer).strip()
     if skills_path is not None:
         missing = missing_sections(summary, skills_path)
         if missing:

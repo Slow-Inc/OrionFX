@@ -13,7 +13,7 @@ The OpenCode workflows (`.github/workflows/opencode-*.yml`, via `.github/actions
 | `t4-gates` | Every PR review (last) |
 | `architecture-audit` | Weekly audit only |
 
-`opencode-review.yml` works out the conditional triggers from the changed-file list, then tells the model which skills to run and which to skip. The review lists each skipped skill as `Skipped: - <skill> — <reason>`. The posting script then appends the gate line `Verdict: <n> blocker, <n> major`, which counts the summary's `[blocker]` and `[major]` finding bullets.
+`opencode-review.yml` works out the conditional triggers from the changed-file list, then tells the model which skills to run and which to skip. The review lists each skipped skill as `Skipped: - <skill> — <reason>`. The posting script then appends the gate line `Verdict: <n> blocker, <n> major`, computed by `post.py`. It counts every `[blocker]`/`[major]` tag anywhere in the summary and in every inline comment body, including inline blocks that were not posted. A failed t4-gates row counts as a major, or as a blocker for gate 10 (the never-list). It overcounts and never undercounts. A review missing a `### <skill>` section for any skill that ran, or missing the `Skipped:` line, is not posted (cause `unavailable: malformed review`). Any model-written `Verdict:` is renamed `Model-verdict:`.
 
 These skills are read from the **PR head**, so a PR can change its own reviewer. Review edits to this folder with that in mind. The scripts that hold tokens run from the base revision; see `docs/agents/workflow.md`.
 
