@@ -24,6 +24,19 @@ Resampling and gaps:
   import: bars inside a closed period (the schedule does not fit the source) and
   unexpected gaps are counted in the report. The bars are stored either way.
 
+No-trade minutes (`NO_TRADE_FILL`, pre-declared per source). A source such as FirstRate
+leaves out minutes with no trade, so a missing minute there is not missing data. Between
+two consecutive bars, the open-session minutes with no bar form one run (scheduled
+closures do not count toward it). A run of at most the source's limit is filled: each
+minute becomes a flat bar at the previous close with volume 0 and no spread, marked
+`filled`, and a resampled bar made only of filled minutes carries `NO_TRADE`. So it is
+neither a GAP nor a missing bar for labels. A longer run is a real gap. A run with no bar
+after it in the range is not filled: nothing says trading resumed. To fill the start of
+the range exactly as a one-pass import would, the source is read from `MAX_CLOSED` plus
+the limit before it; those earlier rows only seed the fill. The report lists the length
+of every filled run, so the limit can be checked against the data. A source with no
+entry is never filled.
+
 Chunks: the source is read once, in order, and split into chunks aligned to H1 bars, one
 transaction each, so no bar spans two chunks. A chunk's first M5 bar takes its gap state
 from the last bar stored before the chunk. Re-running a chunk therefore rebuilds
@@ -32,8 +45,10 @@ the chunk holding the newest stored bar. Import a version's range in time order:
 extending it backwards would change the gap state of a stored chunk, and the store
 refuses that (`CandleConflict`).
 
-`CsvM1Source` is the first concrete source. Its format is documented on the class so that
-any vendor export (Dukascopy or another) can be converted to it. Nothing here downloads.
+`CsvM1Source` is the generic source. Its format is documented on the class so that any
+vendor export (Dukascopy or another) can be converted to it. `FirstRateGcSource`
+(`firstrate.py`) reads FirstRate's own format directly; its prices are futures trades, not
+bid. Nothing here downloads.
 """
 
 import bisect
@@ -53,12 +68,12 @@ from app.core.enums import QualityFlag, Timeframe
 from app.core.time import CLOCK_SKEW, TIMEFRAME_DURATION, Clock, utc_now
 from app.market_data.candles import M5, Issue, floor_time
 from app.market_data.port import HistoricalBarSource, M1Bar
-from app.market_data.session import ScheduleAudit, SessionSchedule, audit
-from app.market_data.sources import SourceRegistry
+from app.market_data.session import MAX_CLOSED, ScheduleAudit, SessionSchedule, audit
+from app.market_data.sources import NO_TRADE_FILL, SourceRegistry
 from app.market_data.store import CandleStore
 from app.storage.db import transaction
 
-__all__ = ["ChunkReport", "CsvM1Source", "ImportReport", "import_history"]
+__all__ = ["ChunkReport", "CsvM1Source", "ImportReport", "import_history", "open_text"]
 
 M1 = timedelta(minutes=1)
 H1 = TIMEFRAME_DURATION[Timeframe.H1]
@@ -76,6 +91,12 @@ class ImportReport:
     chunks: list[ChunkReport] = field(default_factory=list)
     issues: Counter[Issue] = field(default_factory=Counter)
     """Rows dropped by validation, over the whole run."""
+    filled_runs: list[int] = field(default_factory=list)
+    """Length in minutes of each no-trade run filled in the range (`NO_TRADE_FILL`)."""
+
+    @property
+    def filled_minutes(self) -> int:
+        return sum(self.filled_runs)
 
     def in_closed(self, tf: Timeframe) -> int:
         """Bars inside a scheduled closure: the source's schedule does not fit its data."""
@@ -115,8 +136,13 @@ def import_history(
     newest = store.latest_open(symbol, Timeframe.M5, as_of=end)
     first = start if newest is None or newest < start else start + (newest - start) // chunk * chunk
     report = ImportReport()
+    fill = NO_TRADE_FILL.get(data_source)
+    lead = timedelta(0) if fill is None else MAX_CLOSED + fill
     # One pass over the source, split at chunk ends: validated rows only move forward.
-    rows = _validated(source.m1_bars(first, end), clock(), report.issues)
+    rows = _validated(source.m1_bars(first - lead, end), clock(), report.issues, first)
+    if fill is not None:
+        rows = _no_trade_filled(rows, schedule, fill, first, report.filled_runs)
+    rows = (b for b in rows if b.open_time >= first)  # earlier rows only seed the fill
     pending = next(rows, None)
     t = first
     while t < end:
@@ -151,23 +177,66 @@ def _import_chunk(
     return ChunkReport(start, end, audits)
 
 
-def _validated(rows: Iterable[M1Bar], now: datetime, issues: Counter[Issue]) -> Iterator[M1Bar]:
+def _validated(
+    rows: Iterable[M1Bar], now: datetime, issues: Counter[Issue], count_from: datetime
+) -> Iterator[M1Bar]:
+    """Valid rows in order; dropped rows from `count_from` on are counted in `issues`."""
     last: datetime | None = None
     for row in rows:
         if row.open_time.tzinfo is None:
             raise ValueError("naive bar time: a historical source must give UTC times")
         bar = replace(row, open_time=row.open_time.astimezone(UTC))
         if not _valid(bar):
-            issues[Issue.INVALID_QUOTE] += 1
+            issue = Issue.INVALID_QUOTE
         elif bar.open_time + M1 > now + CLOCK_SKEW:
-            issues[Issue.FUTURE_TICK] += 1
+            issue = Issue.FUTURE_TICK
         elif last is not None and bar.open_time < last:
-            issues[Issue.OUT_OF_ORDER] += 1
+            issue = Issue.OUT_OF_ORDER
         elif bar.open_time == last:
-            issues[Issue.DUPLICATE] += 1
+            issue = Issue.DUPLICATE
         else:
             last = bar.open_time
             yield bar
+            continue
+        if bar.open_time >= count_from:
+            issues[issue] += 1
+
+
+def _no_trade_filled(
+    rows: Iterable[M1Bar],
+    schedule: SessionSchedule,
+    limit: timedelta,
+    first: datetime,
+    runs: list[int],
+) -> Iterator[M1Bar]:
+    """The rows, with each no-trade run of at most `limit` open minutes between two rows
+    filled flat at the previous close. Runs reaching `first` or later are listed in `runs`."""
+    prev: M1Bar | None = None
+    for bar in rows:
+        if prev is not None:
+            run = _open_minutes(schedule, prev.open_time + M1, bar.open_time, limit // M1)
+            if run and run[-1] >= first:
+                runs.append(len(run))
+            for t in run:
+                yield M1Bar(t, prev.close, prev.close, prev.close, prev.close, Decimal(0),
+                            spread=None, filled=True)  # fmt: skip
+        yield bar
+        prev = bar
+
+
+def _open_minutes(
+    schedule: SessionSchedule, lo: datetime, hi: datetime, most: int
+) -> list[datetime]:
+    """The open-session minutes in [lo, hi), or none if there are more than `most`."""
+    out: list[datetime] = []
+    t = lo
+    while t < hi:
+        if schedule.is_open(t):
+            if len(out) == most:
+                return []
+            out.append(t)
+        t += M1
+    return out
 
 
 def _valid(b: M1Bar) -> bool:
@@ -237,13 +306,16 @@ def _bar(
 ) -> CandleClosed:
     volumes = [b.volume for b in group if b.volume is not None]
     spreads = [b.spread for b in group if b.spread is not None]
+    flags = [QualityFlag.GAP.value] if gap else []
+    if all(b.filled for b in group):
+        flags.append(QualityFlag.NO_TRADE.value)
     return CandleClosed(
         symbol=symbol, timeframe=tf, open_time=opened, close_time=opened + size,
         open=group[0].open, high=max(b.high for b in group), low=min(b.low for b in group),
         close=group[-1].close,
         volume=sum(volumes, Decimal(0)) if len(volumes) == len(group) else None,
         spread=max(spreads, default=None), available_at=opened + size,
-        quality_flags=[QualityFlag.GAP.value] if gap else [],
+        quality_flags=flags,
     )  # fmt: skip
 
 
@@ -271,7 +343,7 @@ class CsvM1Source:
         self.path = path
 
     def m1_bars(self, start: datetime, end: datetime) -> Iterator[M1Bar]:
-        with self._open() as f:
+        with open_text(self.path) as f:
             reader = csv.reader(f)
             if tuple(next(reader, ())) != self.HEADER:
                 raise ValueError(f"{self.path}: header must be {','.join(self.HEADER)}")
@@ -279,11 +351,6 @@ class CsvM1Source:
                 bar = self._parse(row, line)
                 if start <= bar.open_time < end:
                     yield bar
-
-    def _open(self) -> TextIO:
-        if self.path.suffix == ".gz":
-            return gzip.open(self.path, "rt", encoding="utf-8", newline="")
-        return self.path.open(encoding="utf-8", newline="")
 
     def _parse(self, row: list[str], line: int) -> M1Bar:
         try:
@@ -295,3 +362,10 @@ class CsvM1Source:
                          Decimal(v) if v else None, Decimal(s) if s else None)  # fmt: skip
         except (ValueError, InvalidOperation) as exc:
             raise ValueError(f"{self.path} line {line}: {exc} (UTC offset required)") from exc
+
+
+def open_text(path: Path) -> TextIO:
+    """A UTF-8 text file, gunzipped on the fly if its name ends in `.gz`."""
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8", newline="")
+    return path.open(encoding="utf-8", newline="")

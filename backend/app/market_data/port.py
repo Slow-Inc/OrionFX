@@ -39,7 +39,8 @@ class ReplaySource:
 @dataclass(frozen=True, slots=True)
 class M1Bar:
     """One closed one-minute bar from a historical source (#128). Prices are bid, as live
-    bars are built from bid ticks. M1 is an import format only: the store holds M5/M15/H1."""
+    bars are built from bid ticks, except for a futures source (FirstRate GC), whose prices
+    are trades. M1 is an import format only: the store holds M5/M15/H1."""
 
     open_time: datetime
     """Aware; the importer converts it to UTC."""
@@ -48,9 +49,12 @@ class M1Bar:
     low: Decimal
     close: Decimal
     volume: Decimal | None
-    """Tick volume as the vendor counts it, never traded volume."""
+    """Volume as the vendor counts it: tick volume for a spot FX vendor, contracts traded
+    for a futures vendor (FirstRate). Its meaning is per data source."""
     spread: Decimal | None
     """Ask minus bid in price units (the minute's widest, if the vendor has it)."""
+    filled: bool = False
+    """Set by the importer only: a flat bar for a minute with no trade (#128)."""
 
 
 class HistoricalBarSource(Protocol):

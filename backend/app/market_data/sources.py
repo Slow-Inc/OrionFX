@@ -1,8 +1,8 @@
 """Data sources of candle dataset versions (#128, PRD #120 slice 1; DAT-01, DAT-04).
 
-A **data source** is the feed a bar came from: a vendor's history (`dukascopy`) or the
-live broker feed (`mt5`). It is a dimension separate from LIVE/BACKFILL provenance, which
-says only whether the bot saw a bar as it happened.
+A **data source** is the feed a bar came from: a vendor's history (`dukascopy`,
+`firstrate-gc`) or the live broker feed (`mt5`). It is a dimension separate from
+LIVE/BACKFILL provenance, which says only whether the bot saw a bar as it happened.
 
 Mechanism: one candle dataset version holds the bars of exactly one data source. The
 `candle_sources` table (migration 0014) maps each version to its source, append-only, and
@@ -16,24 +16,47 @@ Export writes the source on every row.
 
 Each source has its own session schedule (`SOURCE_SCHEDULES`), stored with the mapping so
 a later change of the code's mapping is caught rather than silently applied to old bars.
-Both entries are [PROPOSED]: neither has been checked against real data yet (`audit` on
-import reports the fit).
+Every entry is [PROPOSED]: none has been checked against real data yet (`audit` on import
+reports the fit).
+
+A source may omit minutes with no trade (`NO_TRADE_FILL`): the importer then fills a short
+run of them flat instead of calling it a gap. A source's key names its import rules
+(schedule, fill limit, which series is read). Only the schedule is stored with the
+binding, so changing another rule for stored data needs a new key, not an edit.
+
+`firstrate-gc` is FirstRate's ratio-adjusted continuous GC 1-minute series: gold futures
+trades as a proxy for spot XAUUSD. Its prices are not tradable spot levels.
 """
 
 import sqlite3
 from collections.abc import Mapping
+from datetime import timedelta
 
 from app.core.time import Clock, utc_iso, utc_now
-from app.market_data.session import XAUUSD_NY_1700, SessionSchedule
+from app.market_data.session import CME_GLOBEX_GC, XAUUSD_NY_1700, SessionSchedule
 from app.storage.db import transaction
 
-__all__ = ["SOURCE_SCHEDULES", "SourceConflict", "SourceRegistry", "UnknownSource"]
+__all__ = [
+    "NO_TRADE_FILL",
+    "SOURCE_SCHEDULES",
+    "SourceConflict",
+    "SourceRegistry",
+    "UnknownSource",
+]
 
 SOURCE_SCHEDULES: Mapping[str, SessionSchedule] = {
     "dukascopy": XAUUSD_NY_1700,  # [PROPOSED] unverified against Dukascopy XAU/USD data
     "mt5": XAUUSD_NY_1700,  # [PROPOSED] confirm against the broker's symbol spec (#17)
+    "firstrate-gc": CME_GLOBEX_GC,  # [PROPOSED] CME Globex hours; no holiday calendar
 }
 """XAUUSD session schedule per data source."""
+
+NO_TRADE_FILL: Mapping[str, timedelta] = {
+    "firstrate-gc": timedelta(minutes=15),  # [PROPOSED] check the run lengths on import
+}
+"""The longest run of open-session minutes with no bar that a source's import fills as
+"no trade": a flat bar at the previous close, volume 0. Only a source that omits no-trade
+minutes has an entry. A longer run, or any hole in another source, is a real gap."""
 
 
 class UnknownSource(ValueError):
