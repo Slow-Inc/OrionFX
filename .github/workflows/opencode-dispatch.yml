@@ -33,7 +33,7 @@ jobs:
     # service account accepts main only.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 17
     # GITHUB_TOKEN is read-only; an issue comment is posted with the OpenCode App token.
     permissions:
       contents: read

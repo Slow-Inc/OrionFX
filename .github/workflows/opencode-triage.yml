@@ -27,7 +27,7 @@ jobs:
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
       && github.event.issue.user.type != 'Bot'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     # GITHUB_TOKEN is read-only; labels and comments use the OpenCode App token.
     permissions:
       contents: read

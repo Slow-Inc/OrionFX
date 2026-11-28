@@ -20,7 +20,7 @@ from decimal import Decimal
 
 ALLOWED_TOOLS = {"read", "glob", "grep", "list", "skill"}
 HARD_CAP, STALLED = 124, 125  # watchdog.py exit statuses
-TIMEOUT_STATUSES = {HARD_CAP, 137}  # 137: SIGKILL (the job or the runner killed it)
+KILLED = 137  # SIGKILL from outside the watchdog (the job, the runner, the OOM killer)
 RETRY = 75  # exit code: the model ended cleanly with no answer text; the caller may retry once
 
 
@@ -126,7 +126,7 @@ def main(
     if exit_status == HARD_CAP:
         hard = _minutes(stats.get("hard_seconds"))
         return _cause(f"unavailable: OpenCode hit the hard cap ({hard})")
-    if exit_status in TIMEOUT_STATUSES:
+    if exit_status == KILLED:
         return _cause(f"unavailable: OpenCode was killed (status {exit_status})")
     # The latest message that has text: a run can end on a tool-only step.
     texts = ["".join(messages[mid]).strip() for mid in order]

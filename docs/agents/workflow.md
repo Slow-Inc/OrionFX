@@ -85,12 +85,12 @@ Why 4 minutes idle: OpenCode 1.19.6 in `--format json` emits a `step_start` when
 | Workflow | idle | hard cap | job `timeout-minutes` |
 |---|---|---|---|
 | `opencode-review.yml` | 4 | 20 (successful reviews took 5–10 min; #156 needed more than 10) | 30 |
-| `opencode-ask.yml` | 4 | 9 | 12 |
+| `opencode-ask.yml` | 4 | 9 | 14 |
 | `opencode-audit.yml` | 4 | 15 | 20 |
-| `opencode-dispatch.yml` | 4 | 12 | 15 |
-| `opencode-triage.yml` | 4 | 7 | 10 |
+| `opencode-dispatch.yml` | 4 | 12 | 17 |
+| `opencode-triage.yml` | 4 | 7 | 12 |
 
-Each job timeout must exceed the hard cap plus setup (a test checks at least 3 minutes of headroom). Otherwise GitHub cancels the job before the notice step runs. `timeout-minutes` on the action is a deprecated alias of `hard-minutes`, kept for workflow files that predate it. On a PR the workflow file comes from the PR, but the action from the base revision, so a PR that changes these inputs is reviewed with the base action's budgets.
+Each job timeout must exceed the hard cap plus setup (a test checks at least 5 minutes of headroom). Otherwise GitHub cancels the job before the notice step runs. `timeout-minutes` on the action is a deprecated alias of `hard-minutes`, kept for workflow files that predate it. On a PR the workflow file comes from the PR, but the action from the base revision, so a PR that changes these inputs is reviewed with the base action's budgets.
 
 ### When OpenCode is unavailable
 

@@ -48,18 +48,20 @@ def _clock(seconds: float) -> str:
 
 
 def _kill_group(proc: "subprocess.Popen[bytes]", grace_s: float) -> None:
-    """TERM the command and everything it started, then KILL what is left."""
-    if proc.poll() is not None:
-        return
+    """TERM the command and everything it started, then KILL what is left.
+
+    On POSIX the group is KILLed even when the leader has already exited: what it
+    started (and left behind) would otherwise keep running and hold stderr open.
+    """
     if os.name == "posix":
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(proc.pid, signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=grace_s)
-        # The group can outlive its leader, so KILL it even after the leader exited.
+        if proc.poll() is None:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(proc.pid, signal.SIGTERM)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=grace_s)
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, signal.SIGKILL)
-    else:
+    elif proc.poll() is None:
         proc.terminate()
         try:
             proc.wait(timeout=grace_s)
@@ -145,10 +147,7 @@ def run(
             )
             next_beat += heartbeat_s
         time.sleep(poll_s)
-    if os.name == "posix":
-        # Whatever OpenCode started and left behind (it would also hold stderr open).
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(proc.pid, signal.SIGKILL)
+    _kill_group(proc, grace_s)  # leftovers of a clean exit, too (POSIX)
     reader.join(timeout=5)
     elapsed = time.monotonic() - start
     status = proc.returncode

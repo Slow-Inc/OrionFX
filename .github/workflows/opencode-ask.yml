@@ -33,7 +33,7 @@ jobs:
       && github.event.comment.user.type != 'Bot'
       && (github.event_name == 'issue_comment' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 14
     # GITHUB_TOKEN is read-only; the reply is posted with the OpenCode App token.
     permissions:
       contents: read

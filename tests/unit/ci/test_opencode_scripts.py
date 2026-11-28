@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -1016,7 +1017,7 @@ def _fake(code: str) -> list[str]:
 
 
 CHATTY_THEN_DONE = """
-for i in range(25):
+for i in range(40):
     print(json.dumps({"type": "tool_use", "secret": "SECRET-CONTENT"}), flush=True)
     time.sleep(0.1)
 """
@@ -1030,88 +1031,138 @@ while True:
     time.sleep(0.05)
 """
 STDERR_ONLY = """
-for i in range(20):
+for i in range(40):
     sys.stderr.write("log line\\n"); sys.stderr.flush()
     time.sleep(0.1)
 """
+# Idle budgets stay well above a loaded runner's scheduling pauses; decide() has the
+# exact boundaries.
+IDLE = 1.5
 
 
-def _watch(
-    tmp: Path, cmd: list[str], idle: float, hard: float, grace: float = 1.0
-) -> tuple[subprocess.CompletedProcess[str], dict[str, Any], float]:
+def _watch_args(tmp: Path, idle: float, hard: float, grace: float) -> list[str]:
     events, stats = tmp / "events.jsonl", tmp / "stats.json"
     args = [sys.executable, "-I", str(WATCHDOG), "--events", str(events), "--stats", str(stats)]
     args += ["--idle-seconds", str(idle), "--hard-seconds", str(hard)]
     args += ["--heartbeat-seconds", "0.5", "--poll-seconds", "0.05", "--grace-seconds", str(grace)]
+    return args
+
+
+def _watch(
+    tmp: Path, cmd: list[str], idle: float = IDLE, hard: float = 30, grace: float = 1.0
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any], float]:
     started = time.monotonic()
-    result = subprocess.run([*args, "--", *cmd], capture_output=True, text=True, timeout=60)
+    result = subprocess.run(
+        [*_watch_args(tmp, idle, hard, grace), "--", *cmd],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     took = time.monotonic() - started
-    return result, json.loads(stats.read_text(encoding="utf-8")), took
+    return result, json.loads((tmp / "stats.json").read_text(encoding="utf-8")), took
+
+
+def _gone(pid: int, within: float = 5.0) -> bool:
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def test_watchdog_lets_a_chatty_process_finish(tmp_path: Path) -> None:
-    # Runs ~2.5 s, more than 4x the idle budget, and is never stopped.
-    result, stats, took = _watch(tmp_path, _fake(CHATTY_THEN_DONE), idle=0.6, hard=20)
+    # Runs ~4 s, more than twice the idle budget, and is never stopped.
+    result, stats, took = _watch(tmp_path, _fake(CHATTY_THEN_DONE))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert stats["outcome"] == "exited" and stats["events"] == 25
-    assert took > 2.0
-    assert stats["longest_silence_seconds"] < 0.6
+    assert stats["outcome"] == "exited" and stats["events"] == 40
+    assert took > 2 * IDLE
+    assert stats["longest_silence_seconds"] < IDLE
     # Heartbeats show the review is alive, and never echo event content.
     assert re.search(r"heartbeat: \dm\d\ds elapsed, \d+ events, last progress", result.stdout)
     assert "SECRET-CONTENT" not in result.stdout + result.stderr
-    assert (tmp_path / "events.jsonl").read_text(encoding="utf-8").count("SECRET-CONTENT") == 25
+    assert (tmp_path / "events.jsonl").read_text(encoding="utf-8").count("SECRET-CONTENT") == 40
 
 
 def test_watchdog_stops_a_silent_process_after_the_idle_budget(tmp_path: Path) -> None:
-    result, stats, took = _watch(tmp_path, _fake(SILENT), idle=0.8, hard=30)
+    result, stats, took = _watch(tmp_path, _fake(SILENT))
     assert result.returncode == watchdog.STALLED == extract.STALLED
     assert stats["outcome"] == "stalled" and stats["events"] == 1
-    assert 0.8 <= took < 10
+    assert IDLE <= took < 15
     assert "no progress for" in result.stdout
 
 
 def test_watchdog_stops_a_chatty_infinite_loop_at_the_hard_cap(tmp_path: Path) -> None:
-    result, stats, took = _watch(tmp_path, _fake(CHATTY_FOREVER), idle=0.6, hard=1.5)
+    result, stats, took = _watch(tmp_path, _fake(CHATTY_FOREVER), hard=2.5)
     assert result.returncode == watchdog.HARD_CAP == extract.HARD_CAP
     assert stats["outcome"] == "hard_cap" and stats["events"] > 10
-    assert 1.5 <= took < 10
+    assert 2.5 <= took < 15
 
 
 def test_stderr_output_counts_as_progress(tmp_path: Path) -> None:
-    result, stats, _ = _watch(tmp_path, _fake(STDERR_ONLY), idle=0.6, hard=20)
-    assert result.returncode == 0
+    result, stats, took = _watch(tmp_path, _fake(STDERR_ONLY))
+    assert result.returncode == 0, result.stdout
     assert stats["outcome"] == "exited" and stats["events"] == 0
-    assert result.stderr.count("log line") == 20  # passed through to the job log
+    assert took > 2 * IDLE
+    assert result.stderr.count("log line") == 40  # passed through to the job log
 
 
 def test_watchdog_passes_the_command_status_through(tmp_path: Path) -> None:
-    result, stats, _ = _watch(tmp_path, _fake("sys.exit(3)"), idle=5, hard=20)
+    result, stats, _ = _watch(tmp_path, _fake("sys.exit(3)"))
     assert result.returncode == 3 and stats["outcome"] == "exited" and stats["status"] == 3
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX signals")
+def test_a_command_killed_from_outside_reports_status_137(tmp_path: Path) -> None:
+    result, stats, _ = _watch(tmp_path, _fake("os.kill(os.getpid(), signal.SIGKILL)"))
+    assert result.returncode == 137 == extract.KILLED
+    assert stats["outcome"] == "exited" and stats["status"] == 137
+
+
+def _spawner(pidfile: Path, ignore_term: bool, then: str) -> list[str]:
+    ignore = "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else ""
+    code = f"""{ignore}child = subprocess.Popen(["sleep", "60"])
+open({str(pidfile)!r}, "w").write(str(child.pid))
+print("{{}}", flush=True)
+{then}
+"""
+    return _fake(code)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX process groups and signals")
 def test_watchdog_kills_the_whole_group_even_when_term_is_ignored(tmp_path: Path) -> None:
     pidfile = tmp_path / "grandchild.pid"
-    code = f"""
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-child = subprocess.Popen(["sleep", "60"])
-open({str(pidfile)!r}, "w").write(str(child.pid))
-print("{{}}", flush=True)
-time.sleep(60)
-"""
-    result, stats, took = _watch(tmp_path, _fake(code), idle=0.6, hard=30, grace=0.5)
+    cmd = _spawner(pidfile, ignore_term=True, then="time.sleep(60)")
+    result, stats, took = _watch(tmp_path, cmd, grace=0.5)
     assert result.returncode == watchdog.STALLED and stats["outcome"] == "stalled"
-    assert took < 10
-    pid = int(pidfile.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            break
+    assert took < 15
+    assert _gone(int(pidfile.read_text(encoding="utf-8"))), "the grandchild outlived the watchdog"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX process groups and signals")
+def test_what_a_clean_exit_leaves_behind_is_killed(tmp_path: Path) -> None:
+    pidfile = tmp_path / "grandchild.pid"
+    result, stats, took = _watch(tmp_path, _spawner(pidfile, ignore_term=False, then=""))
+    assert result.returncode == 0 and stats["outcome"] == "exited"
+    assert took < 15
+    assert _gone(int(pidfile.read_text(encoding="utf-8"))), "the grandchild outlived the watchdog"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX process groups and signals")
+def test_cancelling_the_step_stops_opencode_too(tmp_path: Path) -> None:
+    # The runner TERMs the step on cancel; OpenCode must never keep running on its own.
+    pidfile = tmp_path / "grandchild.pid"
+    cmd = _spawner(pidfile, ignore_term=False, then="time.sleep(60)")
+    proc = subprocess.Popen([*_watch_args(tmp_path, 30, 60, 1.0), "--", *cmd])
+    deadline = time.monotonic() + 10
+    while not (pidfile.exists() and pidfile.read_text(encoding="utf-8")):
+        assert time.monotonic() < deadline, "the fake never started"
         time.sleep(0.05)
-    else:
-        pytest.fail("the grandchild outlived the watchdog")
+    proc.send_signal(signal.SIGTERM)
+    assert proc.wait(timeout=15) == 128 + signal.SIGTERM
+    assert _gone(int(pidfile.read_text(encoding="utf-8"))), "the grandchild outlived the watchdog"
 
 
 @pytest.mark.parametrize(
@@ -1204,7 +1255,13 @@ STUB_OPENCODE = """#!/usr/bin/env bash
 # Fails like a policy breach would if the OIDC credentials reached it.
 [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}${ACTIONS_RUNTIME_TOKEN:-}" ] || exit 9
 [ "$OPENCODE_API_KEY" = oc_key ] || exit 8
+echo call >> "$RUNNER_TEMP/calls"
+calls=$(wc -l < "$RUNNER_TEMP/calls")
 echo '{"type": "tool_use", "part": {"tool": "read", "state": {"status": "completed"}}}'
+case "$STUB_MODE" in
+  retry) [ "$calls" -ge 2 ] || exit 0 ;;  # the first attempt ends with no answer
+  slow-no-answer) sleep 1.2; exit 0 ;;
+esac
 echo '{"type": "text", "part": {"messageID": "m", "text": "the review"}}'
 """
 
@@ -1212,7 +1269,18 @@ echo '{"type": "text", "part": {"messageID": "m", "text": "the review"}}'
 @pytest.mark.skipif(
     sys.platform == "win32" or shutil.which("jq") is None, reason="needs POSIX bash and jq"
 )
-def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("mode", "hard", "rc", "attempts", "said"),
+    [
+        ("answer", "2", 0, 1, "watchdog: exited (status 0)"),
+        ("retry", "2", 0, 2, "OpenCode gave no final answer; retrying once."),
+        ("slow-no-answer", "1", 1, 1, "No time left in the hard cap for a retry."),
+    ],
+    ids=["answer", "no-answer-then-retry", "no-budget-left-for-a-retry"],
+)
+def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(
+    tmp_path: Path, mode: str, hard: str, rc: int, attempts: int, said: str
+) -> None:
     stubs = tmp_path / "bin"
     stubs.mkdir()
     shim = f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n'
@@ -1233,20 +1301,26 @@ def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(tmp_path: P
         "PROMPT_FILE": str(tmp_path / "prompt.md"),
         "OUTPUT_FILE": str(tmp_path / "answer.md"),
         "IDLE_MINUTES": "1",
-        "HARD_MINUTES": "2",
+        "HARD_MINUTES": hard,
         "RETRIES": "1",
         "RUNNER_TEMP": str(tmp_path),
         "GITHUB_ACTION_PATH": str(WATCHDOG.parent),
         "GITHUB_STEP_SUMMARY": str(summary),
+        "STUB_MODE": mode,
     }
     result = subprocess.run(
         ["bash", "-c", _action_run_script()], env=env, capture_output=True, text=True, timeout=60
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert (tmp_path / "answer.md").read_text(encoding="utf-8") == "the review\n"
-    assert "OpenCode budgets: idle 1 min, hard cap 2 min for the step." in result.stdout
-    assert "watchdog: exited (status 0)" in result.stdout
-    assert "exited (status 0) after" in summary.read_text(encoding="utf-8")
+    assert result.returncode == rc, result.stdout + result.stderr
+    assert said in result.stdout
+    assert f"OpenCode budgets: idle 1 min, hard cap {hard} min for the step." in result.stdout
+    assert (tmp_path / "calls").read_text(encoding="utf-8").count("call") == attempts
+    assert summary.read_text(encoding="utf-8").count("- OpenCode attempt: exited") == attempts
+    if rc == 0:
+        assert (tmp_path / "answer.md").read_text(encoding="utf-8") == "the review\n"
+    else:
+        cause = (tmp_path / "opencode-cause").read_text(encoding="utf-8")
+        assert cause.strip() == "unavailable: OpenCode produced no final answer"
 
 
 def test_every_job_timeout_covers_the_hard_cap_plus_setup() -> None:
@@ -1256,7 +1330,7 @@ def test_every_job_timeout_covers_the_hard_cap_plus_setup() -> None:
         hard = re.search(r"^\s+hard-minutes: '(\d+)'", text, re.M)
         assert job and hard, path.name
         assert "timeout-minutes: '" not in text, path.name  # the deprecated input
-        assert int(job.group(1)) >= int(hard.group(1)) + 3, path.name
+        assert int(job.group(1)) >= int(hard.group(1)) + 5, path.name
 
 
 def test_review_budgets() -> None:
