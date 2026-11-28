@@ -88,6 +88,14 @@ def test_flat_at_the_time_barrier_with_its_drift() -> None:
     assert _label([*path, _bar(4, high="2100")], n=3).outcome is Outcome.FLAT  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize("atr", [D(0), D(-1)])
+def test_a_non_positive_atr_or_no_time_barrier_is_refused(atr: Decimal) -> None:
+    with pytest.raises(ValueError, match="positive ATR"):
+        triple_barrier(ENTRY, [_bar(1)], atr, time_bars=1)
+    with pytest.raises(ValueError, match="time_bars"):
+        triple_barrier(ENTRY, [_bar(1)], ATR, time_bars=0)
+
+
 def test_a_missing_bar_gives_no_label_and_too_few_bars_give_none_yet() -> None:
     assert _label([_bar(1), _bar(3), _bar(4)]) is None
     assert _label([_bar(1), _bar(2)], n=3) is None

@@ -15,8 +15,9 @@ splits, SHA-256 of the exact bytes). Each row is point in time:
   label as zero).
 - `barrier_labels`: the bar's triple-barrier label per horizon (#129; `label_version`,
   UP/DOWN/FLAT, its bid move and the timeframe it was read on), measured from bars known
-  by `window_end`, else null. A row with an AMBIGUOUS (dual-touch) label is left out;
-  `LabelStats` reports how many. The raw `move` labels are unchanged beside them.
+  by `window_end`, else null. A row with an AMBIGUOUS (dual-touch) label is left out
+  (`LabelStats.of` counts them for a window; the export does not emit it). The raw
+  `move` labels are unchanged beside them.
 Only one candle dataset version and one feature schema are exported. With `transforms`,
 `features` are the M04 transforms of the recorded snapshot (`transform_from_store`, the
 function the live recorder feeds a transform model with), under TRANSFORM_SCHEMA.
@@ -164,7 +165,9 @@ def export_dataset(
     session: SessionSchedule | None = None,
 ) -> DatasetManifest:
     """Write the dataset to `out`, register its manifest, and return it. `session`: the
-    market's schedule, for the barrier labels' and the transforms' bar windows."""
+    market's schedule, for the barrier labels' and the transforms' bar windows. None
+    means 24/7: for a scheduled market such as XAUUSD pass its schedule
+    (`XAUUSD_NY_1700`), or every scheduled closure is a gap that leaves rows unlabelled."""
     hs = sorted(horizons, key=horizon_key)
     longest = max(h.length for h in hs)
     log = BarLog(conn)

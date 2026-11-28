@@ -12,7 +12,8 @@ prices both sides from one (UP, DOWN, FLAT) distribution.
   so a historical source without spreads labels exactly as live bid candles do. M05's
   EV charges every cost once, outside it (`fusion.expected_value`).
 - A bar touching both barriers is AMBIGUOUS (the order inside a bar is unknown): no
-  class label. The export leaves such rows out and `LabelStats` reports the rate.
+  class label. The export leaves such rows out; `LabelStats.of` computes the rate for a
+  window (the export does not emit it yet).
 - Labels are read on the finest stored timeframe that can measure them (M5 first), so
   a dual touch is rare. A missing bar before the label resolves gives no label on that
   timeframe, never a stretched one.

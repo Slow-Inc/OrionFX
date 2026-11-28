@@ -28,6 +28,7 @@ from app.learning.export import export_dataset, horizon_key
 from app.learning.labels import LABEL_VERSION, LabelStats, Outcome, label_at, prediction_labels
 from app.learning.lifecycle import Split
 from app.market_data.features import ATR_M15
+from app.market_data.session import XAUUSD_NY_1700
 from app.market_data.store import CandleStore
 from app.prediction.card import ModelCard
 from app.prediction.engine import load_baseline
@@ -145,3 +146,32 @@ def test_a_dual_touch_row_is_left_out_of_the_export_and_counted(
                                     s.snapshot.values.get(ATR_M15), H4, now=END)
                            for s in snaps])  # fmt: skip
     assert stats.ambiguous >= 1 and stats.dual_touch_rate is not None
+
+
+def test_a_barrier_window_a_closure_stretches_past_the_split_end_is_purged(
+    conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    """The raw purge (as_of + horizon <= split end) is not enough on a scheduled market:
+    a closure inside the barrier window pushes its last slot past the split end."""
+    store = CandleStore(conn, dataset_version="v1")
+    closed = {88, 89, 90, 91}  # Monday 22:00-23:00 UTC: 17:00-18:00 New York (EST)
+    _bars(store, [str(2000 + i) for i in range(N)], skip=closed)
+    assert not any(XAUUSD_NY_1700.is_open(T0 + i * STEP) for i in closed)
+    MarketRecorder(conn, candles=store, symbol="XAUUSD", timeframe=M15, context_timeframes=[],
+                   horizons=[H4], provenance=Provenance.BACKFILL, session=XAUUSD_NY_1700,
+                   clock=Clock(_bar_close(N - 1) + LAG)).tick()  # fmt: skip
+    boundary = _bar_close(91)  # 23:00 UTC, the reopen
+    export_dataset(conn, symbol="XAUUSD", timeframe=M15, horizons=[H4], dataset_version="v1",
+                   window_start=_bar_close(0), window_end=END,
+                   splits=[Split(name="train", start=_bar_close(0), end=boundary),
+                           Split(name="validation", start=boundary, end=_bar_close(N))],
+                   dataset_id="xau-tb-closure", version="1", out=tmp_path / "d.jsonl",
+                   session=XAUUSD_NY_1700)  # fmt: skip
+    rows = {
+        json.loads(line)["as_of"]
+        for line in (tmp_path / "d.jsonl").read_text(encoding="utf-8").splitlines()
+    }
+    assert _bar_close(83).isoformat() in rows  # its window ends at 22:00, before the closure
+    for stretched in (_bar_close(86), _bar_close(87)):
+        assert stretched + H4.length <= boundary  # the raw purge would keep it
+        assert stretched.isoformat() not in rows
