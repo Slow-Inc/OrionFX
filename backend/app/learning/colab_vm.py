@@ -35,7 +35,10 @@ MANIFEST = "manifest.json"
 CARD = "card.json"
 WEIGHTS = "weights.json"
 RETURN_FILES = (MANIFEST, CARD, WEIGHTS)
-BINDING = ("job_id", "protocol_hash", "code_sha", "dataset_hash", "seeds")
+BINDING = (
+    "job_id", "protocol_hash", "code_sha", "code_hash", "dataset_hash", "seeds", "config",
+    "entrypoint", "model_id", "model_version",
+)  # fmt: skip
 
 
 def sha256(data: bytes) -> str:

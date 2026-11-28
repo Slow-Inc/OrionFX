@@ -60,48 +60,83 @@ Status: **LIVING** (2026-11-28). This is the operating manual for the autonomous
 | Card | `ModelCard` gains a training cutoff, dataset ref, label version and transform version. `predict` refuses any snapshot with `as_of <= cutoff`, so a model is never scored in-sample. | [planned #130] |
 | Trusted adapter | A reviewed module in an allowlisted package loads the weights only after checking them against the sha256 pinned in the registered card. One adapter serves many versions. | **[decision]** in the tracer PR #127: decide whether `build` receives the card and the verified weight bytes. Generating a module per version would break "allowlisted packages hold reviewed code only". |
 | Evaluation load | `load_model` is point-in-time since #126, so a model registered today is refused for every historical `now`. An explicit **evaluation load** is hash-verified, needs no eligibility, and is marked so that no live path accepts it. | **[decision]** #127 |
-| Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit, and the VM holds no secrets. The artifact, the manifest and the run log come back; only the artifact and the manifest are hash-checked and registered. Every VM is stopped after use. Runbook: §4a. | [built] #134 (runner, bundle scan, verified import; the trainer is a stub until #130). Resumable stages: not built. |
+| Where it runs | Colab CPU high-mem. Probed at 8 vCPU, 50 GB RAM, 226 GB disk and 0.26 CU/h. The code arrives as a `git archive` of a pinned commit. The bundle is scanned for the secret shapes and known local secret values listed in §4a. The artifact, the manifest and the run log come back. Only the artifact and the manifest are hash-checked, verified and kept, and nothing is registered yet. Every VM is stopped after use. Runbook: §4a. | [built] #134: runner, bundle scan, verified import of the files. The trainer is a stub until #130. **Not built:** registration, which comes through the #130 adapter path; resumable stages; local recompute of validation metrics (#130, #132). |
 
 ## 4a. Runbook: a training job on Colab [built #134]
 
-**Run it.** The job spec is a `JobSpec` JSON (`app/learning/colab_job.py`). It holds the protocol hash, the config, the local export path and its `dataset_hash`, the 40-hex code SHA, the seeds, the entrypoint, the model id and version, and `timeout_s`.
+**Run it.** The job spec is a `JobSpec` JSON (`app/learning/colab_job.py`). It holds:
+- the protocol hash and the config;
+- the local export path and its `dataset_hash`;
+- the 40-hex code SHA;
+- the seeds and the entrypoint;
+- the model id and version;
+- `timeout_s`.
+
+`bundle` adds `code_hash`, the sha256 of the bundled `code.tar`.
 
 ```
-uv run python -m app.learning.colab_runner bundle spec.json data/bundles/<job>   # scanned bundle
-uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json \
-    [--repo .] [--db data/orionfx.db] [--artifacts models] [--work data/colab_runs] [--min-cu 20]
+uv run python -m app.learning.colab_runner bundle spec.json data/bundles/<job> \
+    [--repo .] [--exports data/exports]                                # scanned bundle
+uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json --db <scratch.db> \
+    [--repo .] [--artifacts models] [--work data/colab_runs] [--min-cu 20]
 ```
 
 - `bundle` writes three files and nothing else:
-  - the export (`dataset.jsonl`);
+  - the export (`dataset.jsonl`). It must resolve inside `--exports` and must not have a secret-shaped name. It must be UTF-8 JSONL, with one JSON object on every line;
   - `job.json`;
   - `code.tar`, a `git archive` of the code SHA limited to `backend/app`, `pyproject.toml` and `uv.lock`. The SHA must be committed.
+- **Known local secrets.** Both commands load the secret-named environment variables, plus **every value** in `<repo>/.env`. Account data such as a login or a server name is not secret-named, so all `.env` values count. Any value of 4 or more characters, raw or JSON-escaped, found anywhere in the bundle is a refusal. The refusal names the variable, never the value.
+  - Expect false refusals when a `.env` holds a short or common value (for example `true`, a port or a host) that also occurs in the code or the data. Lengthen or rename the value; do not weaken the scan.
 - `run` steps:
-  1. Re-scans the bundle.
-  2. Refuses a `code.tar` that is not byte-identical to a fresh `git archive` of the job's code SHA, taken from `--repo`. The returned manifest is bound to that SHA, so this check proves the attribution. A different git version could change the archive bytes; that case is a refusal, never a pass.
+  1. Re-scans the bundle with the known local secrets, then uploads exactly the scanned bytes.
+  2. Checks `code_hash`, and refuses a `code.tar` that is not byte-identical to a fresh `git archive` of the job's code SHA, taken from `--repo`. This proves that the **uploaded** archive is the pinned commit. It does not prove that the VM ran it: the returned manifest is written by the untrusted VM, so the artifact's provenance is **asserted by the VM, not attested**. A different git version could change the archive bytes; that case is a refusal, never a pass.
   3. Refuses a model version that is already registered, or whose `models/<id>/<version>/` directory already exists.
-  4. Refuses when `colab usage` cannot be read, or shows less than `--min-cu`. **Exit 3 is the CU-floor stop condition: report it to the owner, do not lower the floor on your own.** Any other refusal (a bundle refused at steps 1–3, or a return refused at step 7) exits 2 with `REFUSED: ...`.
+  4. Refuses when `colab usage` cannot be read, or shows less than `--min-cu`. `--min-cu` cannot be set below 20 or to a non-finite value. **Exit 3 is the CU-floor stop condition: report it to the owner, do not lower the floor on your own.** Any other refusal (a bundle refused at steps 1–3, or a return refused at step 7) exits 2 with `REFUSED: ...`.
   5. Starts a CPU high-mem VM. The driver (`colab_vm.py`) installs the locked deps with a pinned uv and runs the entrypoint.
-  6. Downloads the output tar and the run log, then always runs `colab stop`. A `finally` runs it, and SIGINT, SIGTERM and SIGBREAK lead into that `finally`. The stop is attempted even when `colab new` failed, because a late failure can still have assigned a VM. If that stop also fails, the `new` error is raised (the real cause), with the recovery command attached as a note.
-  7. Verifies the return locally, then registers it.
+  6. Downloads the output tar and the run log, then always runs `colab stop`:
+     - A `finally` runs it, and SIGINT, SIGTERM and SIGBREAK lead into that `finally`.
+     - The stop runs in its own process group, so a second Ctrl-C does not kill it. It is retried once.
+     - A signal that arrives during the stop is held until the stop is done. It is then raised as `RunInterrupted`, so nothing is kept.
+     - The stop is attempted even when `colab new` failed, because a late failure can still have assigned a VM. If that stop also fails, the `new` error is raised (the real cause), with the recovery command attached as a note.
+     - The `colab` CLI never receives a secret-named environment variable. A `colab usage` call through this filtered environment authenticated on 2026-11-28.
+  7. Verifies the return locally, then keeps it (see below).
 - **Hard timeout:** `timeout_s` bounds the whole remote run.
-- **Verification:** the return must be exactly `manifest.json`, `card.json` and `weights.json`. Every sha256 must match the manifest. The manifest must echo the job's protocol hash, code SHA, dataset hash and seeds. The card must be a valid `ModelCard` for this job, naming the weights' hash. The weights must be JSON (a native model file is not accepted yet), and are never unpickled.
-- **What happens on success:** the files are copied to `models/<id>/<version>/`. The card's manifest goes into `ArtifactRegistry` last. Any failure before that registers nothing. Registration grants no eligibility.
+- **Verification.** The checks, in order:
+  - **The tar.** `out.tar` must be at most 256 MiB, checked after the download. It must be a plain, uncompressed tar holding exactly `manifest.json`, `card.json` and `weights.json`, all regular files.
+  - **The hashes.** Every sha256 must match the manifest.
+  - **The binding.** The manifest must echo these job fields: job id, protocol hash, code SHA, `code_hash`, dataset hash, seeds, config, entrypoint, and model id and version.
+    - A job bundled before `code_hash` existed is now refused only after the VM has run. The VM's binding comes from the pinned commit's code, so the mismatch shows up only in the returned manifest. Re-bundle older jobs.
+  - **The card.** It must be a valid `ModelCard` for this job and must name the weights' hash. It may not claim anything the VM cannot prove: no LIVE mode, `calibrated` false, no `evidence_refs`, and no `validation` metrics. Validation is recomputed locally, by trusted code (#130, #132). The kept card is forced to SHADOW only.
+  - **The weights.** They must be JSON (a native model file is not accepted yet), and are never unpickled.
+- **What happens on success:**
+  - The verified files are copied to `models/<id>/<version>/`.
+  - A local `run.json` record is written beside them. It holds the job, the file hashes, the session, the forced `supported_modes`, `registered: false`, and the time.
+  - **Nothing is registered.** The registry's `artifact_hash` must be what the trusted adapter loads (#130), so registration belongs to #130's `lightgbm_native` card and weights path. `RunResult` and `run.json` are its inputs. Never register from the copied `card.json`: it is the VM's bytes (hash-pinned by the manifest), so it may still list DEMO, while the forced SHADOW-only value lives in `RunResult` and `run.json`.
+  - Any failure during the copy removes the directory.
+  - `--db` is required. It is read only to refuse a version that is already registered; point smoke runs at a scratch DB.
 - **Recovery after a hard kill** (which cannot be caught): run `colab sessions`, then `colab --config <work>/colab-state.json stop -s <session>`. The runner records its sessions in that state file, not in the default one. A `VmStopFailed` error means the VM may still be billing.
-- Point smoke runs at a scratch `--db`: the registry is append-only.
-- **Smoke evidence (2026-11-28, agent-run, stub trainer, scratch DB).** Commit `88d8e4d` ran with `timeout_s` 900. The VM showed 8 CPUs, `MemTotal` 53467180 kB and Python 3.13.18. Locked deps were installed with uv 0.11.16. The return was verified and registered. Wall time was 38.9 s inside the runner and 44 s end to end; an earlier run was 53 s. The balance read 136.64 CU before and after: `colab usage` shows two decimals, so the spend was below 0.01 CU. Afterwards, `colab sessions` reported "No active sessions found on server", with `Active assignments: 0`. `--min-cu 1000` was refused with exit 3, and no VM started. A real hard-timeout run (`24eea01`, `timeout_s` 25) killed `colab exec` at the deadline, exited non-zero after 32 s in total, registered nothing and left no session. This proves the plumbing only. It is not a model result. The review fixes made after `0ce391c` are unit-tested only and have not run on Colab: the code-pin check, the `--repo` flag, exit 2 for a refused bundle, and the error kept when `new` fails.
+- **Smoke evidence (2026-11-28, run by the agent, stub trainer, scratch DB).**
+  - **Normal run.** Commit `88d8e4d` ran with `timeout_s` 900.
+    - The VM showed 8 CPUs, `MemTotal` 53467180 kB and Python 3.13.18. Locked deps were installed with uv 0.11.16.
+    - The return was verified and registered. That is the behaviour before this change.
+    - Wall time was 38.9 s inside the runner and 44 s end to end. An earlier run took 53 s.
+    - The balance read 136.64 CU before and after. `colab usage` shows two decimals, so the spend was below 0.01 CU.
+    - Afterwards, `colab sessions` reported "No active sessions found on server", with `Active assignments: 0`.
+  - **CU floor.** `--min-cu 1000` was refused with exit 3, and no VM started.
+  - **Hard timeout.** A real run at `24eea01`, with `timeout_s` 25, killed `colab exec` at the deadline. It exited non-zero after 32 s in total, registered nothing and left no session.
+  - **What this proves.** The plumbing only; it is not a model result. Every change after `0ce391c` is unit-tested only and has not run a VM on Colab: the review fixes, the hardened scan, verification without registration, and the stop handling.
 
-**What never goes onto the VM** (enforced by `scan_bundle`, which is tested on a bundle built from HEAD):
-- `.env` files;
+**What the scan refuses** (`scan_files`, tested on a bundle built from HEAD). It proves only what this list covers. It cannot find a secret whose shape and value it does not know.
+- `.env` files, and a dataset export with a secret-shaped name;
 - keys and certificates (`*.pem`, `*.key`, `id_*`), and anything named like a credential;
-- SQLite stores (by name and by magic bytes);
+- SQLite stores (by name and by magic bytes), and a dataset that is not UTF-8 JSONL objects, which covers compressed files;
 - key-like strings (private keys, AWS, GitHub, OpenAI/Anthropic-style, Google, Slack and Telegram tokens);
-- the value of any secret-named local environment variable;
+- the value of any secret-named local environment variable and of every `<repo>/.env` entry, raw or JSON-escaped;
 - config keys that look like secrets;
 - tests, frontend, docs, data, `.claude`, and any path outside the code allow-list;
-- links, special files, and member paths that are absolute or contain `..`.
+- links and special files, and member paths that are absolute, contain `..` or `\`, or are not normalised.
 
-The VM gets no broker, LLM or GitHub credentials. `--env` is never used, so no local environment is forwarded.
+The VM is given no broker, LLM or GitHub credentials. `--env` is never used, so no local environment is forwarded to the VM.
 
 ## 5. Evaluation tiers (always reported separately)
 

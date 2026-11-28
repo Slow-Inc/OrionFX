@@ -32,7 +32,9 @@ class FakeColab:
         *,
         balance: Decimal = Decimal("136.64"),
         fail: dict[str, Exception] | None = None,
+        fail_once: dict[str, Exception] | None = None,
         on_exec: Callable[["FakeColab"], None] = run_stub,
+        on_stop: Callable[["FakeColab"], None] | None = None,
         tamper: Callable[[Path], None] | None = None,
     ) -> None:
         self.calls: list[str] = []
@@ -40,13 +42,17 @@ class FakeColab:
         self.sessions: set[str] = set()
         self._balance = balance
         self._fail = fail or {}
+        self._fail_once = dict(fail_once or {})
         self._on_exec = on_exec
+        self._on_stop = on_stop
         self.tamper = tamper
 
     def _call(self, name: str) -> None:
         self.calls.append(name)
         if name in self._fail:
             raise self._fail[name]
+        if name in self._fail_once:
+            raise self._fail_once.pop(name)
 
     def balance(self) -> Decimal:
         self._call("usage")
@@ -73,4 +79,6 @@ class FakeColab:
 
     def stop(self, session: str, *, timeout: float) -> None:
         self._call("stop")
+        if self._on_stop is not None:
+            self._on_stop(self)
         self.sessions.discard(session)
