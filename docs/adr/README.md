@@ -7,7 +7,8 @@ codebase** (unless marked *pending*), so a new maintainer — human or agent —
 
 | # | Title | Area | Status |
 |---|-------|------|--------|
-| [0001](0001-policy-gated-autonomous-promotion.md) | Policy-gated autonomous model promotion to Shadow and Demo | M07/X02/M06 | Accepted 2026-11-28 (implementation pending, PRD #120) |
+| [0001](0001-policy-gated-autonomous-promotion.md) | Policy-gated autonomous model promotion to Shadow and Demo | M07/X02/M06 | Accepted 2026-11-28 (implementation pending, PRD #120); certifier amended by 0002 |
+| [0002](0002-agent-certification-of-training-protocol.md) | Agent certification of the M04 training protocol (Shadow/Demo only) | M04/X02/M07 | Accepted 2026-11-28 (owner delegation; amends 0001's certifier; Live stays owner-only) |
 
 _Earlier note: Master plan §10 P0 expects ADRs alongside the module PRDs (e.g. EA/Python bridge protocol, DB migration tool, vector index — all [PROPOSED]/[TBD] in master plan §5.2)._
 

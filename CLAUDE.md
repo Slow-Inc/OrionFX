@@ -94,7 +94,7 @@ The freedom stops at these limits, which are not optional. The mechanism in full
   - any change after the hash is a **new protocol version with a stated reason**;
   - **real money and Live stay owner-only**, and so do Live readiness thresholds and a certified `ReadinessPolicy`.
 
-  The owner may revoke the delegation. The mechanism is in `docs/agents/training-loop.md` §6.
+  The owner may revoke the delegation. The decision is recorded in ADR 0002 (`docs/adr/0002-agent-certification-of-training-protocol.md`). The mechanism is in `docs/agents/training-loop.md` §6.
 - **Promotion follows ADR 0001.** Autonomous promotion and rollback are allowed in Shadow/Demo only, under a certified policy. Real-money Live stays owner-only.
 - **Generated code is untrusted** (master plan §15.5 item 6). It goes through PR review, the T4 gates and tests. It runs in a training environment such as Colab with no broker, LLM or GitHub credentials and no production write access. Model weights load only through the trusted adapter, never by pickle.
 - **Honesty.** Write findings up in `docs/research/`: what was tried, what failed, and who verified it. Never present a backtest as a real-market result or an offline metric as profit.

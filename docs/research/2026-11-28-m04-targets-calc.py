@@ -132,3 +132,12 @@ print(
 )
 for fl in [0.0, 0.2]:
     print(f"FLAT share {fl}: a = {0.5 + 0.17 / (2 * (1 - fl)):.3f}")
+print()
+print(
+    "== k grid at H1 (T=4): driftless P(FLAT) and ATR_M15 needed for stressed cost/d <= 0.10 at $1.07/oz =="
+)
+for k in [1.0, 1.25, 1.5, 2.0]:
+    print(
+        f"k={k}: FLAT c=1.6 {p_flat(k, 1.6, 4):.3f}, c=1.2 {p_flat(k, 1.2, 4):.3f}; ATR_M15 >= {1.07 / (0.10 * k):.2f}"
+    )
+print(f"holdout months for 1,260 trades at 2 trades/day: {1260 / (2 * 252) * 12:.0f}")
