@@ -1,0 +1,645 @@
+#!/usr/bin/env bash
+# OrionFX merge gate: the OpenCode review at the PR head SHA (issue #149).
+#
+# REPO-LOCAL, NOT VENDORED. Every t4-* file in this folder is a copy of xeno-skills;
+# this one is OrionFX's own and is edited here. Upstream design: xenodeve/xeno-skills#441.
+#
+# PreToolUse on Bash, PowerShell and Monitor commands, and on GitHub MCP merge tools.
+# Active when "requireOpenCodeReview" is true in the working-tree .claude/t4.json OR in
+# the default branch's copy on GitHub (read with `gh api`; its settings win when it is
+# on). So an uncommitted edit or an old worktree cannot switch the gate off. If the
+# default branch cannot be read when it matters, the command is denied.
+# Limit: the hook registration in .claude/settings.json is also working-tree, so this
+# closes the invisible-disable case, not a determined local edit.
+#
+# HOW IT BLOCKS: a PreToolUse "deny" JSON object on stdout, exit 0 -- like t4-gate, and
+# NEVER by exit code. On Windows run-hook.cmd (vendored) runs `exit /b %ERRORLEVEL%`
+# inside a cmd `( ... )` block, which expands at parse time to 0, so an exit-2 block
+# would be lost there. Every error path, and any unexpected exit or signal (trap),
+# also prints the deny JSON. Allow = exit 0 with empty stdout.
+#
+# The policy and procedure of record are docs/agents/workflow.md -> Review gates; this
+# header describes the code.
+#
+# THE ONLY MERGE IT LETS THROUGH is a tool call that is exactly one plain command (no
+# other statement before or after it, which could change which gh runs) of the form
+#     gh pr merge <number|PR URL> [flags] --match-head-commit <head sha>
+# Any other text that looks like a merge -- `pr merge`, `/pulls/<n>/merge`,
+# `mergePullRequest`, `enablePullRequestAutoMerge` -- is refused (fail closed):
+# `bash -c`, `eval`, `xargs`, aliases, `gh api ... merge`, `{ ...; }`, `time`/`env`/
+# `command` prefixes, `gh -R x pr merge`. The keywords are counted in the raw text, in
+# a copy with quotes and escapes stripped, and in the lexed words, so `gh pr 'merge'`,
+# `m''erge` and `me\rge` count. The word after `gh [-R x] pr` must be a plain
+# subcommand (`gh pr $'merge'`, `gh pr -R x merge` are refused). Heredoc and
+# here-string bodies are data, unless the command also names an interpreter (bash, sh,
+# iex, Invoke-Expression, pwsh, ...): then the bodies are scanned too.
+# `--auto` / `--auto=<anything>` and `--admin` are refused; only known `gh pr merge`
+# flags pass, and outside quotes the merge command may not use shell expansion
+# ($ ` { } * ? [ ] ( ), PowerShell @splat) or a word-changing line continuation. Any
+# merge-like text (a `merge` word with `pr`/`gh`, or a merge keyword) with an unquoted
+# $NAME, ${...}, $(...) or backtick is refused before the keyword count, because such
+# words can be built by the shell (`gh${IFS}pr${IFS}merge`). Comments are not code.
+# NOT CLOSABLE BY A TEXT HOOK: indirect forms such as `$(...)`, variables holding the
+# command, encoded commands, scripts written in one tool call and run in another. The
+# GitHub ruleset on main is the server-side backstop.
+# A merge that passes the parse is then refused unless:
+#   1. normal pass: the latest review by "opencodeBotLogin" at the head SHA ends with
+#      `Verdict: 0 blocker, 0 major`, and EVERY thread the bot opened on the PR (any
+#      round) is resolved AND either has a reply from a trusted non-bot author or is
+#      outdated (its line changed);
+#   2. risk paths: if a changed file (or a rename's old path) matches "riskPaths", a
+#      trusted comment whose FIRST LINE is  <!-- t4:independent-review head=<sha> -->
+#      also exists, with a written summary below it;
+#   3. fallback: with no OpenCode review at the head SHA, a trusted comment whose first
+#      line is  <!-- t4:opencode-fallback head=<sha> reason="<cause>" -->  plus the
+#      independent-review record, both at the head SHA (bot threads still apply);
+#   4. round cap: when it blocks and OpenCode has reviewed more than "opencodeMaxRounds"
+#      (default 5) distinct commits, the message says stop and ask the owner.
+# "Trusted" = not a bot, author_association OWNER/MEMBER/COLLABORATOR (the repo is public).
+# Fail closed: any gh/API error, GraphQL `errors`, a runtime error, an unexpected exit
+# or an exhausted time budget denies. Not covered: `git push` to main, which the GitHub
+# ruleset on main blocks; a human merging on the web.
+#
+# Layout: a bash wrapper (config switch, deny output, trap), then the logic in perl
+# (`perl -x` runs from the #!perl line below). Bash + perl only, like the vendored
+# hooks; JSON::PP is core perl. When the gate is on, perl reads every gated command:
+# a text fast path here would be a second lexer to get wrong.
+set -uo pipefail
+
+DECIDED=0
+deny() {  # static reasons only; perl builds the JSON for anything dynamic
+  DECIDED=1
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"OpenCode merge gate (.claude/hooks/orionfx-opencode-merge-gate): %s"}}\n' "$1"
+  exit 0
+}
+on_exit() {
+  local rc=$?
+  [ "$DECIDED" = 1 ] || [ "$rc" = 0 ] || deny "internal error (the hook exited unexpectedly). Blocking (fail closed)."
+}
+trap on_exit EXIT
+trap 'deny "interrupted by a signal. Blocking (fail closed)."' HUP INT TERM
+
+input=""
+IFS= read -r -d '' input || true
+
+# The working-tree switch is only half of it: perl also reads the DEFAULT BRANCH's
+# .claude/t4.json from GitHub when it matters, and the gate is on if either says true
+# (a local edit or an old worktree cannot turn it off -- #150 review).
+cfg="${CLAUDE_PROJECT_DIR:-.}/.claude/t4.json"
+cfg_txt=""
+[ -f "$cfg" ] && { IFS= read -r -d '' cfg_txt < "$cfg" || true; }
+ORIONFX_LOCAL_ON=false
+[[ "$cfg_txt" =~ \"requireOpenCodeReview\"[[:space:]]*:[[:space:]]*true ]] && ORIONFX_LOCAL_ON=true
+
+if ! command -v perl >/dev/null 2>&1; then
+  # Without perl nothing can be checked, not even the default branch. Locally off:
+  # no opinion (documented limit). Locally on: deny.
+  [ "$ORIONFX_LOCAL_ON" = true ] || exit 0
+  deny "perl is not available, so the command cannot be checked. Blocking (fail closed)."
+fi
+ORIONFX_GH="$(command -v gh 2>/dev/null || true)"
+if [ -z "$ORIONFX_GH" ]; then
+  for c in "/c/Program Files/GitHub CLI/gh" "/c/Program Files/GitHub CLI/gh.exe"; do
+    [ -x "$c" ] && { ORIONFX_GH="$c"; break; }
+  done
+fi
+export ORIONFX_GH ORIONFX_CFG="$cfg" ORIONFX_LOCAL_ON
+out="$(printf '%s' "$input" | perl -x "$0")"
+rc=$?
+[ "$rc" = 0 ] || deny "internal error (the checker exited with $rc). Blocking (fail closed)."
+# Re-emit only what perl's block() prints: empty (allow) or one deny object.
+case "$out" in
+  "") exit 0 ;;
+  '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"'*'"}}')
+    DECIDED=1; printf '%s\n' "$out"; exit 0 ;;
+esac
+deny "the checker printed something other than a decision. Blocking (fail closed)."
+
+#!perl
+use strict;
+use warnings;
+use JSON::PP;
+use File::Temp qw(tempfile);
+
+use MIME::Base64 qw(decode_base64);
+
+my $JSON = JSON::PP->new->allow_nonref;
+my $T0 = time;
+my $BUDGET = 100;   # seconds for all gh calls; the hook's settings.json timeout is 150
+my $GH = $ENV{ORIONFX_GH} // '';
+# GNU coreutils `timeout` only: Windows timeout.exe and BSD timeout take other arguments,
+# and wrapping gh in one of those would make every call fail.
+my $HAS_TIMEOUT;
+sub has_timeout { $HAS_TIMEOUT //= do { my $v = `timeout --version 2>&1`; ($? == 0 && $v =~ /coreutils|GNU/) ? 1 : 0 } }
+# `gh api repos/{owner}/{repo}/...` resolves the repo from the cwd: pin it to the project.
+chdir $ENV{CLAUDE_PROJECT_DIR} if defined $ENV{CLAUDE_PROJECT_DIR} && -d $ENV{CLAUDE_PROJECT_DIR};
+
+# --- is the gate on? -----------------------------------------------------------------
+# On if the working tree OR the default branch's .claude/t4.json says
+# "requireOpenCodeReview": true; when the default branch says so, ITS settings (bot,
+# riskPaths, cap) are used. The default branch is read lazily -- only before a deny or
+# the first gh call -- so with the switch off locally, ordinary commands cost nothing.
+my $LOCAL_ON = ($ENV{ORIONFX_LOCAL_ON} // '') eq 'true';
+my ($cfg, $resolved) = (undef, 0);
+
+# One deny object on stdout, exit 0 (see the header: the exit code can be lost).
+sub deny_json {
+    print JSON::PP->new->ascii->canonical->encode({ hookSpecificOutput => {
+        hookEventName => 'PreToolUse', permissionDecision => 'deny',
+        permissionDecisionReason => "OpenCode merge gate (.claude/hooks/orionfx-opencode-merge-gate): $_[0]" } });
+    exit 0;
+}
+sub block {
+    resolve_cfg() unless $resolved || $LOCAL_ON;   # switch off everywhere: no opinion (exit 0)
+    deny_json($_[0]);
+}
+sub H { ref $_[0] eq 'HASH' ? $_[0] : {} }
+sub A { ref $_[0] eq 'ARRAY' ? $_[0] : [] }
+sub is_on { my $v = H($_[0])->{requireOpenCodeReview}; JSON::PP::is_bool($v) && $v }
+
+sub resolve_cfg {
+    $resolved = 1;   # first: a deny raised while fetching must not recurse here
+    my $f = gh_json('api', 'repos/{owner}/{repo}/contents/.claude/t4.json');
+    my $remote = eval { $JSON->decode(decode_base64($f->{content} // '')) };
+    deny_json("could not parse the default branch's .claude/t4.json, so the gate cannot tell whether it is on. "
+        . "Blocking (fail closed).") unless ref $remote eq 'HASH';
+    if (is_on($remote)) { $cfg = $remote; return }
+    exit 0 unless $LOCAL_ON;
+    $cfg = eval { open my $fh, '<', $ENV{ORIONFX_CFG} or die; local $/; $JSON->decode(<$fh>) };
+    deny_json("could not parse $ENV{ORIONFX_CFG}.") unless ref $cfg eq 'HASH';
+}
+
+my $raw = do { local $/; <STDIN> };
+my $in = eval { $JSON->decode($raw) };
+block("could not parse the hook input as JSON. Blocking rather than guessing.") unless ref $in eq 'HASH';
+my $tool = $in->{tool_name} // '';
+
+block("`$tool` can merge without this gate seeing the review. Use `gh pr merge <n> --match-head-commit <sha>` instead.")
+    if $tool =~ /^mcp__github__.*merge/i;
+my $ps = $tool eq 'PowerShell';
+exit 0 unless $ps || $tool eq 'Bash' || $tool eq 'Monitor';
+my $cmd = H($in->{tool_input})->{command} // '';
+$cmd = '' if ref $cmd;
+
+# --- split into command segments of words (a small shell lexer) -------------------
+# bash ANSI-C quoting: the text of a $'...' span, with its escapes decoded the way bash
+# does (`gh $'\x70r' merge` is `gh pr merge`).
+sub ansi_c {
+    my $s = shift;
+    my %named = (n => "\n", t => "\t", r => "\r", a => "\a", b => "\b", e => "\e", E => "\e", f => "\f", v => "\x0b");
+    $s =~ s{\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|([0-7]{1,3})|c(.)|(.))}{
+        defined $1 ? chr hex $1 : defined $2 ? chr hex $2 : defined $3 ? chr hex $3
+      : defined $4 ? chr oct $4 : defined $5 ? chr(ord(uc $5) ^ 64) : ($named{$6} // $6) }gse;
+    return $s;
+}
+# The same, applied to every $'...' span of a text (bash only).
+sub decode_ansi_c { my $s = shift; $ps ? $s : $s =~ s{\$'((?:\\.|[^'\\])*)'}{ansi_c($1)}gser }
+sub segments {
+    my ($s) = @_;
+    my (@segs, @words);
+    my ($w, $inw, $i, $n) = ('', 0, 0, length $s);
+    my $endw = sub { if ($inw) { push @words, $w; ($w, $inw) = ('', 0) } };
+    my $ends = sub { $endw->(); push @segs, [@words] if @words; @words = () };
+    while ($i < $n) {
+        my $c = substr($s, $i, 1);
+        if (!$ps && $c eq '$' && substr($s, $i + 1) =~ /^'((?:\\.|[^'\\])*)'?/s) {   # $'...'
+            $w .= ansi_c($1); $inw = 1; $i += 1 + length $&; next;
+        }
+        if (!$ps && $c eq '$' && substr($s, $i + 1, 1) eq '"') { $i++; next }      # $"..." = "..."
+        if ($c eq '#' && !$inw) {                                                   # comment to end of line
+            my $j = index($s, "\n", $i); $i = $j < 0 ? $n : $j; next;
+        }
+        if ($c eq "'") {
+            my $j = index($s, "'", $i + 1); $j = $n if $j < 0;
+            $w .= substr($s, $i + 1, $j - $i - 1); $inw = 1; $i = $j + 1; next;
+        }
+        if ($c eq '"') {
+            $i++;
+            while ($i < $n && substr($s, $i, 1) ne '"') {
+                my $d = substr($s, $i, 1);
+                if (!$ps && $d eq '\\' && $i + 1 < $n && substr($s, $i + 1, 1) =~ /["\\\$`]/) { $i++; $d = substr($s, $i, 1) }
+                elsif ($ps && $d eq '`' && $i + 1 < $n) { $i++; $d = substr($s, $i, 1) }
+                $w .= $d; $i++;
+            }
+            $i++; $inw = 1; next;
+        }
+        my $esc = $ps ? '`' : '\\';
+        if ($c eq $esc && $i + 1 < $n) { $w .= substr($s, $i + 1, 1); $inw = 1; $i += 2; next }
+        if ($c =~ /[<>]/) {
+            $w .= $c; $inw = 1; $i++;
+            if ($i < $n && substr($s, $i, 1) eq '&') { $w .= '&'; $i++ }
+            next;
+        }
+        if ($c =~ /[;&|()\n]/) { $ends->(); $i++; next }
+        if ($c =~ /\s/) { $endw->(); $i++; next }
+        $w .= $c; $inw = 1; $i++;
+    }
+    $ends->();
+    return @segs;
+}
+sub base { (my $b = shift // '') =~ s{.*[\\/]}{}; $b =~ s{\.exe$}{}i; lc $b }
+sub is_gh { base(shift) eq 'gh' }
+my $FORM = "gh pr merge <number|PR URL> --squash --match-head-commit <head sha>";
+my $UNCHECKABLE = "in a form the gate cannot check. Run the merge as its own plain command: `$FORM` (no wrapper, "
+    . "prefix, alias, quoting, `gh api` or second merge). If the command only MENTIONS a merge in text, move that "
+    . "text into a file (--body-file / -F) or a heredoc that no interpreter reads.";
+
+# --- normalise ---------------------------------------------------------------------
+# $text: heredoc / here-string bodies replaced (they are data), line continuations
+# joined. $code: the same with the bodies kept, for when an interpreter reads them.
+# A continuation is joined both with nothing (bash drops `\<newline>`, even mid-word)
+# and with a space; every variant is scanned.
+sub join_lines { my ($s, $with) = @_; $ps ? $s =~ s{`\r?\n}{$with}gr : $s =~ s{\\\r?\n}{$with}gr }
+# Quote- and comment-aware: `<<EOF` / `@'` inside quotes or a comment is not a body,
+# and the rest of the `<<EOF` line is still code (`cat <<EOF; gh pr merge 7`). Where
+# `<<` may be a shift (`((`, `$[`, `let`), no body is removed. Unsure = keep the text.
+sub strip_bodies {
+    my $s = shift;
+    return $s if !$ps && $s =~ /\(\(|\$\[|\blet\b/;
+    my $esc = $ps ? '`' : '\\';
+    my ($out, $i, $n, $q, @pending) = ('', 0, length $s, '');
+    while ($i < $n) {
+        my $c = substr($s, $i, 1);
+        if ($q ne '') {                                   # inside '...', "..." or $'...'
+            if ($q ne "'" && $c eq $esc && $i + 1 < $n) { $out .= substr($s, $i, 2); $i += 2; next }
+            $q = '' if $c eq ($q eq 'a' ? "'" : $q);
+            $out .= $c; $i++; next;
+        }
+        if ($c eq $esc && $i + 1 < $n) { $out .= substr($s, $i, 2); $i += 2; next }
+        if ($ps && $c eq '@' && substr($s, $i + 1) =~ /^(['"])[ \t]*\r?\n/) {   # PowerShell here-string
+            my $qc = $1;
+            if (substr($s, $i) =~ /^\@\Q$qc\E[ \t]*\r?\n.*?\r?\n\Q$qc\E\@/s) { $out .= "''"; $i += length $&; next }
+        }
+        if ($c eq "'" || $c eq '"') {
+            $q = ($c eq "'" && !$ps && $i > 0 && substr($s, $i - 1, 1) eq '$') ? 'a' : $c;
+            $out .= $c; $i++; next;
+        }
+        if ($c eq '#' && ($i == 0 || substr($s, $i - 1, 1) =~ /[\s;&|()]/)) {   # comment to end of line
+            my $j = index($s, "\n", $i); $j = $n if $j < 0;
+            $i = $j; next;   # dropped: a comment is not code, and mentioning a merge in one is fine
+        }
+        if (!$ps && substr($s, $i) =~ /^<<(?!<)(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([^\s;&|<>()'"]+))/) {
+            push @pending, $2 // $3 // $4;
+            $out .= '<<HEREDOC'; $i += length $&; next;
+        }
+        if (!$ps && $c eq '<') { while ($i < $n && substr($s, $i, 1) eq '<') { $out .= '<'; $i++ } next }
+        if ($c eq "\n" && @pending) {                     # bodies start on the next line
+            $out .= "\n"; $i++;
+            while (@pending) {
+                my $d = shift @pending;
+                my $rest = substr($s, $i);
+                last unless $rest =~ /^.*?^[ \t]*\Q$d\E[ \t]*\r?$(?:\n|\z)/ms;   # no end: keep it as code
+                $out .= "\n"; $i += length $&;   # the body (and its end line) become an empty line
+            }
+            @pending = ();
+            next;
+        }
+        $out .= $c; $i++;
+    }
+    return $out;
+}
+my $stripped_cmd = strip_bodies($cmd);
+my $text = join_lines($stripped_cmd, ' ');
+my @segs = segments($text);
+my @data_variants = ($text, join_lines($stripped_cmd, ''));
+
+# Heredoc and here-string bodies are DATA only when every command in the call is a
+# known data sink -- it stores or forwards text and never runs it -- and no word names
+# an interpreter. Otherwise they are code and are scanned: `bash <<X`, `$SHELL <<X`,
+# `/bin/ash <<X`, `make -f - <<X`, `cat <<X | sh`, `@'...'@ | iex`, and
+# `gh api --input - <<X` (stdin can carry a merge mutation).
+my $INTERP = qr/^(?:bash|sh|zsh|dash|ksh|mksh|fish|busybox|source|exec|eval|env|xargs|nohup|sudo|wsl|cmd|
+    pwsh|powershell|iex|invoke-expression|invoke-command|icm|start-process|saps|start|
+    python[0-9.]*|py|perl|node|ruby|php|osascript)$/xi;
+my %DATA_CMD = map { $_ => 1 } qw(cat tee git echo printf set-content add-content out-file write-output);
+sub data_sink {
+    my @w = @{ $_[0] };
+    my $b = base($w[0]);
+    return 1 if $DATA_CMD{$b};
+    return 1 if $b eq 'gh' && ($w[1] // '') ne 'api';
+    return 1 if !$ps && @w == 1 && $w[0] =~ /^[A-Za-z_][A-Za-z0-9_]*=/;          # VAR=value
+    return 1 if $ps && $w[0] =~ /^\$[A-Za-z_][\w:]*$/ && ($w[1] // '') eq '=';  # $v = @'...'@
+    return 0;
+}
+my $bodies_are_code = grep({ my $s = $_; ($s->[0] // '') eq '.' || grep { base($_) =~ $INTERP } @$s } @segs)
+    || grep { !data_sink($_) } @segs;
+my @variants = $bodies_are_code ? (@data_variants, join_lines($cmd, ' '), join_lines($cmd, '')) : @data_variants;
+
+# Count the merge keywords in each variant raw, with quotes / escapes stripped
+# (`m''erge`, `me\rge`, `$'merge'`), and as lexed words; the largest count wins.
+my $KW = qr{\bpr(?:\s|\\.)+merge\b|/pulls/[^/\s'"]+/merge\b|mergePullRequest|enablePullRequestAutoMerge}i;
+sub kw_count { my $n = () = $_[0] =~ /$KW/g; $n }
+my $n_kw = 0;
+for my $v (@variants) {
+    my $stripped = $v =~ s/\$(?=['"])//gr =~ s/['"\\`]//gr;
+    my $decoded = decode_ansi_c($v) =~ s/['"\\`]//gr;   # `gh $'\x70r' merge`
+    my $lexed = join "\n", map { join ' ', @$_ } segments($v);
+    for my $c (kw_count($v), kw_count($stripped), kw_count($decoded), kw_count($lexed)) { $n_kw = $c if $c > $n_kw }
+}
+
+# The word after `gh [-R <repo>|--repo[=<repo>]] pr` must be a plain subcommand, or the
+# keyword scan cannot see what it is: `gh pr $'\x6derge'`, `gh pr -R x merge`, `gh pr $SUB`.
+for my $v (@variants) {
+    for my $s (segments($v)) {
+        my @w = @$s;
+        for my $i (grep { is_gh($w[$_]) } 0 .. $#w) {
+            my $j = $i + 1;
+            while ($j < @w && $w[$j] =~ /^-/) { $j += ($w[$j] eq '-R' || $w[$j] eq '--repo') ? 2 : 1 }
+            next unless ($w[$j] // '') eq 'pr';
+            my $sub = $w[$j + 1] // '';
+            block("`gh pr` is followed by `$sub`, not a plain subcommand, so the gate cannot tell whether it merges. "
+                . "Write the subcommand first, as a plain word (`gh pr <subcommand> ...`).")
+                unless $sub =~ /^[a-z][a-z-]*$/ || $sub eq '--help' || $sub eq '-h';
+        }
+    }
+}
+# Words can be BUILT from unquoted expansions: `gh${IFS}pr${IFS}merge` is a merge to bash
+# (an unquoted ${IFS} splits into spaces) but one word to the lexer, and `gh $x merge`
+# hides the subcommand. So in merge-like text (a `merge` word together with `pr` or
+# `gh`, or a merge keyword), any unquoted `$NAME`, `${...}`, `$(...)` or backtick is
+# refused -- before the keyword count can wave it through. `git merge $BRANCH` is not
+# merge-like and is not touched.
+for my $v (@variants) {
+    my $u = unquoted($v);
+    # Merge-likeness is judged on the text with quotes removed (`gh$IFS"pr"$IFS"merge"`),
+    # each expansion standing for a space.
+    my $loose = decode_ansi_c($v) =~ s/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\{[^}]*\}/ /gr =~ s/['"]//gr;
+    next unless $n_kw || ($loose =~ /\bmerge\b/i && $loose =~ /\b(?:pr|gh)\b/i)
+        || $loose =~ /mergePullRequest|enablePullRequestAutoMerge|\/merge\b/i;
+    block("this merge-like command uses an unquoted shell expansion (`\$NAME`, `\${...}`, `\$(...)` or a backtick), "
+        . "so the gate cannot see the words the shell will run (for example `gh\${IFS}pr\${IFS}merge`). $UNCHECKABLE")
+        if $u =~ /\$[{(A-Za-z_0-9@*#?!\$-]/ || (!$ps && $u =~ /`/);
+}
+exit 0 unless $n_kw;
+
+sub is_merge_seg { my $s = shift; @$s >= 3 && is_gh($s->[0]) && $s->[1] eq 'pr' && $s->[2] eq 'merge' }
+my @merges = grep { is_merge_seg($_) } @segs;
+block("this command mentions a merge ($n_kw place(s)) $UNCHECKABLE") unless @merges == 1 && $n_kw == 1;
+# Another statement in the same call can change WHICH gh runs (`export PATH=...;`,
+# `hash -p`, `alias`, `cd`) or where its output goes, so the merge must stand alone.
+block("the merge must be the only command in this tool call (no `;`, `&&`, `||`, `|`, newline or other "
+    . "statement before or after it): another statement can change which `gh` actually runs. Run `$FORM` by itself.")
+    unless @segs == 1;
+# The review state is read with the gh this hook resolves on PATH; a merge naming another
+# gh binary by path could be a different program from the one that answered.
+block("run the merge with plain `gh` (no path, no call operator): the gate checks the review with the `gh` on PATH, "
+    . "and a merge through another binary may not be the one checked. `$FORM`.")
+    unless $merges[0][0] eq 'gh';
+
+# The shell must not be able to build arguments the lexer did not see: outside quotes
+# and comments, no expansion or expression characters ($ ` { } * ? [ ] ( ), PowerShell
+# @splat), and no line continuation that changes the words (`-\<newline>-auto`).
+sub unquoted {
+    my $s = shift;
+    my $e = quotemeta($ps ? '`' : '\\');
+    $s =~ s{$e.|'[^']*'|"(?:$e.|[^"])*"}{ substr($&, 0, 1) =~ /['"]/ ? "''" : $& }gse;
+    $s =~ s{(^|[\s;&|()])#[^\n]*}{$1}g;   # a comment is not code
+    return $s;
+}
+my @merges0 = grep { is_merge_seg($_) } segments($data_variants[1]);
+block("the merge command uses shell expansion, an expression or a line continuation, so the arguments `gh` receives "
+    . "are not the ones checked. $UNCHECKABLE")
+    if unquoted($text) =~ /[\$`{}*?\[\]()]|(?:^|\s)\@/
+    || "@{ $merges0[0] // [] }" ne "@{ $merges[0] }";
+
+# --- merge arguments: known `gh pr merge` flags only --------------------------------
+my %VALUE_FLAG = map { $_ => 1 } qw(-b --body -F --body-file -t --subject -A --author-email --match-head-commit -R --repo);
+my %BOOL_FLAG  = map { $_ => 1 } qw(-d --delete-branch --disable-auto -m --merge -r --rebase -s --squash);
+my @tok = @{ $merges[0] }[3 .. $#{ $merges[0] }];
+my @pos;
+my ($repo_flag, $mhc) = ('', '');
+for (my $i = 0; $i < @tok; $i++) {
+    my $t = $tok[$i];
+    block("`--auto` queues a merge for later, after this gate has run. Merge when the review passes instead.")
+        if $t =~ /^--auto(?:=|$)/;
+    block("`--admin` merges past the branch requirements. The owner runs it by hand if it is ever needed.")
+        if $t =~ /^--admin(?:=|$)/;
+    if ($t =~ /^\d*[<>]+&?\d*$/) { $i++; next }      # redirection with a separate target
+    next if $t =~ /^\d*[<>]/;                          # redirection with an attached target
+    my ($name, $val);
+    if ($t =~ /^(--[A-Za-z-]+)=(.*)$/s) {
+        ($name, $val) = ($1, $2);
+        next if $BOOL_FLAG{$name} && $val =~ /^(?:true|false)$/;
+        block("unknown `gh pr merge` flag `$t`. $UNCHECKABLE") unless $VALUE_FLAG{$name};
+    }
+    elsif ($t =~ /^-R(.+)$/s)              { ($name, $val) = ('-R', $1) }
+    elsif ($VALUE_FLAG{$t})                { ($name, $val) = ($t, $tok[++$i] // '') }
+    elsif ($BOOL_FLAG{$t} || $t =~ /^-[dmrs]+$/) { next }
+    elsif ($t =~ /^-/)                     { block("unknown `gh pr merge` flag `$t`. $UNCHECKABLE") }
+    else                                   { push @pos, $t; next }
+    $repo_flag = $val if $name eq '-R' || $name eq '--repo';
+    $mhc = $val if $name eq '--match-head-commit';
+}
+block("name the PR explicitly: `$FORM`. A bare `gh pr merge` or a branch name may merge a different PR than the one checked.")
+    unless @pos == 1 && $pos[0] =~ m{^(?:\d+|https://github\.com/[^/]+/[^/]+/pull/\d+/?)$};
+my $sel = $pos[0];
+block("add `--match-head-commit <head sha>`, so a push after this check cannot merge an unreviewed head: `$FORM`.")
+    unless $mhc =~ /^[0-9a-fA-F]{40}$/;
+
+# --- config (the default branch's when it has the gate on; see resolve_cfg) --------
+resolve_cfg() unless $resolved;
+my $bot = $cfg->{opencodeBotLogin};
+block('.claude/t4.json "opencodeBotLogin" must be a non-empty string when "requireOpenCodeReview" is true.')
+    unless defined $bot && !ref $bot && $bot =~ /\S/;
+my $risk = $cfg->{riskPaths};
+block('.claude/t4.json "riskPaths" must be a non-empty list of glob strings when "requireOpenCodeReview" is true.')
+    unless ref $risk eq 'ARRAY' && @$risk && !grep { !defined $_ || ref $_ || $_ !~ /\S/ } @$risk;
+my $max_rounds = $cfg->{opencodeMaxRounds} // 5;
+block('.claude/t4.json "opencodeMaxRounds" must be a positive integer.')
+    unless !ref $max_rounds && $max_rounds =~ /^[1-9][0-9]*$/;
+
+sub norm_login { my $l = lc(shift // ''); $l =~ s/\[bot\]$//; $l }   # REST has "[bot]", GraphQL not
+my $bot_n = norm_login($bot);
+sub by_bot { my $u = H(H($_[0])->{user}); ($u->{type} // '') eq 'Bot' && norm_login($u->{login}) eq $bot_n }
+sub trusted_assoc { (shift // '') =~ /^(OWNER|MEMBER|COLLABORATOR)$/ }
+
+sub glob_re {
+    my $g = shift;
+    my $re = '';
+    while ($g =~ /\G(\*\*\/|\*\*|\*|\?|[^*?]+)/gc) {
+        my $p = $1;
+        $re .= $p eq '**/' ? '(?:.*/)?' : $p eq '**' ? '.*' : $p eq '*' ? '[^/]*' : $p eq '?' ? '[^/]' : quotemeta $p;
+    }
+    qr/^$re$/;
+}
+my @risk_re = map { glob_re($_) } @$risk;
+
+# --- gh ($GH and has_timeout are set at the top: resolve_cfg calls gh early) ---------
+sub gh {
+    my (@args) = @_;
+    block('gh (GitHub CLI) was not found, so the review state cannot be checked.') unless $GH ne '';
+    my $label = join ' ', map { /^query=/ ? 'query=...' : $_ } @args;
+    my $left = $T0 + $BUDGET - time;
+    block("time budget used up before `gh $label`. Blocking (fail closed); retry the merge.") if $left < 5;
+    my ($efh) = tempfile(UNLINK => 1);
+    my @run = ((has_timeout() ? ('timeout', ($left < 30 ? $left : 30)) : ()), $GH, @args);
+    my $pid = open(my $out, '-|');
+    block("could not start gh: $!") unless defined $pid;
+    if (!$pid) { open STDERR, '>&', $efh; exec { $run[0] } @run; exit 127 }
+    my $o = do { local $/; <$out> } // '';
+    close $out;
+    my $rc = $? >> 8;
+    if ($rc != 0) {
+        seek $efh, 0, 0;
+        my $e = do { local $/; <$efh> } // '';
+        $e =~ s/\s+$//;
+        block("`gh $label` failed (exit $rc), so the review state is unknown. Blocking (fail closed).\n$e");
+    }
+    return $o;
+}
+
+# `gh api --paginate` prints one JSON array per page, back to back.
+sub gh_list {
+    my $o = gh('api', '--paginate', @_);
+    my $p = JSON::PP->new;
+    my @all;
+    $p->incr_parse($o);
+    while (1) {
+        my $v = eval { $p->incr_parse };
+        block("could not parse the reply of `gh api $_[0]`.") if $@;
+        last unless defined $v;
+        block("unexpected reply shape from `gh api $_[0]`.") unless ref $v eq 'ARRAY';
+        push @all, @$v;
+    }
+    return \@all;
+}
+
+sub gh_json {
+    my $o = gh(@_);
+    my $v = eval { $JSON->decode($o) };
+    block("could not parse the reply of `gh @_[0..1]`.") unless ref $v eq 'HASH';
+    return $v;
+}
+
+# --- PR, head SHA, changed files ----------------------------------------------------
+my @view = ('pr', 'view', $sel);
+push @view, '--repo', $repo_flag if $repo_flag ne '';
+my $pr = gh_json(@view, '--json', 'number,headRefOid,url,changedFiles');
+my ($num, $head, $url) = @{$pr}{qw(number headRefOid url)};
+block("gh pr view returned no head SHA.") unless defined $head && !ref $head && $head =~ /^[0-9a-f]{40}$/i;
+my ($owner, $name) = (defined $url && !ref $url ? $url : '') =~ m{github\.com/([^/]+)/([^/]+)/pull/\d+};
+block("could not read owner/repo from the PR URL.") unless $owner && defined $num && $num =~ /^\d+$/;
+$head = lc $head;
+block("--match-head-commit $mhc is not the PR head ($head). Re-check the review for the current head, then use "
+    . "--match-head-commit $head.") unless lc $mhc eq $head;
+my $R = "repos/$owner/$name";
+
+my $files = gh_list("$R/pulls/$num/files?per_page=100");
+block("GitHub listed " . scalar(@$files) . " of $pr->{changedFiles} changed files, so the risk-path check would be incomplete.")
+    if defined $pr->{changedFiles} && @$files < $pr->{changedFiles};
+my @risk_hits;
+for my $f (map { H($_) } @$files) {
+    for my $path (grep { defined && !ref } $f->{filename}, $f->{previous_filename}) {
+        if (grep { $path =~ $_ } @risk_re) { push @risk_hits, $path; last }
+    }
+}
+
+# --- OpenCode reviews -----------------------------------------------------------------
+my @bot_reviews = grep { by_bot($_) } map { H($_) } @{ gh_list("$R/pulls/$num/reviews?per_page=100") };
+my %bot_review_id = map { ($_->{id} // '') => 1 } @bot_reviews;
+my @head_reviews = sort { ($a->{id} // 0) <=> ($b->{id} // 0) } grep { lc($_->{commit_id} // '') eq $head } @bot_reviews;
+my @problems;
+
+if (@head_reviews) {
+    my $body = $head_reviews[-1]{body} // '';
+    $body = '' if ref $body;
+    my ($last) = grep { /\S/ } reverse split /\r?\n/, $body;
+    if (($last // '') !~ /^\s*Verdict:\s*(\d+)\s+blockers?,\s*(\d+)\s+majors?\s*$/) {
+        push @problems, "the latest OpenCode review at $head has no `Verdict: <n> blocker, <n> major` line, so its findings cannot be counted.";
+    } elsif ($1 + $2 > 0) {
+        push @problems, "the latest OpenCode review at $head reports $1 blocker and $2 major finding(s). "
+            . "Fix them (reply on any inline thread you decline, with the reason) and push; the new head gets a new review.";
+    }
+}
+
+# Every thread the bot opened on this PR, in any round: it must be resolved AND either
+# answered by a trusted human or outdated (its line changed since).
+if (@bot_reviews) {
+    my $q = 'query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){'
+          . 'reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved isOutdated path line '
+          . 'comments(first:50){nodes{authorAssociation author{login __typename} pullRequestReview{databaseId}}}}}}}}';
+    my $g = gh_json('api', 'graphql', '-f', "owner=$owner", '-f', "name=$name", '-F', "n=$num", '-f', "query=$q");
+    block("the GraphQL reply has errors: " . $JSON->encode($g->{errors})) if $g->{errors};
+    my $rt = H(H(H(H($g->{data})->{repository})->{pullRequest})->{reviewThreads});
+    block("the GraphQL reply has no reviewThreads.") unless ref $rt->{nodes} eq 'ARRAY';
+    block("the PR has more than 100 review threads; this gate does not page them, so it cannot prove they are handled.")
+        if H($rt->{pageInfo})->{hasNextPage};
+    my (@open, @silent);
+    for my $t (map { H($_) } @{ $rt->{nodes} }) {
+        my @c = map { H($_) } @{ A(H($t->{comments})->{nodes}) };
+        next unless @c;
+        my $first = $c[0];
+        my $a0 = H($first->{author});
+        next unless $bot_review_id{ H($first->{pullRequestReview})->{databaseId} // '' }
+            || (($a0->{__typename} // '') eq 'Bot' && norm_login($a0->{login}) eq $bot_n);
+        my $where = ($t->{path} // '?') . ':' . ($t->{line} // '?');
+        if (!$t->{isResolved}) { push @open, $where; next }
+        my $answered = grep { (H($_->{author})->{__typename} // '') ne 'Bot' && trusted_assoc($_->{authorAssociation}) } @c[1 .. $#c];
+        push @silent, $where unless $answered || $t->{isOutdated};
+    }
+    push @problems, scalar(@open) . " OpenCode review thread(s) are not resolved: @open. Fix each valid finding, or "
+        . "reply with why not; then resolve the thread (resolveReviewThread mutation)." if @open;
+    push @problems, scalar(@silent) . " OpenCode thread(s) were resolved with no fix and no reply: @silent. "
+        . "Reply on each with the fix commit or the reason it is not fixed." if @silent;
+}
+
+# --- trusted marker comments (the marker must be the comment's FIRST line) -----------
+my ($ind_ok, $fb_ok) = (0, 0);
+if (@risk_hits || !@head_reviews) {
+    for my $c (map { H($_) } @{ gh_list("$R/issues/$num/comments?per_page=100") }) {
+        my $u = H($c->{user});
+        next if ($u->{type} // '') eq 'Bot' || ($u->{login} // '') =~ /\[bot\]$/i;
+        next unless trusted_assoc($c->{author_association});
+        my $body = $c->{body} // '';
+        next if ref $body;
+        if ($body =~ /\A[^\S\n]*<!--\s*t4:independent-review\s+head=([0-9a-fA-F]{40})\s*-->[^\n]*\n(.*)\z/s && lc $1 eq $head) {
+            $ind_ok = 1 if $2 =~ /\S/;
+        }
+        if ($body =~ /\A[^\S\n]*<!--\s*t4:opencode-fallback\s+head=([0-9a-fA-F]{40})\s+reason="([^"\n]*)"\s*-->/ && lc $1 eq $head) {
+            (my $r = $2) =~ s/^\s+|\s+$//g;
+            $fb_ok = 1 if $r ne '' && $r !~ /^\.+$/;
+        }
+    }
+}
+
+# Placeholders only: the real SHA never appears inside a marker template, so pasting
+# this message into a comment cannot satisfy the gate.
+my $IND = '<!-- t4:independent-review head=<sha> -->';
+my $FB  = '<!-- t4:opencode-fallback head=<sha> reason="..." -->';
+my $HOW = "as the FIRST line of its own PR comment, with <sha> = the full head SHA (gh pr view $num --json headRefOid)";
+if (!@head_reviews && !($fb_ok && $ind_ok)) {
+    push @problems, "no review by $bot at the PR head. Either:\n"
+        . "  (a) wait for the OpenCode `review` check on this head (gh pr checks $num --watch), then handle its findings; or\n"
+        . "  (b) if OpenCode is down (model 429, App token failure, timeout, or the check finished without a review for an "
+        . "infra reason), run the fallback self-review with subagents (code-review, scrutinize, simplify, + security-review "
+        . "when relevant), then post BOTH markers $HOW:\n"
+        . "      $FB  (reason = the cause)  " . ($fb_ok ? "[present]" : "[missing]") . "\n"
+        . "      $IND  then the findings and how each was handled  " . ($ind_ok ? "[present]" : "[missing]");
+}
+# The fallback is for "OpenCode is down", not "OpenCode has not finished yet": accept it
+# only once a `review` check run at this head has completed (any conclusion, including
+# skipped, as for Dependabot PRs).
+if (!@head_reviews && $fb_ok && $ind_ok) {
+    my $cr = gh_json('api', "$R/commits/$head/check-runs?check_name=review&per_page=100");
+    my $done = grep { (H($_)->{name} // '') eq 'review' && (H($_)->{status} // '') eq 'completed' } @{ A($cr->{check_runs}) };
+    push @problems, "the fallback markers are present, but no OpenCode `review` check has completed at $head yet, so "
+        . "OpenCode may still post a review. Wait for it (gh pr checks $num --watch); if it never starts, re-run the "
+        . "workflow so that it completes." unless $done;
+}
+if (@risk_hits && @head_reviews && !$ind_ok) {
+    push @problems, "this PR touches risk paths (" . join(', ', @risk_hits[0 .. ($#risk_hits < 4 ? $#risk_hits : 4)])
+        . (@risk_hits > 5 ? ', ...' : '') . "), so it also needs one independent subagent review. "
+        . "Run it, then post $IND $HOW, followed by the findings and how each was handled.";
+}
+
+exit 0 unless @problems;
+
+# Round cap: one OpenCode round per distinct reviewed commit. Past the cap, the
+# review -> fix loop is not converging; a human decides, not another push.
+my %rounds = map { lc($_->{commit_id} // '') => 1 } @bot_reviews;
+my $n_rounds = scalar keys %rounds;
+unshift @problems, "STOP AND ASK THE OWNER. OpenCode has reviewed $n_rounds commits on this PR, above the cap of "
+    . "$max_rounds (.claude/t4.json \"opencodeMaxRounds\"), and the gate still fails. Do not push another round: "
+    . "report the open findings below to the owner and wait for a decision."
+    if $n_rounds > $max_rounds;
+block("PR #$num cannot merge yet:\n- " . join("\n- ", @problems));
