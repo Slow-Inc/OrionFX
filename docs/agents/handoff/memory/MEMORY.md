@@ -4,3 +4,4 @@
 - [PRD via /to-prd](prd-via-to-prd.md) — run /to-prd per module, publish bilingual to its PRD issue before implementing
 - [Training research autonomy](training-research-autonomy.md) — agent may research/improve M04 training on its own within PRD #120 protocol + ADR 0001
 - [Target certification delegated](target-certification-delegated.md) — owner lets agent certify M04 targets/protocol (research+advisor) and start the loop without asking
+- [Free public data allowed](free-public-data-allowed.md) — owner 2026-11-28: use Dukascopy/HistData for training; no redistribution; FirstRate not needed
