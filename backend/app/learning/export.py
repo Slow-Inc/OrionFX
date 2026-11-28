@@ -15,9 +15,11 @@ splits, SHA-256 of the exact bytes). Each row is point in time:
   label as zero).
 - `barrier_labels`: the bar's triple-barrier label per horizon (#129; `label_version`,
   UP/DOWN/FLAT, its bid move and the timeframe it was read on), measured from bars known
-  by `window_end`, else null. A row with an AMBIGUOUS (dual-touch) label is left out
-  (`LabelStats.of` counts them for a window; the export does not emit it). The raw
-  `move` labels are unchanged beside them.
+  by `window_end`, else null. It carries `ends_at`, the close of the label's last slot:
+  a walk-forward fold must purge on `ends_at` (not on `as_of + horizon`), because a
+  scheduled closure inside the window pushes it later. A row with an AMBIGUOUS
+  (dual-touch) label is left out; the manifest's `label_stats` count them per era (each
+  split, and "all"). The raw `move` labels are unchanged beside them.
 Only one candle dataset version and one feature schema are exported. With `transforms`,
 `features` are the M04 transforms of the recorded snapshot (`transform_from_store`, the
 function the live recorder feeds a transform model with), under TRANSFORM_SCHEMA.
@@ -45,14 +47,15 @@ import os
 import sqlite3
 from collections.abc import Iterable
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 from app.core.contracts import FeatureSnapshot, NewsAssessment
 from app.core.enums import Timeframe
 from app.core.time import live
 from app.learning.bars import BarLog, BarOutcome, Horizon, Provenance, SnapshotRow
-from app.learning.labels import LABEL_VERSION, TripleBarrierLabel, label_at
-from app.learning.lifecycle import DatasetManifest, DatasetStore, Split
+from app.learning.labels import LABEL_VERSION, LabelStats, TripleBarrierLabel, label_at
+from app.learning.lifecycle import RATE_Q, DatasetManifest, DatasetStore, LabelEraStats, Split
 from app.market_data.features import ATR_M15, FEATURE_SCHEMA
 from app.market_data.session import SessionSchedule
 from app.market_data.store import CandleStore
@@ -98,7 +101,19 @@ def _barrier(lab: TripleBarrierLabel | None) -> dict[str, object] | None:
         "move": _num(lab.move),
         "timeframe": lab.timeframe.value,
         "available_at": lab.available_at.isoformat(),
+        "ends_at": lab.ends_at.isoformat(),
     }
+
+
+def _era(era: str, labels: list[TripleBarrierLabel | None]) -> LabelEraStats:
+    s = LabelStats.of(labels)
+
+    def q(x: Decimal | None) -> Decimal | None:
+        return None if x is None else x.quantize(RATE_Q)
+
+    return LabelEraStats(era=era, rows=s.rows, missing=s.missing,
+                         dual_touch_count=s.ambiguous, dual_touch_rate=q(s.dual_touch_rate),
+                         flat_share=q(s.flat_share))  # fmt: skip
 
 
 def _row(
@@ -162,12 +177,14 @@ def export_dataset(
     provenance: set[Provenance] | None = None,
     feature_schema: str = FEATURE_SCHEMA,
     transforms: bool = False,
-    session: SessionSchedule | None = None,
+    session: SessionSchedule | None,
 ) -> DatasetManifest:
-    """Write the dataset to `out`, register its manifest, and return it. `session`: the
-    market's schedule, for the barrier labels' and the transforms' bar windows. None
-    means 24/7: for a scheduled market such as XAUUSD pass its schedule
-    (`XAUUSD_NY_1700`), or every scheduled closure is a gap that leaves rows unlabelled."""
+    """Write the dataset to `out`, register its manifest, and return it. `session` (no
+    default, so a caller always chooses): the market's schedule, for the barrier labels'
+    and the transforms' bar windows; the recorder that fed the models must use the same
+    one. None means 24/7: for XAUUSD pass `XAUUSD_NY_1700`, or every scheduled closure
+    is a gap that leaves rows unlabelled. The manifest records it as
+    `session:<schedule_id|24x7>`."""
     hs = sorted(horizons, key=horizon_key)
     longest = max(h.length for h in hs)
     log = BarLog(conn)
@@ -179,6 +196,7 @@ def export_dataset(
     }  # fmt: skip
     news = _News(conn, before=window_end)
     lines: list[str] = []
+    kept: dict[str, list[TripleBarrierLabel | None]] = {s.name: [] for s in splits}
     for snap in log.snapshots(symbol, timeframe, start=window_start, end=window_end):
         if (snap.dataset_version, snap.snapshot.feature_schema) != (dataset_version,
                                                                      feature_schema):  # fmt: skip
@@ -195,6 +213,7 @@ def export_dataset(
                     for h in hs}  # fmt: skip
         if any(b is not None and b.ends_at > split.end for b in barriers.values()):
             continue  # a barrier window that a closure stretched into the next split
+        kept[split.name].extend(barriers.values())
         if any(b is not None and not b.labelled for b in barriers.values()):
             continue  # a dual touch: no class label
         labels = {}
@@ -213,10 +232,13 @@ def export_dataset(
                      f"{feature_schema}:{tag}",
                      *(f"learning_outcomes:{horizon_key(h)}" for h in hs),
                      f"labels:{LABEL_VERSION}",
+                     f"session:{'24x7' if session is None else session.schedule_id}",
                      *([f"transforms:{TRANSFORM_SCHEMA}"] if transforms else []),
                      "journal:news.assessment"],
         window_start=window_start, window_end=window_end, splits=splits,
         content_hash=f"sha256:{hashlib.sha256(data).hexdigest()}",
+        label_stats=[_era("all", [lab for labs in kept.values() for lab in labs]),
+                     *(_era(name, labs) for name, labs in kept.items())],
     )  # fmt: skip
     DatasetStore(conn).save(manifest)  # validated and registered before any write
     tmp = out.with_name(out.name + ".tmp")

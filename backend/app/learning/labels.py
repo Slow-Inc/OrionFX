@@ -11,9 +11,22 @@ prices both sides from one (UP, DOWN, FLAT) distribution.
 - No spread, slippage or commission is inside the label: it depends on bid prices only,
   so a historical source without spreads labels exactly as live bid candles do. M05's
   EV charges every cost once, outside it (`fusion.expected_value`).
-- A bar touching both barriers is AMBIGUOUS (the order inside a bar is unknown): no
-  class label. The export leaves such rows out; `LabelStats.of` computes the rate for a
-  window (the export does not emit it yet).
+- A bar that opens beyond a barrier (a gap) crossed it first: UP or DOWN by that
+  barrier, whatever the rest of the bar touched.
+- A bar touching both barriers otherwise is AMBIGUOUS (the order inside a bar is
+  unknown): no class label. The export leaves such rows out and records the rate per
+  era in the manifest (`LabelEraStats`).
+- A FLAT is priced by EV at zero drift; it still pays the fills. Its `move` keeps the
+  real drift as data.
+
+Certified by agent under owner delegation, 2026-11-28 (#129, owner grant in CLAUDE.md):
+- AMBIGUOUS rows stay excluded. Labels resolve on the finest stored timeframe
+  (FINEST_FIRST, M5 first), so dual touches should be rare; the manifest measures it.
+- Pre-declared switch: if the measured dual-touch rate exceeds 1% in any era, the next
+  label version adds AMBIGUOUS as a fourth class, priced worst case for both sides:
+  EV = size x (d x (p_s - p_o - p_amb) - fills) - commission. Not built in tb.v2.
+- FLAT drift = 0 is a certified assumption (a FLAT still pays the fills); estimating
+  E[move | FLAT] is a research backlog item.
 - Labels are read on the finest stored timeframe that can measure them (M5 first), so
   a dual touch is rare. A missing bar before the label resolves gives no label on that
   timeframe, never a stretched one.
@@ -217,12 +230,13 @@ def prediction_labels(
     start: datetime,
     end: datetime,
     now: datetime,
-    session: SessionSchedule | None = None,
+    session: SessionSchedule | None,
     model_version: str | None = None,
 ) -> list[tuple[RecordedPrediction, TripleBarrierLabel | None]]:
     """Each recorded prediction of `model_id` with `start <= as_of < end`, scored on the
     label the training export carries (LABEL_VERSION, the model's own horizon, the ATR
-    of the bar's recorded M02 snapshot on `timeframe`), from bars known at `now`."""
+    of the bar's recorded M02 snapshot on `timeframe`), from bars known at `now`.
+    `session` has no default: it must be the schedule the export and recorder used."""
     log = BarLog(conn)
     atr = {r.snapshot.as_of: r.snapshot.values.get(ATR_M15)
            for r in log.snapshots(symbol, timeframe, start=start, end=end)

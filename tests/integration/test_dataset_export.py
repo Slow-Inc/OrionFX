@@ -56,6 +56,7 @@ def _export(conn: sqlite3.Connection, out: Path, version: str = "1", **over: obj
         "symbol": "XAUUSD", "timeframe": M15, "horizons": [H4], "dataset_version": "v1",
         "window_start": _bar_close(0), "window_end": _bar_close(N) + LAG,
         "splits": _splits(), "dataset_id": "xau-m15", "version": version, "out": out,
+        "session": None,
     }  # fmt: skip
     args.update(over)
     return export_dataset(conn, **args)  # type: ignore[arg-type]
