@@ -314,6 +314,15 @@ class Summary:
 
 
 @dataclass(frozen=True)
+class Baseline:
+    summary: Summary
+    """Closed trades only."""
+    open_at_end: int
+    equity_change_usd: Decimal
+    """Closed and still-open positions together: an open loser is never hidden."""
+
+
+@dataclass(frozen=True)
 class Manifest:
     code_sha: str
     model: str
@@ -344,7 +353,7 @@ class SystemBacktestResult:
     exposure: Decimal
     """Share of steps that held a bot position."""
     regimes: list[Bucket]
-    baselines: dict[str, Summary]
+    baselines: dict[str, Baseline]
     decisions: dict[str, int]
     """M05's decisions by action and reason codes (WAITs included)."""
     no_decision: dict[str, int]
@@ -663,7 +672,8 @@ def _ledger(sim: _Sim, tags: Callable[[datetime], dict[str, str]]) -> _Ledger:
         net = sum((d.profit for d in ds), D(0)) - commission
         trades.append(Trade(pid, ordinal, entry.side, entry.volume, entry.time, entry.price,
                             exits[-1].time, _vwap(exits), commission, net,
-                            reason or "UNKNOWN", tags(entry.time)))  # fmt: skip
+                            "UNKNOWN" if reason is None else reason.value,
+                            tags(entry.time)))  # fmt: skip
         by_cycle[ordinal] += net
     open_cost = sum((deals[pid][0].commission for pid in still), D(0))
     if (
@@ -788,6 +798,9 @@ def run_system_backtest(
     card = model.predictor.card
     if card.training_cutoff is None or spec.start <= card.training_cutoff:
         raise Refused(f"{card.ref}: the window must start after the training cutoff")
+    classifier = getattr(regimes, "__qualname__", None)
+    if classifier is None:
+        raise ValueError("name the regime classifier (a function): the manifest records it")
     t0 = wallclock.perf_counter()
     guarded = _PointInTime(candles)
     tf = spec.timeframe
@@ -818,14 +831,18 @@ def run_system_backtest(
         sim.step(bar, lambda: loop.tick() is not None)
     ledger = _ledger(sim, tags)
     stepped = wallclock.perf_counter() - t0
-    baselines = {"no_trade": summarize([])}
+    baselines = {"no_trade": Baseline(summarize([]), open_at_end=0, equity_change_usd=D(0))}
     if spec.baseline_seed is not None:
         p = ledger.opens / sim.flat_steps if sim.flat_steps else 0.0
         base = _Sim(spec, guarded, opening, policy=policy, enabled=[BASELINE_STRATEGY])
         entrant = _random_entrant(base, random.Random(spec.baseline_seed), p)
         for bar in driving:
             base.step(bar, entrant)
-            baselines[BASELINE_STRATEGY] = summarize(_ledger(base, lambda _t: {}).trades)
+        held = _ledger(base, lambda _t: {})
+        baselines[BASELINE_STRATEGY] = Baseline(
+            summarize(held.trades), open_at_end=len(held.open_at_end),
+            equity_change_usd=base.broker.account().equity - spec.account.balance,
+        )  # fmt: skip
     start = spec.account.balance
     dd_usd, dd_pct = _drawdown(sim.equity, start)
     return SystemBacktestResult(
@@ -836,7 +853,7 @@ def run_system_backtest(
             policy_version=policy.policy_version,
             strategies=[subject_ref(s.manifest.strategy_id, s.manifest.version)
                         for s in strategies],
-            classifier=getattr(regimes, "__qualname__", repr(regimes)), spec=spec),
+            classifier=classifier, spec=spec),
         trades=ledger.trades, open_at_end=ledger.open_at_end, refused=ledger.refused,
         daily_pnl=_daily(sim.days, start), equity=sim.equity,
         summary=summarize(ledger.trades), max_drawdown_usd=dd_usd,

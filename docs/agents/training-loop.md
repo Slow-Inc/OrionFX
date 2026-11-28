@@ -264,4 +264,6 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 **Measured (#121), on this machine.**
 - **DENY staleness.** After a DENY, the next bar's first M06 tick reports positions again, so the 30 s staleness rule does not stall a bar-driven clock. A test pins this: every bar gets a decision.
 - **Deal scan.** The per-tick cost of `deals_since(None)` is reported in `timings`. It is not hashed.
-- **Speed.** The fixture runs reach roughly 100 steps/s on M15 with the default library and no context timeframes. Real runs with H1/M15 context and M04 transforms will be slower; measure them on Colab.
+- **Speed.** On the tracer's real shape (`test_the_system_backtest_runs_the_tracer_model_on_the_session`: M5 driving, M15/H1 context, `XAUUSD_NY_1700`, the M04-transform model, `trend_following`, the full technique library), the backtest ran 190 steps across the daily break in about 7 s, or about 28 steps/s. That works out to roughly 1 h per year of M5 per run on this laptop, before Colab. On that run the loop decided on every step, and the break never stalled it. The M15 fixtures without context run at about 100 steps/s.
+- **Cross-process determinism.** Three processes with different `PYTHONHASHSEED` values gave the same `output_hash`, random baseline included.
+- **Random baseline.** It reports closed trades, positions still open at the end, and the equity change, so an open loser is never hidden. On the tracer run it closed 0 trades, held 1 position open at the end, and had an equity change of -15.30.

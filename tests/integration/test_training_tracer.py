@@ -41,7 +41,7 @@ from app.learning.lifecycle import DatasetStore, ModelLifecycle, Split
 from app.market_data.session import XAUUSD_NY_1700, SessionSchedule
 from app.market_data.store import CandleStore
 from app.prediction.card import ModelCard
-from app.prediction.engine import load_for_evaluation
+from app.prediction.engine import EvaluationPredictor, load_for_evaluation
 from app.prediction.transforms import TRANSFORM_SCHEMA
 from app.runtime.market_recorder import MarketRecorder
 from app.storage.artifacts import ArtifactLoader
@@ -49,6 +49,7 @@ from app.storage.db import connect, migrate, transaction
 from app.storage.registry import ArtifactRegistry, subject_ref
 from app.validation.evidence import DEFAULT_POLICY, EvidenceStore, ValidationRun, Verdict
 from app.validation.replay import CostModel, EvaluationEvidence, ReplayResult, replay
+from app.validation.system_backtest import Account, BacktestSpec, run_system_backtest
 
 D = Decimal
 U = UTC
@@ -164,6 +165,8 @@ class Chain:
     card: ModelCard
     result: ReplayResult
     readiness: Any
+    candles: CandleStore
+    model: EvaluationPredictor
 
 
 def _chain(conn: sqlite3.Connection, folder: Path, session: SessionSchedule | None,
@@ -198,7 +201,7 @@ def _chain(conn: sqlite3.Connection, folder: Path, session: SessionSchedule | No
         regimes=["TREND"], window_start=TEST.start, window_end=TEST.end,
         trades=len(result.trades), metrics=result.metrics,
     ))  # fmt: skip
-    return Chain(log, rows, card, result, store.evaluate([ref]))
+    return Chain(log, rows, card, result, store.evaluate([ref]), candles, model)
 
 
 @pytest.fixture(scope="module")
@@ -279,3 +282,24 @@ def test_without_the_session_the_long_h1_and_m15_features_never_come_back(
         assert values and all(v[ADX_H1] is None and v[STRUCT_M15] is None for v in values)
     finally:
         conn.close()
+
+
+def test_the_system_backtest_runs_the_tracer_model_on_the_session(chain: Chain) -> None:
+    """#131 on the real shape: M5 driving, M15/H1 context, the session schedule, a
+    transform model and `trend_following`, over the test fold across the daily break.
+    Every read passes the point-in-time guard (no LookAhead), the break never stalls the
+    loop, and every step either decides or says why not."""
+    cutoff = chain.card.training_cutoff
+    assert cutoff is not None
+    start = max(TEST.start, cutoff + timedelta(minutes=5))
+    account = Account(balance=D(10000), initial_lot=D("0.01"), profit_target_usd=D(10),
+                      max_drawdown_percent=D(20))  # fmt: skip
+    spec = BacktestSpec(symbol="XAUUSD", timeframe=M5, context_timeframes=(M15, H1),
+                        start=start, end=TEST.end, session=XAUUSD_NY_1700,
+                        account=account)  # fmt: skip
+    r = run_system_backtest(chain.candles, model=chain.model, strategies=[STRATEGY], spec=spec,
+                            code_sha="tracer")  # fmt: skip
+    assert r.steps > 100
+    assert sum(r.decisions.values()) + sum(r.no_decision.values()) == r.steps
+    assert not any("positions" in k for k in r.no_decision), r.no_decision
+    assert any(k.startswith("ENTER") for k in r.decisions), r.decisions

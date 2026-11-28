@@ -251,10 +251,13 @@ def test_the_same_inputs_give_the_same_output_hash_baseline_included(
 
     first, again = run(7), run(7)
     assert first.output_hash == again.output_hash
-    assert first.trades and first.baselines["random_entry"].trades  # both did trade
+    assert first.trades and first.baselines["random_entry"].summary.trades  # both traded
     other = run(8)
     assert other.baselines["random_entry"] != first.baselines["random_entry"]
-    assert first.baselines["no_trade"].trades == 0
+    assert first.baselines["no_trade"].summary.trades == 0
+    for b in (first, other):  # an open loser shows in the equity change, never hidden
+        base = b.baselines["random_entry"]
+        assert base.open_at_end or base.equity_change_usd == base.summary.net_usd
 
 
 def test_thin_buckets_are_not_covered_and_never_listed_as_evidence(
