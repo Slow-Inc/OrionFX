@@ -7,10 +7,12 @@ Prices trend in legs of 18-36 hours, so the chart has a direction that a trivial
 learn and that `trend_following` (H1 ADX >= 25) can see. It is fixture data, never market
 data, and proves nothing about edge.
 
-Trainer: a two-feature logistic regression fitted by gradient descent on the train split,
-then Platt-calibrated on the validation split, which comes later in time. Floats are used
-here, offline; the weights are written as Decimal strings for the `logistic_json` adapter.
-#130 replaces this with the real trainer behind the same adapter seam.
+Trainer: a three-class softmax regression on two M04 transforms, fitted by gradient
+descent on the train split to the triple-barrier label (#129, `m07.labels.tb.v2`: UP,
+DOWN or FLAT; AMBIGUOUS rows are not exported), then temperature-scaled on the
+validation split, which comes later in time. Floats are used
+here, offline; the weights are written as Decimal strings for the `barrier_softmax`
+adapter. #130 replaces this with the real trainer behind the same adapter seam.
 """
 
 import json
@@ -25,11 +27,10 @@ import app.prediction.adapters as adapters
 from app.core.contracts import CandleClosed, sha256_ref
 from app.core.enums import Timeframe
 from app.core.time import TIMEFRAME_DURATION
-from app.decision.strategies import ADX_H1, ATR_M15, DIR_H1, DIR_M15, STRUCT_M15
+from app.decision.strategies import ADX_H1, ATR_M15, DIR_H1, STRUCT_M15
 from app.market_data.features import DEFAULT_TECHNIQUES
 from app.market_data.session import SessionSchedule
 from app.prediction.card import BASELINE_BRIER, BRIER
-from app.validation.metrics import brier
 
 D = Decimal
 CENT = D("0.01")
@@ -39,16 +40,18 @@ SPREAD = D("0.20")
 LEG_MIN, LEG_MAX = 216, 432
 """Trend legs last 18-36 hours of M5 bars."""
 
-MODEL_FEATURES = [DIR_H1, DIR_M15]
-CHAIN_KEYS = (DIR_H1, DIR_M15, STRUCT_M15, ADX_H1, ATR_M15)
-"""What the chain reads: the model, `trend_following` and M05's EV (ATR_M15)."""
-
-CHAIN_CATALOG = {"CAT-T03-07", "CAT-T03-04", "CAT-T01-07", "CAT-T01-06"}
+MODEL_FEATURES = ["H1.close_sma_atr", "M15.close_sma_atr"]
+"""M04 transforms (`m04.transforms.v1`): (close - SMA20) / ATR14 per timeframe."""
+CHAIN_KEYS = (DIR_H1, STRUCT_M15, ADX_H1, ATR_M15, "H1.sma_20.sma", "M15.sma_20.sma")
+"""What the chain reads: `trend_following`, M05's EV (ATR_M15) and the model's inputs."""
+CHAIN_CATALOG = {"CAT-T01-01", "CAT-T01-06", "CAT-T01-07", "CAT-T03-04", "CAT-T03-07"}
 TECHNIQUES = tuple(t for t in DEFAULT_TECHNIQUES if t.catalog_id in CHAIN_CATALOG)
-"""The default library cut to the techniques behind `CHAIN_KEYS` (direction, structure,
-ADX, ATR): the same ids, keys and values, at a fraction of the cost per bar."""
-ADAPTER = "app.prediction.adapters.logistic_json"
-ADAPTER_HASH = sha256_ref((Path(adapters.__file__).parent / "logistic_json.py").read_bytes())
+"""The default library cut to the techniques behind `CHAIN_KEYS` (SMA, ATR, ADX,
+structure, direction): the same ids, keys and values, at a fraction of the cost per bar."""
+ADAPTER = "app.prediction.adapters.barrier_softmax"
+ADAPTER_HASH = sha256_ref((Path(adapters.__file__).parent / "barrier_softmax.py").read_bytes())
+CLASSES = ("UP", "DOWN", "FLAT")
+"""The adapter's row order."""
 
 
 def _bar(tf: Timeframe, start: datetime, o: Decimal, h: Decimal, low: Decimal, c: Decimal,
@@ -100,69 +103,91 @@ def resample(bars: list[CandleClosed], tf: Timeframe) -> list[CandleClosed]:
 
 # --- the trivial trainer --------------------------------------------------------------------
 
-
-def _sigmoid(z: float) -> float:
-    return 1 / (1 + math.exp(-z))
+Matrix = list[list[float]]
 
 
-def _fit(xs: list[list[float]], ys: list[int], *, steps: int = 300, lr: float = 0.5
-         ) -> tuple[list[float], float]:  # fmt: skip
-    """Logistic regression by full-batch gradient descent: (coefficients, intercept)."""
-    w, b, n = [0.0] * len(xs[0]), 0.0, len(xs)
+def _softmax(z: list[float]) -> list[float]:
+    top = max(z)
+    e = [math.exp(v - top) for v in z]
+    return [v / sum(e) for v in e]
+
+
+def _scores(b: list[float], w: Matrix, x: list[float]) -> list[float]:
+    return [bk + sum(c * v for c, v in zip(wk, x, strict=True))
+            for bk, wk in zip(b, w, strict=True)]  # fmt: skip
+
+
+def _fit(xs: Matrix, ys: list[int], *, steps: int = 300, lr: float = 0.5
+         ) -> tuple[list[float], Matrix]:  # fmt: skip
+    """Softmax regression by full-batch gradient descent on standardised inputs, folded
+    back to raw inputs: (intercepts, coefficients), one row per class."""
+    k, n, m = len(CLASSES), len(xs), len(xs[0])
+    mu = [sum(x[j] for x in xs) / n for j in range(m)]
+    sd = [math.sqrt(sum((x[j] - mu[j]) ** 2 for x in xs) / n) or 1.0 for j in range(m)]
+    zs = [[(x[j] - mu[j]) / sd[j] for j in range(m)] for x in xs]
+    b, w = [0.0] * k, [[0.0] * m for _ in range(k)]
     for _ in range(steps):
-        gw, gb = [0.0] * len(w), 0.0
-        for x, y in zip(xs, ys, strict=True):
-            e = _sigmoid(b + sum(wi * xi for wi, xi in zip(w, x, strict=True))) - y
-            gb += e
-            gw = [g + e * xi for g, xi in zip(gw, x, strict=True)]
-        b -= lr * gb / n
-        w = [wi - lr * g / n for wi, g in zip(w, gw, strict=True)]
-    return w, b
+        gb, gw = [0.0] * k, [[0.0] * m for _ in range(k)]
+        for x, y in zip(zs, ys, strict=True):
+            p = _softmax(_scores(b, w, x))
+            for c in range(k):
+                e = p[c] - (c == y)
+                gb[c] += e
+                gw[c] = [g + e * v for g, v in zip(gw[c], x, strict=True)]
+        b = [bc - lr * g / n for bc, g in zip(b, gb, strict=True)]
+        w = [[wj - lr * g / n for wj, g in zip(wc, gc, strict=True)]
+             for wc, gc in zip(w, gw, strict=True)]  # fmt: skip
+    coef = [[wc[j] / sd[j] for j in range(m)] for wc in w]
+    return [b[c] - sum(coef[c][j] * mu[j] for j in range(m)) for c in range(k)], coef
 
 
 def _round(x: float) -> str:
     return f"{x:.6f}"
 
 
-def _xy(rows: list[dict[str, Any]], label: str) -> tuple[list[list[float]], list[int]]:
-    """Rows with every model feature and a non-zero move: (features, 1 if it rose)."""
+def _xy(rows: list[dict[str, Any]], label: str) -> tuple[Matrix, list[int]]:
+    """Rows with every model feature and a class label: (features, class index)."""
     xs, ys = [], []
     for r in rows:
         values = [r["features"].get(k) for k in MODEL_FEATURES]
-        move = None if r["labels"][label] is None else D(r["labels"][label]["move"])
-        if None in values or not move:
+        barrier = r["barrier_labels"][label]
+        if None in values or barrier is None:
             continue
         xs.append([float(v) for v in values])
-        ys.append(int(move > 0))
+        ys.append(CLASSES.index(barrier["outcome"]))
     return xs, ys
 
 
-def _brier(ps: list[float], ys: list[int]) -> Decimal:
-    value = brier([D(_round(p)) for p in ps], [bool(y) for y in ys]).value
-    assert value is not None
-    return value
+def _nll(ps: Matrix, ys: list[int]) -> float:
+    return -sum(math.log(max(p[y], 1e-12)) for p, y in zip(ps, ys, strict=True)) / len(ys)
+
+
+def _brier(ps: Matrix, ys: list[int]) -> Decimal:
+    """Multiclass Brier: the mean over rows of the squared error summed over classes."""
+    return D(_round(sum(sum((pk - (k == y)) ** 2 for k, pk in enumerate(p))
+                        for p, y in zip(ps, ys, strict=True)) / len(ys)))  # fmt: skip
 
 
 def train(rows: list[dict[str, Any]], label: str) -> tuple[bytes, dict[str, Any]]:
-    """Fit on the `train` rows, calibrate on the later `validation` rows. Returns the
-    weights file and what the card states: validation Brier against the train class
-    prior, and the training cutoff (when the latest label read became known)."""
+    """Fit on the `train` rows, then fit the temperature on the later `validation` rows.
+    Returns the weights file and what the card states: the validation Brier against the
+    train class priors, and the training cutoff (when the latest label read became
+    known)."""
     by_split = {s: [r for r in rows if r["split"] == s] for s in ("train", "validation")}
     xs, ys = _xy(by_split["train"], label)
-    coef, intercept = _fit(xs, ys)
-    coef_s, intercept_s = [_round(c) for c in coef], _round(intercept)
-    cx, cy = _xy(by_split["validation"], label)
-    zs = [float(intercept_s) + sum(float(c) * v for c, v in zip(coef_s, x, strict=True))
-          for x in cx]  # fmt: skip
-    (a,), b = _fit([[z] for z in zs], cy)
-    a_s, b_s = _round(a), _round(b)
-    ps = [_sigmoid(float(a_s) * z + float(b_s)) for z in zs]
-    prior = sum(ys) / len(ys)
-    weights = json.dumps({"features": MODEL_FEATURES, "coef": coef_s, "intercept": intercept_s,
-                          "platt": {"a": a_s, "b": b_s}}, sort_keys=True).encode()  # fmt: skip
-    used = [r for s in by_split.values() for r in s if r["labels"][label] is not None]
+    b, w = _fit(xs, ys)
+    b_s, w_s = [_round(v) for v in b], [[_round(v) for v in r] for r in w]
+    vx, vy = _xy(by_split["validation"], label)
+    z = [_scores([float(v) for v in b_s], [[float(v) for v in r] for r in w_s], x) for x in vx]
+    grid = [0.25 + 0.05 * i for i in range(76)]
+    t = _round(min(grid, key=lambda t: _nll([_softmax([v / t for v in zi]) for zi in z], vy)))
+    prior = [ys.count(c) / len(ys) for c in range(len(CLASSES))]
+    weights = json.dumps({"features": MODEL_FEATURES, "intercept": b_s, "coef": w_s,
+                          "temperature": t}, sort_keys=True).encode()  # fmt: skip
+    used = [r["barrier_labels"][label] for s in by_split.values() for r in s
+            if r["barrier_labels"][label] is not None]  # fmt: skip
     return weights, {
-        "validation": {BRIER: _brier(ps, cy), BASELINE_BRIER: _brier([prior] * len(cy), cy)},
-        "training_cutoff": max(datetime.fromisoformat(r["labels"][label]["available_at"])
-                               for r in used),
+        "validation": {BRIER: _brier([_softmax([v / float(t) for v in zi]) for zi in z], vy),
+                       BASELINE_BRIER: _brier([prior] * len(vy), vy)},
+        "training_cutoff": max(datetime.fromisoformat(b["available_at"]) for b in used),
     }  # fmt: skip

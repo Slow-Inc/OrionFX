@@ -19,7 +19,7 @@ from app.decision.fusion import Costs
 from app.learning.bars import Horizon, Provenance
 from app.learning.experience import ExperienceLog
 from app.market_data.store import CandleStore
-from app.prediction.adapters import logistic_json
+from app.prediction.adapters import barrier_softmax
 from app.prediction.baseline import BASELINE
 from app.prediction.card import ModelCard
 from app.prediction.engine import (
@@ -44,8 +44,9 @@ NOW = T0 + timedelta(seconds=5)
 CUTOFF = T0 - timedelta(days=1)
 H1_DIR, M15_DIR = "H1.direction_10.direction", "M15.direction_10.direction"
 MODULE, ADAPTER_HASH = tracer.ADAPTER, tracer.ADAPTER_HASH
-WEIGHTS = json.dumps({"features": [H1_DIR, M15_DIR], "coef": ["1.5", "1.0"],
-                      "intercept": "0", "platt": {"a": "1", "b": "0"}}).encode()  # fmt: skip
+WEIGHTS = json.dumps({"features": [H1_DIR, M15_DIR], "intercept": ["0", "0", "0"],
+                      "coef": [["1.5", "1.0"], ["-1.5", "-1.0"], ["0", "0"]],
+                      "temperature": "1"}).encode()  # fmt: skip
 
 
 def _card(weights: bytes = WEIGHTS, **over: object) -> ModelCard:
@@ -104,7 +105,8 @@ def test_a_model_registered_today_scores_history_without_any_approval(
                    mode=Mode.SHADOW, now=NOW)  # fmt: skip
     p = predict_for_evaluation(_evaluate(registry), _snapshot(), now=NOW)
     assert p.direction is Direction.UP and p.probability.calibrated
-    assert p.probability.value == D(1) / (1 + D("-2.5").exp())  # sigmoid(1.5 + 1.0)
+    e = [D("2.5").exp(), D("-2.5").exp(), D(1)]  # softmax of (2.5, -2.5, 0)
+    assert abs(p.probability.value - e[0] / sum(e)) < D("1e-20")
 
 
 def test_no_live_path_accepts_an_evaluation_predictor(
@@ -137,7 +139,7 @@ def test_the_adapter_refuses_weights_that_are_not_the_pinned_ones(
     with pytest.raises(Refused, match="weights"):
         _evaluate(registry, weights=tampered)
     with pytest.raises(ValueError, match="weights"):  # the adapter checks for itself too
-        logistic_json.build(_card(), tampered)
+        barrier_softmax.build(_card(), tampered)
 
 
 def test_a_card_that_is_not_the_registered_one_is_refused(registry: ArtifactRegistry) -> None:
@@ -168,8 +170,8 @@ def test_a_snapshot_at_or_before_the_training_cutoff_is_refused(
 
 
 def test_the_evaluation_path_applies_the_label_rules_of_129(conn: sqlite3.Connection) -> None:
-    """A card calibrated on another label is refused at load, and a labelled model must
-    score all three classes, as on the live path."""
+    """A card calibrated on another label is refused at load, and a labelled model's
+    forecast carries its class triple, as on the live path."""
     stale = _card(model_version="4", label_version="m07.labels.tb.v0")
     labelled = _card(model_version="5", label_version=LABEL_VERSION)
     reg = ArtifactRegistry(conn)
@@ -177,8 +179,10 @@ def test_the_evaluation_path_applies_the_label_rules_of_129(conn: sqlite3.Connec
         reg.register("model", card.manifest(), actor="m07")
     with pytest.raises(Refused, match="another label"):
         _evaluate(reg, card=stale)
-    with pytest.raises(Refused, match="UP, DOWN and NEUTRAL"):
-        predict_for_evaluation(_evaluate(reg, card=labelled), _snapshot(), now=NOW)
+    p = predict_for_evaluation(_evaluate(reg, card=labelled), _snapshot(), now=NOW)
+    assert p.class_probabilities is not None
+    assert p.class_probabilities.label_version == LABEL_VERSION
+    assert p.class_probabilities.up == p.probability.value
 
 
 class _CutBaseline:
@@ -197,8 +201,9 @@ def test_the_live_predict_refuses_a_snapshot_at_or_before_the_cutoff() -> None:
 
 
 def test_weights_naming_other_features_than_the_card_are_refused(conn: sqlite3.Connection) -> None:
-    other = json.dumps({"features": [M15_DIR, H1_DIR], "coef": ["1.5", "1.0"],
-                        "intercept": "0", "platt": {"a": "1", "b": "0"}}).encode()  # fmt: skip
+    other = json.dumps({"features": [M15_DIR, H1_DIR], "intercept": ["0", "0", "0"],
+                        "coef": [["1.5", "1.0"], ["-1.5", "-1.0"], ["0", "0"]],
+                        "temperature": "1"}).encode()  # fmt: skip
     card = _card(other, model_version="3")
     reg = ArtifactRegistry(conn)
     reg.register("model", card.manifest(), actor="m07")

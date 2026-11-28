@@ -177,7 +177,7 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 - **Limit:** a hand-written lambda that wraps an evaluation predictor defeats the runtime check. Only review catches that.
 
 **2. Adapter and weights [built #127].**
-- One reviewed adapter module per model family lives in the allowlisted package `app.prediction.adapters`. Today that is `logistic_json`; LightGBM comes in #130.
+- One reviewed adapter module per model family lives in the allowlisted package `app.prediction.adapters`. Today that is `barrier_softmax` (one three-class softmax head scoring the triple-barrier label); LightGBM comes in #130.
 - It defines `build(card, weights: bytes) -> Predictor`. `load_for_evaluation` checks the weights with `verified_weights` (in `prediction/card.py`) before calling `build`, and the adapter checks again before it parses anything. It never uses pickle, and JSON numbers parse as Decimals.
 - **Three pins per version, all immutable:**
   - the adapter source is the registered `artifact_hash`, the same for many versions;
@@ -191,7 +191,7 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 
 **4. Tracer fixture [built #127]** (`tests/integration/test_training_tracer.py`, `tests/support/tracer.py`).
 - **Fixture:** seeded synthetic M5 bars on `XAUUSD_NY_1700` with trend legs of 18-36 h. M15/H1 are resampled from them. The import link is stubbed until #128.
-- **Chain:** record (BACKFILL, `session=`) → label → export → train a 2-feature logistic on train → Platt-calibrate on validation → card + JSON weights → `propose_candidate` → `load_for_evaluation` → `replay(session=)` on the holdout with real `trend_following` → `EvidenceStore`.
+- **Chain:** record (BACKFILL, `session=`) → label → export → export M04 transforms and `m07.labels.tb.v2` → train a three-class softmax on two transforms (`H1/M15.close_sma_atr`) on train → temperature-scale on validation → card (`label_version`) + JSON weights → `propose_candidate` → `load_for_evaluation` → `replay(session=)` on the holdout with real `trend_following` → `EvidenceStore`.
 - **Asserts:**
   - H1/M15 features set on the test fold and after both reopens;
   - every row labelled or marked unlabellable exactly at a closure;
@@ -201,6 +201,6 @@ All four were open before #127; each is now **[built]** in #127 (branch `feat/12
 - **CI-time deviations from "7+ days of M5":**
   - The library is the default one cut to the techniques the chain reads (`tracer.TECHNIQUES`): same ids and values.
   - M5 is stored only from the train split on, while M15/H1 history starts a week earlier.
-  - Measured locally (Windows): recording 2,760 M5 bars (about 10 trading days) with the full library took 42 s for the recorder alone; the tracer takes about 9 s and the suite grows from about 49 s to about 63 s. CI runs only on pull requests, so no CI time exists yet.
-- **After #129 (merged at `57970a2`):** EV is priced only from a forecast's class probabilities of the current `LABEL_VERSION`. The evaluation path applies the same rules as the live one (a card on another label is refused at load; a labelled model must score all three classes), and `EvaluationEvidence` feeds a transform model `transform_from_store`, as the recorder and the export do. The tracer's model is still two-class, so its ENTER test is `xfail(strict=True)` until the three-class adapter is trained on `m07.labels.tb.v2`.
+  - Measured locally (Windows): recording 2,760 M5 bars (about 10 trading days) with the full library took 42 s for the recorder alone; the tracer takes about 16 s (about 7 s of it is `transform_from_store`, which reads 600 M5 bars per row and per replay step) and the suite grows from about 49 s to about 69 s. CI runs only on pull requests, so no CI time exists yet.
+- **After #129 (merged at `3b10ae3`, `m07.labels.tb.v2`):** EV is priced only from a forecast's class probabilities of the current `LABEL_VERSION`. The evaluation path applies the same rules as the live one (a card on another label is refused at load; a labelled model's forecast carries its class triple), and `EvaluationEvidence` feeds a transform model `transform_from_store`, as the recorder and the export do (train/serve parity). The tracer's ENTER fires under that EV with no threshold or fixture change, and every ENTER has a positive EV.
 - **What the fixture does not exercise:** H1 MACD (not in the cut library), M5 history beyond about 2.5 trading days, and on the negative control only about 4 hours of M5 around the daily break (run both with and without the session on that window).

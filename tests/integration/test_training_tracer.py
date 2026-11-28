@@ -13,8 +13,8 @@ Stubs and shortcuts, each deliberate:
   history starts a week earlier, so H1 ADX (85 bars) is warm. Recording every M5 bar of
   that week with the full library cost ~45 s.
 - The negative control runs the same chain on a few hours of M5 around the daily break.
-- The trainer is a two-feature logistic regression (`tracer.train`); #130 brings the real
-  one behind the same adapter.
+- The trainer is a three-class softmax on two M04 transforms, fitted to the
+  triple-barrier label (`tracer.train`); #130 brings the real one behind the same adapter.
 """
 
 import functools
@@ -31,6 +31,7 @@ import pytest
 from tests.support import tracer
 from tests.support.tracer import H1, M5, M15
 
+from app.core.bet import LABEL_VERSION
 from app.core.contracts import CandleClosed, EligibilityRecord, ParameterBound, sha256_ref
 from app.core.enums import DecisionAction, Eligibility, ForecastLineage, Mode
 from app.decision.strategies import ADX_H1, STRATEGIES, STRUCT_M15
@@ -41,6 +42,7 @@ from app.market_data.session import XAUUSD_NY_1700, SessionSchedule
 from app.market_data.store import CandleStore
 from app.prediction.card import ModelCard
 from app.prediction.engine import load_for_evaluation
+from app.prediction.transforms import TRANSFORM_SCHEMA
 from app.runtime.market_recorder import MarketRecorder
 from app.storage.artifacts import ArtifactLoader
 from app.storage.db import connect, migrate, transaction
@@ -114,7 +116,7 @@ def _export(conn: sqlite3.Connection, out: Path, session: SessionSchedule | None
     manifest = export_dataset(conn, symbol="XAUUSD", timeframe=M5, horizons=HORIZONS,
                               dataset_version="tracer-v1", window_start=TRAIN.start,
                               window_end=END, splits=[TRAIN, VALIDATION, TEST],
-                              dataset_id="tracer", version="1", out=out,
+                              dataset_id="tracer", version="1", out=out, transforms=True,
                               session=session)  # fmt: skip
     data = out.read_bytes()
     assert manifest.content_hash == sha256_ref(data)
@@ -125,15 +127,16 @@ def _artifact(rows: list[dict[str, Any]], folder: Path) -> None:
     """Train, then write the native artifact: a card and a JSON weights file."""
     weights, stated = tracer.train(rows, horizon_key(LABEL))
     card = ModelCard(
-        model_id="tracer-logit", model_version="1",
+        model_id="tracer-softmax", model_version="1",
         artifact_hash=tracer.ADAPTER_HASH,
-        lineage=ForecastLineage.CHART_ONLY, feature_schema="m02.features.v2",
+        lineage=ForecastLineage.CHART_ONLY, feature_schema=TRANSFORM_SCHEMA,
         required_features=tracer.MODEL_FEATURES,
-        feature_ranges={k: ParameterBound(low=D(-1), high=D(1)) for k in tracer.MODEL_FEATURES},
+        feature_ranges={k: ParameterBound(low=D(-20), high=D(20)) for k in tracer.MODEL_FEATURES},
         horizon=LABEL.timeframe, horizon_bars=LABEL.bars,
-        semantics="P(the close rises over 1 H1 bar), Platt-calibrated on the validation split",
+        semantics="P(UP, DOWN, FLAT) of the triple-barrier label over 1 H1 bar,"
+                  " temperature-scaled on the validation split",
         calibrated=True, validation=stated["validation"],
-        evidence_refs=["dataset:tracer@1#validation"],
+        evidence_refs=["dataset:tracer@1#validation"], label_version=LABEL_VERSION,
         training_cutoff=stated["training_cutoff"], weights_hash=sha256_ref(weights),
     )  # fmt: skip
     (folder / "card.json").write_text(card.model_dump_json(), encoding="utf-8")
@@ -239,16 +242,11 @@ def test_the_session_aware_replay_lets_the_strategy_propose(chain: Chain) -> Non
     assert any(not chart_gates & set(d.reason_codes) for d in chain.result.decisions)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#129: EV is priced only from class probabilities of the current label version."
-    " The tracer's two-class model has none, so it cannot ENTER until its three-class"
-    " adapter is trained on that label (held for m07.labels.tb.v2).",
-)
 def test_the_model_drives_at_least_one_entry_in_the_test_fold(chain: Chain) -> None:
     enters = [d for d in chain.result.decisions if d.action is DecisionAction.ENTER]
     assert enters, sorted({c for d in chain.result.decisions for c in d.reason_codes})
     assert all(d.confidence is not None and d.confidence.calibrated for d in enters)
+    assert all(d.expected_value_usd is not None and d.expected_value_usd > 0 for d in enters)
     assert chain.result.trades
 
 
