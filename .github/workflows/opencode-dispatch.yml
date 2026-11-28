@@ -67,7 +67,7 @@ jobs:
           client-id: ${{ vars.OPENCODE_AUTOMATION_CLIENT_ID }}  # "OrionFX Automation"; a credential ID, not a secret
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
-          timeout-minutes: '12'
+          hard-minutes: '12'
       - name: Publish the answer
         env:
           ISSUE: ${{ inputs.issue }}

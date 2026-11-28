@@ -390,9 +390,18 @@ def notice(cause_path: str, repo: str, pr: str, head_sha: str) -> int:
         "developer จะรันรีวิวสำรองแทน และนี่เป็นคอมเมนต์ธรรมดาโดยตั้งใจ ไม่ใช่ PR review"
     )
     result = gh_api(f"repos/{repo}/issues/{pr}/comments", {"body": body})
-    if result.returncode != 0:
-        print(f"::warning::Could not post the notice: {result.stderr.strip()[:300]}")
     print(f"::warning::{line}")
+    if result.returncode != 0:
+        reason = result.stderr.strip()[:300]
+        if re.search(r"HTTP 40[13]", result.stderr):
+            # A refused notice is a broken setup (the job token lacks pull-requests: write):
+            # fail red, or the PR would get neither a review nor a notice behind a green check.
+            print(f"::error::OpenCode config error: GitHub refused the notice: {reason}")
+            if summary_path:
+                with open(summary_path, "a", encoding="utf-8") as fh:
+                    fh.write("### OpenCode config error: GitHub refused the unavailable notice\n")
+            return 1
+        print(f"::warning::Could not post the notice: {reason}")
     return 0
 
 

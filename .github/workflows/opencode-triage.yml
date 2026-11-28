@@ -61,7 +61,7 @@ jobs:
           client-id: ${{ vars.OPENCODE_AUTOMATION_CLIENT_ID }}  # "OrionFX Automation"; a credential ID, not a secret
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
-          timeout-minutes: '7'
+          hard-minutes: '7'
       - name: Apply labels and check the bilingual body as the OpenCode app
         env:
           ISSUE: ${{ github.event.issue.number }}

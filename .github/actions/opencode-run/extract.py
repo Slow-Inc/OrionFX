@@ -7,6 +7,10 @@ non-zero on a model error, an empty answer, or a policy breach.
 Policy canary: the run is allowed only read/glob/grep/list/skill. If any other
 tool ran without being refused (for example bash or edit), the tool policy was not honoured,
 so the answer is discarded and nothing is posted.
+
+The optional STATS file is watchdog.py's record of the attempt (outcome, duration,
+event count, longest silence). It names the stall or hard-cap budget in the cause, and
+one line per attempt goes to the job summary so the budgets can be tuned from evidence.
 """
 
 import json
@@ -15,7 +19,8 @@ import sys
 from decimal import Decimal
 
 ALLOWED_TOOLS = {"read", "glob", "grep", "list", "skill"}
-TIMEOUT_STATUSES = {124, 137}  # `timeout` and its --kill-after SIGKILL
+HARD_CAP, STALLED = 124, 125  # watchdog.py exit statuses
+TIMEOUT_STATUSES = {HARD_CAP, 137}  # 137: SIGKILL (the job or the runner killed it)
 RETRY = 75  # exit code: the model ended cleanly with no answer text; the caller may retry once
 
 
@@ -28,7 +33,44 @@ def _cause(text: str) -> int:
     return 1
 
 
-def main(events_path: str, output_path: str, exit_status: int = 0) -> int:
+def _minutes(seconds: object) -> str:
+    """`4 min` for whole minutes, else `2m30s`; `?` when the stats are missing."""
+    if not isinstance(seconds, int | float):
+        return "?"
+    whole = int(seconds)
+    return f"{whole // 60} min" if whole % 60 == 0 else f"{whole // 60}m{whole % 60:02d}s"
+
+
+def _read_stats(stats_path: str | None) -> dict[str, object]:
+    if not stats_path:
+        return {}
+    try:
+        with open(stats_path, encoding="utf-8") as fh:
+            stats = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return stats if isinstance(stats, dict) else {}
+
+
+def _summarise(stats: dict[str, object], usage: str) -> None:
+    """One line per attempt in the job summary: the evidence to tune the budgets from."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path or not stats:
+        return
+    line = (
+        f"- OpenCode attempt: {stats.get('outcome')} (status {stats.get('status')}) after "
+        f"{_minutes(stats.get('elapsed_seconds'))}, {stats.get('events')} events, longest "
+        f"silence {_minutes(stats.get('longest_silence_seconds'))}; budgets idle "
+        f"{_minutes(stats.get('idle_seconds'))}, hard {_minutes(stats.get('hard_seconds'))}; "
+        f"{usage}\n"
+    )
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(line)
+
+
+def main(
+    events_path: str, output_path: str, exit_status: int = 0, stats_path: str | None = None
+) -> int:
     """Return 0 (answer written), RETRY (no answer after a clean exit), or 1 (cause recorded)."""
     messages: dict[str, list[str]] = {}
     order: list[str] = []
@@ -67,16 +109,25 @@ def main(events_path: str, output_path: str, exit_status: int = 0) -> int:
                 tokens_out += int(tok.get("output") or 0)
             elif kind == "error":
                 errors.append(json.dumps(event.get("error"))[:500])
-    print(f"usage: input~{tokens_in} tokens, output~{tokens_out} tokens, cost ${cost:.4f}")
+    usage = f"usage: input~{tokens_in} tokens, output~{tokens_out} tokens, cost ${cost:.4f}"
+    print(usage)
+    stats = _read_stats(stats_path)
+    _summarise(stats, usage)
     for err in errors:
         print(f"::error::OpenCode error: {err}")
-    # Cause precedence: policy breach (security, red) > timeout > model error >
+    # Cause precedence: policy breach (security, red) > stall > hard cap > model error >
     # no answer (the only retryable case) > non-zero exit status.
     if breaches:
         print(f"::error::Tool policy breach: {sorted(set(breaches))} completed; nothing is posted.")
         return _cause(f"security: tool policy breach, {sorted(set(breaches))} completed")
+    if exit_status == STALLED:
+        idle = _minutes(stats.get("idle_seconds"))
+        return _cause(f"unavailable: OpenCode stalled (no progress for {idle})")
+    if exit_status == HARD_CAP:
+        hard = _minutes(stats.get("hard_seconds"))
+        return _cause(f"unavailable: OpenCode hit the hard cap ({hard})")
     if exit_status in TIMEOUT_STATUSES:
-        return _cause(f"unavailable: OpenCode timed out (status {exit_status})")
+        return _cause(f"unavailable: OpenCode was killed (status {exit_status})")
     # The latest message that has text: a run can end on a tool-only step.
     texts = ["".join(messages[mid]).strip() for mid in order]
     answer = next((t for t in reversed(texts) if t), "")
@@ -97,4 +148,4 @@ def main(events_path: str, output_path: str, exit_status: int = 0) -> int:
 
 if __name__ == "__main__":
     status = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-    sys.exit(main(sys.argv[1], sys.argv[2], status))
+    sys.exit(main(sys.argv[1], sys.argv[2], status, sys.argv[4] if len(sys.argv) > 4 else None))

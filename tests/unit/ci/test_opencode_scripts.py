@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -548,8 +549,13 @@ def test_skill_selection_follows_the_changed_files(
     ("events", "status", "rc", "cause"),
     [
         ([_tool("bash"), _text("m", "a")], 124, 1, "security:"),
-        ([_text("m", "a")], 124, 1, "timed out"),
-        ([_text("m", "a")], 137, 1, "timed out"),
+        ([_tool("bash"), _text("m", "a")], 125, 1, "security:"),
+        ([_text("m", "a")], 124, 1, "hit the hard cap"),
+        ([_text("m", "a")], 125, 1, "stalled (no progress for"),
+        ([_tool("read")], 125, 1, "stalled"),  # a stall is never retried
+        ([_tool("read")], 124, 1, "hard cap"),  # nor is the hard cap
+        ([{"type": "error", "error": {"name": "E"}}], 125, 1, "stalled"),
+        ([_text("m", "a")], 137, 1, "was killed (status 137)"),
         ([{"type": "error", "error": {"name": "E"}}], 1, 1, "model error"),
         ([_tool("read")], 0, extract.RETRY, "no final answer"),
         ([_tool("read")], 2, 1, "no final answer"),
@@ -557,8 +563,13 @@ def test_skill_selection_follows_the_changed_files(
         ([_text("m", "a")], 0, 0, None),
     ],
     ids=[
-        "breach-beats-timeout",
-        "timeout",
+        "breach-beats-hard-cap",
+        "breach-beats-stall",
+        "hard-cap",
+        "stall",
+        "stall-not-retried",
+        "hard-cap-not-retried",
+        "stall-beats-model-error",
         "killed",
         "model-error",
         "no-answer-retryable",
@@ -972,3 +983,338 @@ def test_extract_logs_usage_from_step_finish(
     events = [finish, finish, _text("m", "answer")]
     assert extract.main(_events(tmp_path, events), str(tmp_path / "out.md")) == 0
     assert "usage: input~240 tokens, output~14 tokens, cost $0.0250" in capsys.readouterr().out
+
+
+# --- liveness watchdog (#160) --------------------------------------------------------------
+# A fixed timeout killed big, still-working reviews (PR #156: 3 attempts, status 124, the
+# model mid-way through tool calls). The watchdog stops OpenCode only when it goes silent
+# for the idle budget, or when the step's hard cap runs out.
+
+WATCHDOG = ROOT / ".github/actions/opencode-run/watchdog.py"
+watchdog = _load("opencode_watchdog", WATCHDOG)
+MIN = 60.0
+
+
+def test_a_chatty_review_past_the_old_limit_is_not_stopped_before_the_hard_cap() -> None:
+    # An event every 30 s for 19.5 minutes: far past the old 7- and 10-minute limits.
+    for t in range(0, int(19.5 * MIN), 30):
+        assert watchdog.decide(t + 29, 0, t, 4 * MIN, 20 * MIN) == "", t
+    assert watchdog.decide(20 * MIN, 0, 20 * MIN - 1, 4 * MIN, 20 * MIN) == "hard_cap"
+
+
+def test_silence_for_the_idle_budget_is_a_stall() -> None:
+    assert watchdog.decide(8 * MIN, 0, 4 * MIN + 1, 4 * MIN, 20 * MIN) == ""
+    assert watchdog.decide(8 * MIN, 0, 4 * MIN, 4 * MIN, 20 * MIN) == "stalled"
+
+
+def test_the_hard_cap_wins_over_a_stall_at_the_same_moment() -> None:
+    assert watchdog.decide(20 * MIN, 0, 0, 4 * MIN, 20 * MIN) == "hard_cap"
+
+
+def _fake(code: str) -> list[str]:
+    return [sys.executable, "-c", "import json, os, subprocess, signal, sys, time\n" + code]
+
+
+CHATTY_THEN_DONE = """
+for i in range(25):
+    print(json.dumps({"type": "tool_use", "secret": "SECRET-CONTENT"}), flush=True)
+    time.sleep(0.1)
+"""
+SILENT = """
+print(json.dumps({"type": "step_start"}), flush=True)
+time.sleep(60)
+"""
+CHATTY_FOREVER = """
+while True:
+    print(json.dumps({"type": "tool_use"}), flush=True)
+    time.sleep(0.05)
+"""
+STDERR_ONLY = """
+for i in range(20):
+    sys.stderr.write("log line\\n"); sys.stderr.flush()
+    time.sleep(0.1)
+"""
+
+
+def _watch(
+    tmp: Path, cmd: list[str], idle: float, hard: float, grace: float = 1.0
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any], float]:
+    events, stats = tmp / "events.jsonl", tmp / "stats.json"
+    args = [sys.executable, "-I", str(WATCHDOG), "--events", str(events), "--stats", str(stats)]
+    args += ["--idle-seconds", str(idle), "--hard-seconds", str(hard)]
+    args += ["--heartbeat-seconds", "0.5", "--poll-seconds", "0.05", "--grace-seconds", str(grace)]
+    started = time.monotonic()
+    result = subprocess.run([*args, "--", *cmd], capture_output=True, text=True, timeout=60)
+    took = time.monotonic() - started
+    return result, json.loads(stats.read_text(encoding="utf-8")), took
+
+
+def test_watchdog_lets_a_chatty_process_finish(tmp_path: Path) -> None:
+    # Runs ~2.5 s, more than 4x the idle budget, and is never stopped.
+    result, stats, took = _watch(tmp_path, _fake(CHATTY_THEN_DONE), idle=0.6, hard=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert stats["outcome"] == "exited" and stats["events"] == 25
+    assert took > 2.0
+    assert stats["longest_silence_seconds"] < 0.6
+    # Heartbeats show the review is alive, and never echo event content.
+    assert re.search(r"heartbeat: \dm\d\ds elapsed, \d+ events, last progress", result.stdout)
+    assert "SECRET-CONTENT" not in result.stdout + result.stderr
+    assert (tmp_path / "events.jsonl").read_text(encoding="utf-8").count("SECRET-CONTENT") == 25
+
+
+def test_watchdog_stops_a_silent_process_after_the_idle_budget(tmp_path: Path) -> None:
+    result, stats, took = _watch(tmp_path, _fake(SILENT), idle=0.8, hard=30)
+    assert result.returncode == watchdog.STALLED == extract.STALLED
+    assert stats["outcome"] == "stalled" and stats["events"] == 1
+    assert 0.8 <= took < 10
+    assert "no progress for" in result.stdout
+
+
+def test_watchdog_stops_a_chatty_infinite_loop_at_the_hard_cap(tmp_path: Path) -> None:
+    result, stats, took = _watch(tmp_path, _fake(CHATTY_FOREVER), idle=0.6, hard=1.5)
+    assert result.returncode == watchdog.HARD_CAP == extract.HARD_CAP
+    assert stats["outcome"] == "hard_cap" and stats["events"] > 10
+    assert 1.5 <= took < 10
+
+
+def test_stderr_output_counts_as_progress(tmp_path: Path) -> None:
+    result, stats, _ = _watch(tmp_path, _fake(STDERR_ONLY), idle=0.6, hard=20)
+    assert result.returncode == 0
+    assert stats["outcome"] == "exited" and stats["events"] == 0
+    assert result.stderr.count("log line") == 20  # passed through to the job log
+
+
+def test_watchdog_passes_the_command_status_through(tmp_path: Path) -> None:
+    result, stats, _ = _watch(tmp_path, _fake("sys.exit(3)"), idle=5, hard=20)
+    assert result.returncode == 3 and stats["outcome"] == "exited" and stats["status"] == 3
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX process groups and signals")
+def test_watchdog_kills_the_whole_group_even_when_term_is_ignored(tmp_path: Path) -> None:
+    pidfile = tmp_path / "grandchild.pid"
+    code = f"""
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+child = subprocess.Popen(["sleep", "60"])
+open({str(pidfile)!r}, "w").write(str(child.pid))
+print("{{}}", flush=True)
+time.sleep(60)
+"""
+    result, stats, took = _watch(tmp_path, _fake(code), idle=0.6, hard=30, grace=0.5)
+    assert result.returncode == watchdog.STALLED and stats["outcome"] == "stalled"
+    assert took < 10
+    pid = int(pidfile.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("the grandchild outlived the watchdog")
+
+
+@pytest.mark.parametrize(
+    ("status", "stats", "cause"),
+    [
+        (125, {"idle_seconds": 240}, "unavailable: OpenCode stalled (no progress for 4 min)"),
+        (124, {"hard_seconds": 1200}, "unavailable: OpenCode hit the hard cap (20 min)"),
+        (124, {"hard_seconds": 450}, "unavailable: OpenCode hit the hard cap (7m30s)"),
+        (125, None, "unavailable: OpenCode stalled (no progress for ?)"),
+    ],
+    ids=["stall", "hard-cap", "partial-minutes", "no-stats"],
+)
+def test_watchdog_causes_name_their_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    stats: dict[str, Any] | None,
+    cause: str,
+) -> None:
+    cause_file = tmp_path / "cause"
+    monkeypatch.setenv("OPENCODE_CAUSE_FILE", str(cause_file))
+    stats_path = None
+    if stats is not None:
+        stats_path = tmp_path / "stats.json"
+        stats_path.write_text(json.dumps(stats), encoding="utf-8")
+    events = _events(tmp_path, [_tool("read")])
+    out = str(tmp_path / "out.md")
+    assert extract.main(events, out, status, str(stats_path) if stats_path else None) == 1
+    assert cause_file.read_text(encoding="utf-8").strip() == cause
+    assert post.classify(cause)[0] == "unavailable"
+
+
+def test_each_attempt_records_duration_and_events_in_the_job_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    stats = tmp_path / "stats.json"
+    record = {
+        "outcome": "exited",
+        "status": 0,
+        "elapsed_seconds": 372.4,
+        "events": 87,
+        "longest_silence_seconds": 101.0,
+        "idle_seconds": 240,
+        "hard_seconds": 1200,
+    }
+    stats.write_text(json.dumps(record), encoding="utf-8")
+    events = _events(tmp_path, [_text("m", "answer")])
+    assert extract.main(events, str(tmp_path / "out.md"), 0, str(stats)) == 0
+    line = summary.read_text(encoding="utf-8")
+    assert "exited (status 0) after 6m12s, 87 events, longest silence 1m41s" in line
+    assert "budgets idle 4 min, hard 20 min" in line and "usage: input~" in line
+
+
+# --- action and workflow wiring (#160) -----------------------------------------------------
+
+ACTION = (ROOT / ".github/actions/opencode-run/action.yml").read_text(encoding="utf-8")
+REVIEW = (ROOT / ".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+
+
+def test_the_action_has_no_fixed_timeout_and_runs_the_watchdog() -> None:
+    assert not re.search(r"^\s*timeout\s", ACTION, re.M)
+    assert '"${scrub[@]}" python3 -I "$GITHUB_ACTION_PATH/watchdog.py"' in ACTION
+    assert '"$events" "$OUTPUT_FILE" "$status" "$stats"' in ACTION
+    # Old workflow files still pass timeout-minutes; it stays a working alias.
+    assert "inputs.hard-minutes || inputs.timeout-minutes || '20'" in ACTION
+
+
+def _action_run_script() -> str:
+    """The bash of the action's "Sign in to OpenCode and run" step, dedented."""
+    lines = ACTION.splitlines()
+    start = next(i for i, x in enumerate(lines) if "- name: Sign in to OpenCode and run" in x)
+    body = next(i for i in range(start, len(lines)) if lines[i].strip() == "run: |")
+    script = []
+    for line in lines[body + 1 :]:
+        if line and not line.startswith("        "):
+            break
+        script.append(line[8:])
+    return "\n".join(script) + "\n"
+
+
+STUB_SIGNIN_CURL = """#!/usr/bin/env bash
+case "$*" in
+  *oauth/token*) echo '{"access_token": "oc_key"}' ;;
+  *) echo '{"value": "oidc"}' ;;
+esac
+"""
+STUB_OPENCODE = """#!/usr/bin/env bash
+# Fails like a policy breach would if the OIDC credentials reached it.
+[ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}${ACTIONS_RUNTIME_TOKEN:-}" ] || exit 9
+[ "$OPENCODE_API_KEY" = oc_key ] || exit 8
+echo '{"type": "tool_use", "part": {"tool": "read", "state": {"status": "completed"}}}'
+echo '{"type": "text", "part": {"messageID": "m", "text": "the review"}}'
+"""
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("jq") is None, reason="needs POSIX bash and jq"
+)
+def test_the_action_step_runs_opencode_under_the_watchdog_end_to_end(tmp_path: Path) -> None:
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    shim = f'#!/usr/bin/env bash\nexec "{sys.executable}" "$@"\n'
+    for name, text in (("curl", STUB_SIGNIN_CURL), ("opencode", STUB_OPENCODE), ("python3", shim)):
+        (stubs / name).write_text(text, encoding="utf-8")
+        (stubs / name).chmod(0o755)
+    (tmp_path / "prompt.md").write_text("review it", encoding="utf-8")
+    summary = tmp_path / "summary.md"
+    env = {
+        **os.environ,
+        "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}",
+        "ACTIONS_ID_TOKEN_REQUEST_URL": "https://example.invalid/token?x=1",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "req",
+        "ACTIONS_RUNTIME_TOKEN": "rt",
+        "AUDIENCE": "https://opencode.ai/console",
+        "CLIENT_ID": "id",
+        "MODEL": "m",
+        "PROMPT_FILE": str(tmp_path / "prompt.md"),
+        "OUTPUT_FILE": str(tmp_path / "answer.md"),
+        "IDLE_MINUTES": "1",
+        "HARD_MINUTES": "2",
+        "RETRIES": "1",
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_ACTION_PATH": str(WATCHDOG.parent),
+        "GITHUB_STEP_SUMMARY": str(summary),
+    }
+    result = subprocess.run(
+        ["bash", "-c", _action_run_script()], env=env, capture_output=True, text=True, timeout=60
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "answer.md").read_text(encoding="utf-8") == "the review\n"
+    assert "OpenCode budgets: idle 1 min, hard cap 2 min for the step." in result.stdout
+    assert "watchdog: exited (status 0)" in result.stdout
+    assert "exited (status 0) after" in summary.read_text(encoding="utf-8")
+
+
+def test_every_job_timeout_covers_the_hard_cap_plus_setup() -> None:
+    for path in sorted((ROOT / ".github/workflows").glob("opencode-*.yml")):
+        text = path.read_text(encoding="utf-8")
+        job = re.search(r"^    timeout-minutes: (\d+)", text, re.M)
+        hard = re.search(r"^\s+hard-minutes: '(\d+)'", text, re.M)
+        assert job and hard, path.name
+        assert "timeout-minutes: '" not in text, path.name  # the deprecated input
+        assert int(job.group(1)) >= int(hard.group(1)) + 3, path.name
+
+
+def test_review_budgets() -> None:
+    assert "idle-minutes: '4'" in REVIEW and "hard-minutes: '20'" in REVIEW
+
+
+def test_review_job_token_can_post_the_notice_and_nothing_more() -> None:
+    # On a PR, POST .../issues/<pr>/comments needs pull-requests: write; with only
+    # issues: write it returned HTTP 403 (runs 46131122474 and 46131996298).
+    block = re.search(r"^    permissions:\n((?:      .*\n)+)", REVIEW, re.M)
+    assert block is not None
+    perms = dict(line.strip().split(": ") for line in block.group(1).splitlines())
+    assert perms == {
+        "contents": "read",
+        "pull-requests": "write",
+        "issues": "read",
+        "id-token": "write",
+    }
+    notice_step = REVIEW.split("- name: OpenCode unavailable notice", 1)[1]
+    assert "GH_TOKEN: ${{ github.token }}" in notice_step  # not the (revoked) App token
+
+
+def test_a_malformed_review_ends_in_a_posted_notice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Wiring: the post step exits MALFORMED -> cause-for-post -> the notice step runs on
+    # steps.post.outcome == 'failure' and posts an issue comment; the check stays green.
+    assert "steps.post.outcome == 'failure'" in REVIEW
+    assert 'cause-for-post "$rc" > "$RUNNER_TEMP/opencode-cause"' in REVIEW
+    cause = tmp_path / "cause"
+    cause.write_text(post.cause_for_post(post.MALFORMED) + "\n", encoding="utf-8")
+    rec = _Recorder()
+    monkeypatch.setattr(post, "gh_api", rec)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    assert post.notice(str(cause), "o/r", "7", "abc") == 0
+    assert rec.endpoints == ["repos/o/r/issues/7/comments"]
+    assert "malformed review" in rec.calls[0]["body"]
+
+
+@pytest.mark.parametrize(
+    ("stderr", "rc"),
+    [
+        ("gh: Resource not accessible by integration (HTTP 403)", 1),
+        ("gh: Bad credentials (HTTP 401)", 1),
+        ("gh: Server Error (HTTP 502)", 0),
+    ],
+    ids=["403-red", "401-red", "outage-green"],
+)
+def test_a_refused_notice_fails_red_instead_of_leaving_the_pr_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stderr: str, rc: int
+) -> None:
+    def refuse(endpoint: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 1, "", stderr)
+
+    monkeypatch.setattr(post, "gh_api", refuse)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    cause = tmp_path / "cause"
+    cause.write_text("unavailable: OpenCode stalled (no progress for 4 min)\n", encoding="utf-8")
+    assert post.notice(str(cause), "o/r", "7", "abc") == rc
+    assert ("config error" in summary.read_text(encoding="utf-8")) is (rc == 1)

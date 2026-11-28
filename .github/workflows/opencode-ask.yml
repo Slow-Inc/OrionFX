@@ -106,7 +106,7 @@ jobs:
           client-id: ${{ github.event_name == 'issue_comment' && vars.OPENCODE_AUTOMATION_CLIENT_ID || vars.OPENCODE_PR_CLIENT_ID }}
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
-          timeout-minutes: '9'
+          hard-minutes: '9'
       - name: Reply as the OpenCode app
         env:
           EVENT: ${{ github.event_name }}
