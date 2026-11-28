@@ -33,7 +33,7 @@ jobs:
       && github.event.comment.user.type != 'Bot'
       && (github.event_name == 'issue_comment' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 14
     # GITHUB_TOKEN is read-only; the reply is posted with the OpenCode App token.
     permissions:
       contents: read
@@ -106,7 +106,7 @@ jobs:
           client-id: ${{ github.event_name == 'issue_comment' && vars.OPENCODE_AUTOMATION_CLIENT_ID || vars.OPENCODE_PR_CLIENT_ID }}
           prompt-file: .git/opencode-ctx/prompt.md
           output-file: ${{ runner.temp }}/answer.md
-          timeout-minutes: '9'
+          hard-minutes: '9'
       - name: Reply as the OpenCode app
         env:
           EVENT: ${{ github.event_name }}
