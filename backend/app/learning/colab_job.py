@@ -110,18 +110,30 @@ class JobSpec(ContractModel):
         return self
 
 
+def _dotenv_value(raw: str) -> str:
+    """One value as dotenv reads it: a quoted value ends at its closing quote (`\\` escapes
+    inside double quotes); a bare value ends at a ` #` comment."""
+    value = raw.strip()
+    if value[:1] not in ("'", '"'):
+        return re.split(r"\s#", value, maxsplit=1)[0].rstrip()
+    quote, out, i = value[0], [], 1
+    while i < len(value) and value[i] != quote:
+        if quote == '"' and value[i] == "\\" and i + 1 < len(value):
+            i += 1
+        out.append(value[i])
+        i += 1
+    return "".join(out)
+
+
 def _dotenv_values(path: Path) -> dict[str, str]:
-    """`KEY=VALUE` lines of a `.env` file (optional `export `, optional quotes)."""
+    """`KEY=VALUE` lines of a `.env` file (optional `export `, quotes, inline comments)."""
     values: dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.removeprefix("export ").split("=", 1)
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        values[key.strip()] = value
+        values[key.strip()] = _dotenv_value(value)
     return values
 
 

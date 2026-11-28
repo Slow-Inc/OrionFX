@@ -105,7 +105,8 @@ uv run python -m app.learning.colab_runner run data/bundles/<job>/job.json --db 
   - **The tar.** `out.tar` must be at most 256 MiB, checked after the download. It must be a plain, uncompressed tar holding exactly `manifest.json`, `card.json` and `weights.json`, all regular files.
   - **The hashes.** Every sha256 must match the manifest.
   - **The binding.** The manifest must echo these job fields: job id, protocol hash, code SHA, `code_hash`, dataset hash, seeds, config, entrypoint, and model id and version.
-    - A job bundled before `code_hash` existed is now refused only after the VM has run. The VM's binding comes from the pinned commit's code, so the mismatch shows up only in the returned manifest. Re-bundle older jobs.
+    - A bundle without `code_hash` is refused by the scan, before any VM starts. Re-bundle older jobs.
+    - A job whose `code_sha` pins a commit from before this binding was extended is refused only after the VM has run. The VM-side binding comes from the pinned commit's `colab_vm.py`, so the mismatch shows up only in the returned manifest. Pin a commit that has this change.
   - **The card.** It must be a valid `ModelCard` for this job and must name the weights' hash. It may not claim anything the VM cannot prove: no LIVE mode, `calibrated` false, no `evidence_refs`, and no `validation` metrics. Validation is recomputed locally, by trusted code (#130, #132). The kept card is forced to SHADOW only.
   - **The weights.** They must be JSON (a native model file is not accepted yet), and are never unpickled.
 - **What happens on success:**

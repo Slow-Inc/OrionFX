@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.contracts import sha256_ref
-from app.learning import colab_job
+from app.learning import colab_job, colab_runner
 from app.learning.colab_job import (
     BUNDLE_FILES,
     CODE,
@@ -199,6 +199,16 @@ def test_code_outside_the_allow_list_is_refused(tmp_path: Path) -> None:
         scan_bundle(bundle)
 
 
+def test_a_directory_outside_the_allow_list_is_refused(tmp_path: Path) -> None:
+    bundle = _build(tmp_path, _job(_dataset(tmp_path)))
+    with tarfile.open(bundle / CODE, "a") as tar:
+        info = tarfile.TarInfo("scripts")
+        info.type = tarfile.DIRTYPE
+        tar.addfile(info)
+    with pytest.raises(BundleRefused, match="scripts: outside the code allow-list"):
+        scan_bundle(bundle)
+
+
 def test_a_code_archive_that_differs_from_its_code_hash_is_refused(tmp_path: Path) -> None:
     bundle = _build(tmp_path, _job(_dataset(tmp_path)))
     _rewrite_code(bundle, {"backend/app/extra.py": b"X = 1\n"})
@@ -282,10 +292,20 @@ def test_a_dataset_that_is_not_jsonl_objects_is_refused(
         _build(tmp_path, _job(_dataset(tmp_path, text)))
 
 
-def test_a_deeply_nested_dataset_line_is_refused_not_crashed(tmp_path: Path) -> None:
-    deep = '{"x":' * 100_000 + "1" + "}" * 100_000 + "\n"
+def test_a_dataset_line_too_deep_to_parse_is_refused_not_crashed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # How deep the parser can go depends on the platform's stack, so force the error.
+    original = json.loads
+
+    def too_deep(s: str | bytes, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(s, str) and s.strip() == '{"deep":1}':
+            raise RecursionError("maximum recursion depth exceeded")
+        return original(s, *args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", too_deep)
     with pytest.raises(BundleRefused, match="not JSON"):
-        _build(tmp_path, _job(_dataset(tmp_path, deep)))
+        _build(tmp_path, _job(_dataset(tmp_path, '{"deep":1}\n')))
 
 
 # --- B1: known local secret values -----------------------------------------------------
@@ -332,10 +352,74 @@ def test_known_secret_values_come_from_secret_named_variables_and_every_dotenv_v
         "MT5_SERVER": "Demo-Server",
         "QUOTED": "q-value",
     }
+    assert known_secret_values({}, dotenv=_dotenv(tmp_path, 'A="x\\"y z"\n')) == {"A": 'x"y z'}
     assert known_secret_values(env, dotenv=tmp_path / "missing.env") == {
         "MT5_PASSWORD": "pw-1",
         "TELEGRAM_BOT_TOKEN": "tok-123456789",
     }
+
+
+def _dotenv(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "x.env"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    ("line", "value"),
+    [
+        ("MT5_PASSWORD=hunter2 # prod", "hunter2"),
+        ("MT5_PASSWORD=hunter2\t# prod", "hunter2"),
+        ('MT5_PASSWORD="hunter2" # prod', "hunter2"),
+        ("MT5_PASSWORD='hunter2' trailing", "hunter2"),
+        ("MT5_PASSWORD=hun#ter2", "hun#ter2"),  # a '#' inside a bare value is not a comment
+        ('MT5_PASSWORD="a # b"', "a # b"),
+    ],
+    ids=["inline-comment", "tab-comment", "quoted-comment", "quoted-trailing", "hash", "quoted"],
+)
+def test_the_dotenv_parser_strips_comments_and_quotes_like_dotenv(
+    tmp_path: Path, line: str, value: str
+) -> None:
+    assert known_secret_values({}, dotenv=_dotenv(tmp_path, line + "\n")) == {"MT5_PASSWORD": value}
+
+
+def test_a_dotenv_secret_with_an_inline_comment_is_still_found_in_the_bundle(
+    tmp_path: Path,
+) -> None:
+    known = known_secret_values({}, dotenv=_dotenv(tmp_path, "MT5_PASSWORD=hunter2 # prod\n"))
+    with pytest.raises(BundleRefused, match="MT5_PASSWORD"):
+        _build(tmp_path, _job(_dataset(tmp_path, '{"x":"hunter2"}\n')), known_secrets=known)
+
+
+def _spec(tmp_path: Path, dataset: Path) -> Path:
+    spec = tmp_path / "spec.json"
+    spec.write_text(_job(dataset).model_dump_json(), encoding="utf-8")
+    return spec
+
+
+def test_the_bundle_command_writes_a_scanned_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    monkeypatch.setattr(colab_runner, "known_secret_values", lambda **kw: {})
+    spec = _spec(tmp_path, _dataset(tmp_path))
+    argv = ["bundle", str(spec), str(tmp_path / "b"), "--repo", str(REPO),
+            "--exports", str(_exports(tmp_path))]  # fmt: skip
+    assert colab_runner.main(argv) == 0
+    assert capsys.readouterr().out.strip() == str(tmp_path / "b" / JOB)
+    assert scan_bundle(tmp_path / "b").code_hash is not None
+
+
+def test_the_bundle_command_exits_2_on_a_refused_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    monkeypatch.setattr(colab_runner, "known_secret_values", lambda **kw: {})
+    outside = tmp_path / "elsewhere.jsonl"
+    outside.write_text('{"x":1}\n', encoding="utf-8")
+    argv = ["bundle", str(_spec(tmp_path, outside)), str(tmp_path / "b"), "--repo", str(REPO),
+            "--exports", str(_exports(tmp_path))]  # fmt: skip
+    assert colab_runner.main(argv) == 2
+    assert "REFUSED" in capsys.readouterr().err
+    assert not (tmp_path / "b").exists()
 
 
 def test_a_dataset_that_differs_from_its_recorded_hash_is_refused(tmp_path: Path) -> None:

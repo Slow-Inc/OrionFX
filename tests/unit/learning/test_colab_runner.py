@@ -451,10 +451,6 @@ TAMPERS = {
         lambda out: _rehash_card(out, validation={"brier": "0.1"}),
         "validation",
     ),
-    "deeply-nested-weights": (
-        lambda out: _rehash_weights(out, "[" * 100_000 + "]" * 100_000),
-        "unreadable return",
-    ),
 }
 
 
@@ -463,6 +459,24 @@ def _rehash_weights(out: Path, text: str) -> None:
     digest = sha256_ref((out / vm.WEIGHTS).read_bytes())
     _rehash_card(out, artifact_hash=digest)
     _manifest_files(out, **{vm.WEIGHTS: digest})
+
+
+def test_weights_too_deep_to_parse_are_refused_not_crashed(
+    conn: sqlite3.Connection, tmp_path: Path, job_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # How deep the parser can go depends on the platform's stack, so force the error.
+    original = json.loads
+
+    def too_deep(s: str | bytes, *args: Any, **kwargs: Any) -> Any:
+        if s == b'{"deep":1}':
+            raise RecursionError("maximum recursion depth exceeded")
+        return original(s, *args, **kwargs)
+
+    fake = FakeColab(tamper=lambda out: _rehash_weights(out, '{"deep":1}'))
+    monkeypatch.setattr(json, "loads", too_deep)
+    with pytest.raises(ReturnRefused, match="unreadable return"):
+        _runner(fake, conn, tmp_path).run(job_path)
+    _nothing_kept(conn, tmp_path)
 
 
 @pytest.mark.parametrize(("tamper", "reason"), list(TAMPERS.values()), ids=list(TAMPERS))

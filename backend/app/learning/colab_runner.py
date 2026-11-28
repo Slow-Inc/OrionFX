@@ -80,7 +80,8 @@ STATE_FILE = "colab-state.json"
 RUN_RECORD = "run.json"
 MAX_RETURN_BYTES = 256 * 1024 * 1024
 """Cap on the downloaded `out.tar`, checked after the download and before it is opened."""
-MAX_MEMBER_BYTES = MAX_RETURN_BYTES
+MAX_MEMBER_BYTES = 128 * 1024 * 1024
+"""Cap on each returned file, read from its tar header before anything is extracted."""
 _BALANCE = re.compile(r"Current balance:\s*([0-9]+(?:\.[0-9]+)?)\s*compute units")
 
 
@@ -408,13 +409,14 @@ class ColabRunner:
                     f" check `colab sessions` and run"
                     f" `colab --config {self._work / STATE_FILE} stop -s {session}`"
                 )
-                if stop_error is not None and (started or primary is None):
-                    raise VmStopFailed(hint) from stop_error
-                if stop_error is not None and primary is not None:
+                if stop_error is None:
+                    if held and primary is None:
+                        raise RunInterrupted(f"signal {held[0]} during colab stop; VM stopped")
+                elif not started and primary is not None:
                     # `new` never completed: keep its error (the real cause), with the hint.
                     primary.add_note(f"{hint} ({stop_error})")
-                elif held and primary is None:
-                    raise RunInterrupted(f"signal {held[0]} during colab stop; the VM stopped")
+                else:
+                    raise VmStopFailed(hint) from stop_error
 
 
 def _min_cu_arg(text: str) -> Decimal:
@@ -444,19 +446,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "bundle":
         job = JobSpec.model_validate_json(args.spec.read_bytes())
-        print(build_bundle(job, repo=args.repo, out=args.out, exports=args.exports,
-                           known_secrets=known))  # fmt: skip
+        try:
+            print(build_bundle(job, repo=args.repo, out=args.out, exports=args.exports,
+                               known_secrets=known))  # fmt: skip
+        except BundleRefused as exc:
+            print(f"REFUSED: {exc}", file=sys.stderr)
+            return 2
         return 0
 
     args.db.parent.mkdir(parents=True, exist_ok=True)
     args.work.mkdir(parents=True, exist_ok=True)
     conn = connect(args.db)
-    migrate(conn)
-    cli = ColabCli(state=args.work / STATE_FILE)
-    runner = ColabRunner(cli, ArtifactRegistry(conn), artifacts=args.artifacts,
-                         work=args.work, archive=lambda sha: git_archive(args.repo, sha),
-                         known_secrets=known, min_cu=args.min_cu)  # fmt: skip
     try:
+        migrate(conn)
+        cli = ColabCli(state=args.work / STATE_FILE)
+        runner = ColabRunner(cli, ArtifactRegistry(conn), artifacts=args.artifacts,
+                             work=args.work, archive=lambda sha: git_archive(args.repo, sha),
+                             known_secrets=known, min_cu=args.min_cu)  # fmt: skip
         result = runner.run(args.job)
     except CuFloorRefused as exc:
         print(f"REFUSED (stop and report to the owner): {exc}", file=sys.stderr)
