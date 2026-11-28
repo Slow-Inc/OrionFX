@@ -30,6 +30,7 @@ MT5 adapter (#17).
 
 import logging
 import sqlite3
+from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
@@ -94,6 +95,9 @@ class MarketRecorder:
         self._log = BarLog(conn, clock=clock)
         self._retry_at: datetime | None = None
         self._healthy: bool | None = None
+        self.refused: Counter[str] = Counter()
+        """Refused predictions per model ref since start: a model that never speaks is
+        visible, not silently dropped."""
 
     def tick(self) -> None:
         now = self._clock()
@@ -156,8 +160,9 @@ class MarketRecorder:
                     p = predict(loaded, inputs, now=snapshot.available_at)
                     self._log.record_prediction(p, inputs, provenance=provenance,
                                                 dataset_version=version)  # fmt: skip
-            except Refused:
-                continue  # this model cannot speak to this bar: nothing to record
+            except Refused as exc:  # this model cannot speak to this bar: nothing to record
+                self.refused[loaded.card.ref] += 1
+                log.debug("M07 recorder: %s refused %s: %s", loaded.card.ref, snapshot.ref, exc)
             except Exception:
                 log.exception("M07 recorder: %s failed on %s", loaded.card.ref, snapshot.ref)
 

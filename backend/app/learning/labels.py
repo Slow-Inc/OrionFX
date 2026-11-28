@@ -120,6 +120,10 @@ def triple_barrier(
         bar = by_open.get(slot)
         if bar is None:
             return None  # a hole before it resolved: no label
+        if bar.open >= upper:  # a gap over a barrier: the open crossed it first
+            return label(Outcome.UP, d, bar)
+        if bar.open <= lower:
+            return label(Outcome.DOWN, -d, bar)
         up, down = bar.high >= upper, bar.low <= lower
         if up and down:
             return label(Outcome.AMBIGUOUS, None, bar)

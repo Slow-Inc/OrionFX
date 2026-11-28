@@ -57,7 +57,7 @@ def _label(path: list[CandleClosed], *, n: int | None = None, **kw: object):  # 
 
 def test_the_label_constants_are_pinned_to_the_label_version() -> None:
     # Changing a barrier constant changes what every label means: bump LABEL_VERSION.
-    assert (LABEL_VERSION, K) == ("m07.labels.tb.v2", TARGET_ATR)
+    assert ("m07.labels.tb.v2", D(1)) == (LABEL_VERSION, K) and K == TARGET_ATR
 
 
 def test_the_upper_barrier_touched_first_is_up() -> None:
@@ -78,6 +78,21 @@ def test_a_bar_touching_both_barriers_is_ambiguous_not_a_class() -> None:
     assert not lab.labelled and lab.move is None
     one_side_first = _label([_bar(1, high="2004"), _bar(2, high="2010", low="1990")], n=2)
     assert one_side_first is not None and one_side_first.outcome is Outcome.UP
+
+
+@pytest.mark.parametrize(
+    ("open_", "outcome", "move"), [("2005", Outcome.UP, D(4)), ("1995", Outcome.DOWN, D(-4))]
+)
+def test_a_bar_that_gaps_over_a_barrier_resolves_on_that_barrier(
+    open_: str, outcome: Outcome, move: Decimal
+) -> None:
+    """The open is the first price of the bar: one already beyond a barrier crossed it
+    first, whatever the rest of the bar touched, so the order is known."""
+    gap = _bar(1, high="2006", low="1994").model_copy(update={"open": D(open_)})
+    lab = _label([gap])
+    assert lab is not None and lab.outcome is outcome and lab.labelled and lab.move == move
+    inside = _bar(1, high="2006", low="1994").model_copy(update={"open": D("2003.99")})
+    assert _label([inside]).outcome is Outcome.AMBIGUOUS  # type: ignore[union-attr]
 
 
 def test_flat_at_the_time_barrier_with_its_drift() -> None:
@@ -154,6 +169,16 @@ def test_the_finest_stored_timeframe_resolves_what_a_coarser_bar_cannot(
     _save(candles, [_bar(2), _bar(3, high="2005"), _bar(4), _bar(5, low="1995")])
     lab = label_at(candles, "XAUUSD", as_of, ATR, h, now=now)
     assert lab is not None and lab.outcome is Outcome.UP and lab.timeframe is M5
+
+
+def test_a_hole_in_the_finest_path_falls_back_to_a_complete_coarser_one(
+    candles: CandleStore,
+) -> None:
+    _save(candles, [_bar(0, tf=M15), _bar(1, tf=M15, high="2005")])
+    _save(candles, [_bar(2), _bar(4), _bar(5)])  # M5 entry, then a hole at slot 3
+    as_of = T0 + STEP[M15]
+    lab = label_at(candles, "XAUUSD", as_of, ATR, Horizon(M15, 1), now=as_of + 2 * STEP[M15])
+    assert lab is not None and lab.timeframe is M15 and lab.outcome is Outcome.UP
 
 
 def test_a_label_reads_only_bars_known_at_now(candles: CandleStore) -> None:

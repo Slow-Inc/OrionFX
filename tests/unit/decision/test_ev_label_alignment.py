@@ -26,6 +26,7 @@ from app.decision.fusion import CENT, Evidence, expected_value, gather
 from app.learning.bars import Horizon
 from app.learning.labels import Outcome, TripleBarrierLabel, triple_barrier
 from app.market_data.features import ATR_M15
+from app.risk.policy import DEFAULT_POLICY
 
 M5 = timedelta(minutes=5)
 CTX = _ctx()  # bid 2000, spread 0.20, ATR_M15 4, 0.01 lot of 100 oz
@@ -124,6 +125,16 @@ def test_a_non_positive_atr_makes_ev_unknown(atr: Decimal) -> None:
     assert expected_value(ctx, inp, COSTS) == (None, None)
 
 
+@pytest.mark.parametrize("contract_size", [D(0), D(-100)])
+def test_a_non_positive_contract_size_makes_ev_unknown(contract_size: Decimal) -> None:
+    costs = replace(COSTS, contract_size=contract_size)
+    f = _forecast().model_copy(update={"class_probabilities": ClassProbabilities(
+        label_version=LABEL_VERSION, up=D("0.6"), down=D("0.1"), flat=D("0.3"))})  # fmt: skip
+    inp = gather(CTX, [_proposal()], Evidence(forecast=f), cycle=CYCLE, costs=costs,
+                 symbol="XAUUSD", policy_version="p1")  # fmt: skip
+    assert expected_value(CTX, inp, costs) == (None, None)
+
+
 def test_one_triple_prices_both_sides_as_mirror_images() -> None:
     long, short = _ev(Direction.UP, "0.6", "0.1", "0.3"), _ev(Direction.DOWN, "0.1", "0.6", "0.3")
     assert long == short == (D(4) * D("0.5") - D("0.30") - D("0.07")).quantize(CENT)
@@ -153,3 +164,4 @@ def test_the_stressed_cost_is_pre_declared_and_dearer_than_the_live_one() -> Non
     assert (STRESSED_COST.spread, STRESSED_COST.slippage, STRESSED_COST.commission) == (
         D("0.80"), D("0.10"), D("0.07"))  # fmt: skip
     assert cost_over_atr(STRESSED_COST, ATR) > cost_over_atr(COST, ATR)
+    assert STRESSED_COST.spread == DEFAULT_POLICY.max_spread  # the widest spread M06 accepts

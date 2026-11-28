@@ -114,7 +114,9 @@ def test_a_refused_prediction_is_skipped_not_fatal(
 ) -> None:
     _bars(candles, _closes(3))  # far too little history for the feature the model needs
     clock = Clock(_bar_close(2) + LAG)
-    _recorder(conn, candles, clock, model).tick()
+    rec = _recorder(conn, candles, clock, model)
+    rec.tick()
+    assert rec.refused == {model.card.ref: 3}  # counted, not silently dropped
     assert len(BarLog(conn).snapshots("XAUUSD", M15, start=T0, end=clock.t)) == 3
     assert BarLog(conn).predictions("XAUUSD", "trend-m15", start=T0, end=clock.t) == []
     assert Journal(conn).recent(["health.updated"])[0].envelope.payload.status.value == "OK"  # type: ignore[union-attr]
